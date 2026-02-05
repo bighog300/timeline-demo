@@ -1,0 +1,23 @@
+{
+  "name": "timeline-app",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": "9.15.9"
+  },
+  "scripts": {
+    "dev:api": "pnpm --filter ./apps/api dev",
+    "dev:web": "pnpm --filter ./apps/web dev",
+    "db:generate": "pnpm --filter ./apps/api db:generate",
+    "db:migrate": "pnpm --filter ./apps/api db:migrate",
+    "db:reset": "pnpm --filter ./apps/api db:reset",
+    "preflight": "node scripts/preflight.mjs",
+    "test": "pnpm -r --if-present test",
+    "build": "pnpm -r --if-present build",
+    "lint": "pnpm -r --if-present lint",
+    "vercel:install": "corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile --filter ./apps/web...",
+    "vercel:build": "pnpm --filter ./apps/web build"
+  }
+}
