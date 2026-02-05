@@ -3,7 +3,7 @@
   "version": 2,
   "buildCommand": "pnpm run vercel:build",
   "installCommand": "pnpm run vercel:install",
-  "framework": null,
+  "framework": "nextjs",
   "rewrites": [
     {
       "source": "/api/:path*",
@@ -20,5 +20,6 @@
         }
       ]
     }
-  ]
+  ],
+  "outputDirectory": "apps/web/.next"
 }
