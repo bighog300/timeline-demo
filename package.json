@@ -18,10 +18,7 @@
     "lint": "pnpm -r --if-present lint",
     "vercel:install": "corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile",
     "vercel:build": "pnpm --filter ./apps/web build",
-    "validate:env": "node scripts/validate-env.mjs",
-    "smoke": "bash scripts/smoke-test.sh",
-    "validate:env:web": "node scripts/validate-env.mjs --target=web --env-file .env.example",
-    "deploy:check": "pnpm preflight && pnpm validate:env:web && pnpm build"
+
   },
   "devDependencies": {
     "next": "^15.1.6"
