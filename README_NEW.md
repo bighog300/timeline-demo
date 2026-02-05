@@ -81,6 +81,7 @@ See the comprehensive [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for detailed in
 
 2. **Deploy Web to Vercel**
    - Connect GitHub repository
+   - If Vercel import shows `Invalid request: should NOT have additional property rootDirectory`, clear any custom Project Settings JSON/deploy-button parameters and leave Root Directory managed in the Vercel UI (set it to `.` for this repo).
    - Configure build commands:
      - Install: `pnpm run vercel:install`
      - Build: `pnpm run vercel:build`
