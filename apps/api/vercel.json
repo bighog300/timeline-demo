@@ -1,0 +1,5 @@
+{
+  "version": 2,
+  "installCommand": "pnpm -w install",
+  "buildCommand": "echo \"no build\""
+}
