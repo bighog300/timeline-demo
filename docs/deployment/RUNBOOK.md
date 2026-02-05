@@ -28,6 +28,8 @@ Order matters: **deploy API first, then web**.
 
 ### 1.2 Web deploy (Vercel)
 1. Update `vercel.json` rewrite destination from placeholder to real API origin.
+   - Temporary API domain currently wired: `https://timeline-demo-2ue2e27s6-craigs-projects-bffb1f7c.vercel.app`.
+   - During production cutover, replace this temp domain with the final API origin.
 2. Configure Vercel env vars:
    - `API_SERVER_ORIGIN=https://<api-domain>`
    - `NEXT_PUBLIC_API_BASE=/api`
