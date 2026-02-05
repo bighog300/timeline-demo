@@ -27,6 +27,9 @@ Order matters: **deploy API first, then web**.
    ```
 
 ### 1.2 Web deploy (Vercel)
+> Vercel project setup note: set **Root Directory = `.` (repo root)**.
+> The root `vercel.json` controls install/build/output for `apps/web`.
+
 1. Update `vercel.json` rewrite destination from placeholder to real API origin.
    - Temporary API domain currently wired: `https://timeline-demo-2ue2e27s6-craigs-projects-bffb1f7c.vercel.app`.
    - During production cutover, replace this temp domain with the final API origin.
@@ -38,7 +41,12 @@ Order matters: **deploy API first, then web**.
    curl -I https://<web-domain>/
    ```
 
-### 1.3 Post-deploy smoke check
+### 1.3 API Vercel Project
+1. Create a separate Vercel project with **Root Directory = `apps/api`**.
+2. Vercel function endpoints: `/health` and `/echo`.
+3. Web `/api/*` rewrite in root `vercel.json` proxies to this API project's `.vercel.app` domain.
+
+### 1.4 Post-deploy smoke check
 ```bash
 bash scripts/smoke-test.sh --api-url https://<api-domain> --web-url https://<web-domain>
 ```
