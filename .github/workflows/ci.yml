@@ -42,6 +42,12 @@ jobs:
         run: pnpm test
         continue-on-error: true
       
+      - name: Run preflight
+        run: pnpm preflight
+
+      - name: Validate web env
+        run: pnpm validate:env:web
+
       - name: Build all packages
         run: pnpm build
 
@@ -76,6 +82,12 @@ jobs:
         run: pnpm run vercel:install
 
       
+      - name: Run preflight
+        run: pnpm preflight
+
+      - name: Validate web env
+        run: pnpm validate:env:web
+
       - name: Build web app (Vercel style)
         run: pnpm run vercel:build
       
