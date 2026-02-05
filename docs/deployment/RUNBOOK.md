@@ -23,7 +23,7 @@ Order matters: **deploy API first, then web**.
    - `DRIVE_ADAPTER=google`
 3. Deploy API and verify health endpoint:
    ```bash
-   curl -i https://<api-domain>/health
+   curl -i https://<api-domain>/api/health
    ```
 
 ### 1.2 Web deploy (Vercel)
@@ -88,7 +88,7 @@ Actions:
 2. Verify `DATABASE_URL` and SSL settings.
 3. Roll back API release.
 4. Correct migration/env issue in a patch branch.
-5. Redeploy and verify `/health`.
+5. Redeploy and verify `/api/health`.
 
 ### 4.2 OAuth redirect mismatch
 **Symptoms:** Google OAuth errors (`redirect_uri_mismatch`) during login.
