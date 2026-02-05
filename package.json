@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@9.15.9",
   "engines": {
-    "node": ">=20.0.0",
+    "node": "20.x",
     "pnpm": "9.15.9"
   },
   "scripts": {
@@ -18,9 +18,8 @@
     "lint": "pnpm -r --if-present lint",
     "vercel:install": "corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile",
     "vercel:build": "pnpm --filter ./apps/web build"
-
   },
-  "devDependencies": {
+  "dependencies": {
     "next": "^15.1.6"
   }
 }
