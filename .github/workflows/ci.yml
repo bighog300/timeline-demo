@@ -44,9 +44,15 @@ jobs:
       
       - name: Run preflight
         run: pnpm preflight
+        env:
+          API_SERVER_ORIGIN: https://example.com
+          NEXT_PUBLIC_API_BASE: /api
 
       - name: Validate web env
         run: pnpm validate:env:web
+        env:
+          API_SERVER_ORIGIN: https://example.com
+          NEXT_PUBLIC_API_BASE: /api
 
       - name: Build all packages
         run: pnpm build
@@ -84,9 +90,15 @@ jobs:
       
       - name: Run preflight
         run: pnpm preflight
+        env:
+          API_SERVER_ORIGIN: https://example.com
+          NEXT_PUBLIC_API_BASE: /api
 
       - name: Validate web env
         run: pnpm validate:env:web
+        env:
+          API_SERVER_ORIGIN: https://example.com
+          NEXT_PUBLIC_API_BASE: /api
 
       - name: Build web app (Vercel style)
         run: pnpm run vercel:build
