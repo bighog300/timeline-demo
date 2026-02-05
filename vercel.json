@@ -9,7 +9,7 @@
     "source": "/api/:path*",
     "destination": "https://timeline-demo-2ue2e27s6-craigs-projects-bffb1f7c.vercel.app/api/:path*"
   }
-]
+],
 
   "headers": [
     {
