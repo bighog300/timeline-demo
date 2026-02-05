@@ -43,7 +43,7 @@ Order matters: **deploy API first, then web**.
 
 ### 1.3 API Vercel Project
 1. Create a separate Vercel project with **Root Directory = `apps/api`**.
-2. Vercel function endpoints: `/health` and `/echo`.
+2. Vercel function endpoints: `/api/health` and `/api/echo`.
 3. Web `/api/*` rewrite in root `vercel.json` proxies to this API project's `.vercel.app` domain.
 
 ### 1.4 Post-deploy smoke check
