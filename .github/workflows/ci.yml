@@ -32,6 +32,12 @@ jobs:
       
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Run preflight checks
+        run: pnpm preflight
+
+      - name: Validate web environment template
+        run: pnpm validate:env:web
       
       - name: Run linting
         run: pnpm lint
@@ -73,6 +79,12 @@ jobs:
       
       - name: Install dependencies (Vercel style)
         run: pnpm run vercel:install
+
+      - name: Run preflight checks
+        run: pnpm preflight
+
+      - name: Validate web environment template
+        run: pnpm validate:env:web
       
       - name: Build web app (Vercel style)
         run: pnpm run vercel:build
