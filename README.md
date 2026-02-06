@@ -8,6 +8,7 @@ A privacy-first timeline demo that showcases a Next.js App Router UI with API ro
 - **App Router API Routes**: JSON endpoints implemented in `apps/web/app/api/*`
 - **Monorepo Structure**: A single web app in `apps/web` plus shared types in `packages/shared`
 - **Vercel Ready**: Single-project deployment targeting the repo root
+- **Phase 2A Summaries to Drive**: Summaries stored as Markdown + JSON artifacts in your provisioned Drive folder
 
 ## 🏗️ Architecture
 
@@ -97,8 +98,23 @@ they are missing.
 - ✅ Google sign-in + connection status
 - ✅ Gmail + Drive metadata listing (user-selected items only)
 - ✅ Drive folder provisioning for app-owned artifacts
-- ❌ No background scanning
-- ❌ No summarization yet (Phase 2)
+- ✅ Phase 2A: summarize selected Gmail/Drive items and write artifacts to Drive
+- ❌ No background scanning (Phase 2A only processes selected items)
+
+### Phase 2A Summaries to Drive
+
+- **How it works**: On `/timeline`, click “Generate summaries” to summarize the selected Gmail + Drive
+  items. Summaries are generated deterministically (no external LLM by default) and written into the
+  provisioned Drive folder.
+- **Drive artifact format**: Each item produces two files in the folder:
+  - `"<Title> - Summary.md"` (human-readable summary + highlights)
+  - `"<Title> - Summary.json"` (structured `SummaryArtifact` payload)
+- **Supported Drive types**:
+  - ✅ Google Docs (exported to text/plain)
+  - ✅ Text/Markdown files (downloaded as text)
+  - ⚠️ Other formats (PDFs/images) return an “Unsupported in Phase 2A” placeholder text
+- **Gmail parsing**: Best-effort extraction of `text/plain` with fallback to stripped HTML or message
+  snippets.
 
 ## 🧪 Testing
 

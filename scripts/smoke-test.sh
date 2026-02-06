@@ -85,3 +85,17 @@ if ! printf '%s' "${chat}" | node -e 'const fs=require("fs");const data=JSON.par
   fail_response "Chat" "${chat}"
 fi
 echo "✅ /api/chat ok"
+
+summarize=$(curl -sS -X POST "${BASE_URL}/api/timeline/summarize" \
+  -H 'content-type: application/json' \
+  --data '{"items":[{"source":"gmail","id":"demo"}]}' \
+  -w "\n%{http_code}") || true
+summarize_body=$(printf '%s' "${summarize}" | sed '$d')
+summarize_status=$(printf '%s' "${summarize}" | tail -n 1)
+if [[ "${summarize_status}" != "401" ]]; then
+  fail_response "Timeline summarize (unauth)" "${summarize_body}"
+fi
+if ! printf '%s' "${summarize_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+  fail_response "Timeline summarize (unauth)" "${summarize_body}"
+fi
+echo "✅ /api/timeline/summarize unauth ok"
