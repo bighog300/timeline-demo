@@ -41,6 +41,9 @@ jobs:
       - name: Verify build outputs
         run: node scripts/verify-build.mjs
 
+      - name: Verify docs
+        run: node scripts/verify-docs.mjs
+
       - name: Smoke test
         run: bash scripts/smoke-test.sh
 
@@ -78,6 +81,9 @@ jobs:
 
       - name: Verify build artifacts
         run: node scripts/verify-build.mjs
+
+      - name: Verify docs
+        run: node scripts/verify-docs.mjs
 
       - name: Production smoke test
         run: bash scripts/smoke-test.sh

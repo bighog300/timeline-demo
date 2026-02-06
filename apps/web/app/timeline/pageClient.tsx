@@ -567,7 +567,10 @@ export default function TimelinePageClient() {
 
   const scrollToTimelineTop = useCallback(() => {
     requestAnimationFrame(() => {
-      timelineTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      const target = timelineTopRef.current;
+      if (target && typeof target.scrollIntoView === 'function') {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     });
   }, []);
 
