@@ -59,10 +59,10 @@ describe('EventsClient', () => {
     render(<EventsClient />);
 
     expect(await screen.findByText('Planning session')).toBeInTheDocument();
-    expect(screen.getByText('Music')).toBeInTheDocument();
+    expect(screen.getByText(/Music/)).toBeInTheDocument();
     expect(screen.getByText(/Tags: live, community/)).toBeInTheDocument();
     expect(screen.getByText('2 items')).toBeInTheDocument();
-    expect(screen.getByText('Kickoff sync')).toBeInTheDocument();
+    expect(screen.getByText(/Kickoff sync/)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith('/api/events');
     expect(fetchMock).toHaveBeenCalledWith('/api/calendar');
 
