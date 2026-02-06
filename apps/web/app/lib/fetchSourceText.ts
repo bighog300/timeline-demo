@@ -1,9 +1,14 @@
 import type { drive_v3, gmail_v1 } from 'googleapis';
 
+import { buildUnsupportedPlaceholder, normalizeJsonText, truncateText } from './driveText';
+import { normalizeWhitespace, stripHtml, trimQuotedReplies } from './gmailText';
+import type { SourceMetadata } from './types';
+
 type SourceText = {
   title: string;
   text: string;
   dateISO?: string;
+  metadata?: SourceMetadata;
 };
 
 const decodeBase64 = (value: string) => {
@@ -11,18 +16,6 @@ const decodeBase64 = (value: string) => {
   const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
   return Buffer.from(padded, 'base64').toString('utf-8');
 };
-
-const stripHtml = (value: string) =>
-  value
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\s+/g, ' ')
-    .trim();
 
 const findPart = (
   parts: gmail_v1.Schema$MessagePart[] | undefined,
@@ -74,6 +67,8 @@ export const fetchGmailMessageText = async (
   const headers = payload?.headers ?? [];
   const subject = headerValue(headers, 'Subject') || '(no subject)';
   const dateISO = parseDateISO(headerValue(headers, 'Date'));
+  const from = headerValue(headers, 'From');
+  const to = headerValue(headers, 'To');
 
   const plainPart = findPart(payload?.parts ?? [], 'text/plain') ?? payload;
   const htmlPart = findPart(payload?.parts ?? [], 'text/html');
@@ -90,10 +85,20 @@ export const fetchGmailMessageText = async (
     text = detail.data.snippet ?? '';
   }
 
+  const cleaned = normalizeWhitespace(trimQuotedReplies(text));
+
   return {
     title: subject,
-    text,
+    text: cleaned,
     dateISO,
+    metadata: {
+      from: from || undefined,
+      to: to || undefined,
+      subject: subject || undefined,
+      dateISO,
+      threadId: detail.data.threadId ?? undefined,
+      labels: detail.data.labelIds ?? undefined,
+    },
   };
 };
 
@@ -103,15 +108,24 @@ export const fetchDriveFileText = async (
 ): Promise<SourceText> => {
   const metadata = await drive.files.get({
     fileId,
-    fields: 'id, name, mimeType, modifiedTime',
+    fields: 'id, name, mimeType, modifiedTime, webViewLink',
   });
 
   const title = metadata.data.name ?? 'Untitled';
   const mimeType = metadata.data.mimeType ?? 'application/octet-stream';
   const dateISO = parseDateISO(metadata.data.modifiedTime);
+  const sourceMetadata: SourceMetadata = {
+    mimeType,
+    driveName: title,
+    driveModifiedTime: metadata.data.modifiedTime ?? undefined,
+    driveWebViewLink: metadata.data.webViewLink ?? undefined,
+  };
 
   const isGoogleDoc = mimeType === 'application/vnd.google-apps.document';
-  const isText = mimeType === 'text/plain' || mimeType === 'text/markdown' || mimeType === 'text/x-markdown';
+  const isText =
+    mimeType === 'text/plain' || mimeType === 'text/markdown' || mimeType === 'text/x-markdown';
+  const isJson = mimeType === 'application/json';
+  const isCsv = mimeType === 'text/csv';
 
   if (isGoogleDoc) {
     const exportResponse = await drive.files.export(
@@ -119,18 +133,24 @@ export const fetchDriveFileText = async (
       { responseType: 'text' },
     );
     const text = typeof exportResponse.data === 'string' ? exportResponse.data : '';
-    return { title, text, dateISO };
+    return { title, text: truncateText(text), dateISO, metadata: sourceMetadata };
   }
 
-  if (isText) {
+  if (isText || isJson || isCsv) {
     const response = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'text' });
-    const text = typeof response.data === 'string' ? response.data : '';
-    return { title, text, dateISO };
+    const rawText = typeof response.data === 'string' ? response.data : '';
+    const text = isJson ? normalizeJsonText(rawText) : rawText;
+    return { title, text: truncateText(text), dateISO, metadata: sourceMetadata };
   }
 
   return {
     title,
-    text: `Unsupported in Phase 2A. This file type ("${mimeType}") is not yet summarized.`,
+    text: buildUnsupportedPlaceholder({
+      name: title,
+      mimeType,
+      webViewLink: metadata.data.webViewLink ?? undefined,
+    }),
     dateISO,
+    metadata: sourceMetadata,
   };
 };

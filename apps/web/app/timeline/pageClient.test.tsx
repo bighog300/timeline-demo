@@ -42,6 +42,17 @@ const syncArtifact = {
   version: 1,
 };
 
+const artifactWithMetadata = {
+  ...syncArtifact,
+  sourceMetadata: {
+    from: 'alice@example.com',
+    subject: 'Hello',
+    threadId: 'thread-1',
+    labels: ['INBOX'],
+  },
+  sourcePreview: 'Preview text from the message body.',
+};
+
 const selectionList = [
   {
     driveFileId: 'selection-1',
@@ -340,5 +351,32 @@ describe('TimelinePageClient', () => {
       expect(gmailStored).toHaveLength(1);
       expect(driveStored).toHaveLength(2);
     });
+  });
+
+  it('renders source metadata and toggles the content preview', async () => {
+    setSelections();
+    window.localStorage.setItem('timeline.summaryArtifacts', JSON.stringify({ 'gmail:msg-1': artifactWithMetadata }));
+    mockFetch((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByText('From', { selector: 'span' })).toBeInTheDocument();
+      expect(screen.getByText('Subject', { selector: 'span' })).toBeInTheDocument();
+    });
+    expect(screen.getAllByText('alice@example.com').length).toBeGreaterThan(0);
+
+    const previewSummary = screen.getByText(/content preview/i);
+    const previewDetails = previewSummary.closest('details');
+    expect(previewDetails).not.toHaveAttribute('open');
+
+    fireEvent.click(previewSummary);
+    expect(previewDetails).toHaveAttribute('open');
+    expect(screen.getByText(/preview text from the message body/i)).toBeInTheDocument();
   });
 });

@@ -184,6 +184,25 @@
   font-size: 0.9rem;
 }
 
+.metadata {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.metaRow {
+  display: flex;
+  gap: 8px;
+}
+
+.metaLabel {
+  min-width: 80px;
+  font-weight: 600;
+  color: #475569;
+}
+
 .summaryBlock {
   margin-top: 12px;
   padding-top: 12px;
@@ -207,6 +226,26 @@
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.preview {
+  border-radius: 10px;
+  background: rgba(148, 163, 184, 0.12);
+  padding: 10px 12px;
+}
+
+.preview summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.previewContent {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--muted);
+  white-space: pre-wrap;
 }
 
 .driveLink {

@@ -115,9 +115,13 @@ they are missing.
 - **Supported Drive types**:
   - ✅ Google Docs (exported to text/plain)
   - ✅ Text/Markdown files (downloaded as text)
-  - ⚠️ Other formats (PDFs/images) return an “Unsupported in Phase 2A” placeholder text
-- **Gmail parsing**: Best-effort extraction of `text/plain` with fallback to stripped HTML or message
-  snippets.
+  - ✅ JSON + CSV files (downloaded as text, JSON pretty-printed when possible)
+  - ⚠️ Other formats (PDFs/images) return an “Unsupported for text extraction in Phase 3A” placeholder
+    with a Drive link (no OCR yet).
+- **Gmail parsing**: Prefer `text/plain`, fallback to stripped HTML, decode common entities, and trim
+  quoted replies/signatures heuristically. Short emails are preserved.
+- **Text truncation**: Extracted Drive text is capped at ~80k characters, with a `(truncated)` marker
+  appended when needed.
 
 ### Phase 2B Sync from Drive
 

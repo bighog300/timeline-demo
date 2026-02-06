@@ -6,6 +6,32 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) && value.every((item) => typeof item === 'string');
 
+const normalizeString = (value: unknown) => (typeof value === 'string' ? value : undefined);
+
+const normalizeStringArray = (value: unknown) =>
+  Array.isArray(value) ? value.filter((item) => typeof item === 'string') : undefined;
+
+const normalizeSourceMetadata = (value: unknown) => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const metadata = {
+    from: normalizeString(value.from),
+    to: normalizeString(value.to),
+    subject: normalizeString(value.subject),
+    dateISO: normalizeString(value.dateISO),
+    threadId: normalizeString(value.threadId),
+    labels: normalizeStringArray(value.labels),
+    mimeType: normalizeString(value.mimeType),
+    driveName: normalizeString(value.driveName),
+    driveModifiedTime: normalizeString(value.driveModifiedTime),
+    driveWebViewLink: normalizeString(value.driveWebViewLink),
+  };
+
+  return Object.values(metadata).some((entry) => entry !== undefined) ? metadata : undefined;
+};
+
 export const isSummaryArtifact = (value: unknown): value is SummaryArtifact => {
   if (!isRecord(value)) {
     return false;
@@ -23,6 +49,8 @@ export const isSummaryArtifact = (value: unknown): value is SummaryArtifact => {
     typeof value.createdAtISO === 'string' &&
     typeof value.summary === 'string' &&
     isStringArray(value.highlights) &&
+    (value.sourceMetadata === undefined || isRecord(value.sourceMetadata)) &&
+    (value.sourcePreview === undefined || typeof value.sourcePreview === 'string') &&
     typeof value.driveFolderId === 'string' &&
     typeof value.driveFileId === 'string' &&
     (value.driveWebViewLink === undefined || typeof value.driveWebViewLink === 'string') &&
@@ -36,6 +64,8 @@ export const normalizeArtifact = (artifact: SummaryArtifact): SummaryArtifact =>
   highlights: Array.isArray(artifact.highlights)
     ? artifact.highlights.filter((item) => typeof item === 'string')
     : [],
+  sourceMetadata: normalizeSourceMetadata(artifact.sourceMetadata),
+  sourcePreview: normalizeString(artifact.sourcePreview),
   model: artifact.model || 'unknown',
   version: Number.isFinite(artifact.version) && artifact.version > 0 ? artifact.version : 1,
 });
