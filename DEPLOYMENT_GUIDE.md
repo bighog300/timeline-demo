@@ -14,7 +14,7 @@ This guide covers deploying the Timeline App from GitHub to Vercel (web) and a s
 
 ### Tools Required
 - Node.js 20.x
-- pnpm 9.15.9 (or compatible)
+- pnpm 9.17.0 (or compatible)
 - Git
 - GitHub account
 - Vercel account
@@ -59,13 +59,7 @@ This guide covers deploying the Timeline App from GitHub to Vercel (web) and a s
   "buildCommand": "pnpm run vercel:build",
   "installCommand": "pnpm run vercel:install",
   "framework": "nextjs",
-  "outputDirectory": "apps/web/.next",
-  "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://your-api-domain.com/:path*"
-    }
-  ]
+  "outputDirectory": "apps/web/.next"
 }
 ```
 
@@ -85,10 +79,10 @@ This guide covers deploying the Timeline App from GitHub to Vercel (web) and a s
   "name": "timeline-app",
   "private": true,
   "workspaces": ["apps/*", "packages/*"],
-  "packageManager": "pnpm@9.15.9",
+  "packageManager": "pnpm@9.17.0",
   "engines": {
     "node": ">=20.0.0",
-    "pnpm": "9.15.9"
+    "pnpm": "9.17.0"
   },
   "scripts": {
     "dev:api": "pnpm --filter ./apps/api dev",
@@ -100,7 +94,7 @@ This guide covers deploying the Timeline App from GitHub to Vercel (web) and a s
     "test": "pnpm -r --if-present test",
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
-    "vercel:install": "corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile --filter ./apps/web...",
+    "vercel:install": "corepack enable && corepack prepare pnpm@9.17.0 --activate && pnpm install --frozen-lockfile --filter ./apps/web...",
     "vercel:build": "pnpm --filter ./apps/web build"
   }
 }
@@ -113,7 +107,7 @@ This guide covers deploying the Timeline App from GitHub to Vercel (web) and a s
 ```bash
 # From repo root
 corepack enable
-corepack prepare pnpm@9.15.9 --activate
+corepack prepare pnpm@9.17.0 --activate
 pnpm install
 ```
 
@@ -160,7 +154,7 @@ The API must be deployed **before** the web app, as the web app needs the API UR
      - **Runtime:** Node
      - **Build Command:** 
        ```bash
-       corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile && pnpm db:generate && pnpm db:migrate && pnpm build
+       corepack enable && corepack prepare pnpm@9.17.0 --activate && pnpm install --frozen-lockfile && pnpm db:generate && pnpm db:migrate && pnpm build
        ```
      - **Start Command:** 
        ```bash
@@ -235,6 +229,7 @@ The API must be deployed **before** the web app, as the web app needs the API UR
 **IMPORTANT:** Override the build settings:
 
 ```
+Root Directory: /
 Build Command: pnpm run vercel:build
 Install Command: pnpm run vercel:install
 Output Directory: apps/web/.next
@@ -250,37 +245,11 @@ API_SERVER_ORIGIN=https://your-api-domain.onrender.com
 NEXT_PUBLIC_API_BASE=/api
 ```
 
-**Note:** The `API_SERVER_ORIGIN` should point to your deployed API (from Part 2).
+**Note:** The `API_SERVER_ORIGIN` should point to your deployed API (from Part 2). The optional API rewrite is handled in `apps/web/next.config.js` and is only applied when `API_SERVER_ORIGIN` is set.
 
-### 3.4 Update vercel.json with Real API URL
+### 3.4 API Rewrite Configuration (Optional)
 
-After API is deployed, update `vercel.json`:
-
-```json
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "version": 2,
-  "buildCommand": "pnpm run vercel:build",
-  "installCommand": "pnpm run vercel:install",
-  "framework": "nextjs",
-  "outputDirectory": "apps/web/.next",
-  "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://timeline-api.onrender.com/:path*"
-    }
-  ]
-}
-```
-
-Commit and push:
-```bash
-git add vercel.json
-git commit -m "Update API rewrite URL"
-git push origin main
-```
-
-Vercel will auto-deploy.
+If `API_SERVER_ORIGIN` is set, the web app rewrites `/api/:path*` to `${API_SERVER_ORIGIN}/api/:path*` from `apps/web/next.config.js`. If it is not set, no rewrite is added and local/relative API routes remain in use.
 
 ### 3.5 Deploy
 
@@ -324,7 +293,7 @@ curl https://your-api-domain.onrender.com/health
 git clone https://github.com/YOUR_USERNAME/timeline-app.git
 cd timeline-app
 corepack enable
-corepack prepare pnpm@9.15.9 --activate
+corepack prepare pnpm@9.17.0 --activate
 pnpm install
 ```
 
