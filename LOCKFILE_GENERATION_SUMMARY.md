@@ -146,7 +146,7 @@ The lockfile will auto-update when you run these commands.
 **A:** Not recommended for this project. The workspace setup and Vercel configuration are built for pnpm, and API routes ship with the Next.js app under `apps/web/app/api/*`.
 
 ### Q: What if someone on my team uses a different pnpm version?
-**A:** The `packageManager` field in package.json specifies pnpm@9.17.0. With corepack enabled, it will auto-use the correct version.
+**A:** The `packageManager` field in package.json specifies pnpm@9.15.9. With corepack enabled, it will auto-use the correct version.
 
 ---
 
