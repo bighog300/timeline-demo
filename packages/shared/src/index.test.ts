@@ -1,6 +1,6 @@
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type { EchoResponse, HealthResponse } from './index';
+import type { EchoResponse, HealthResponse } from './index.js';
 
 describe('shared types', () => {
   it('exposes the expected response shapes', () => {

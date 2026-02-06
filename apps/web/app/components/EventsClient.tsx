@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent } from 'react';
+import React, { useEffect, useState, type FormEvent } from 'react';
 
 type EventItem = {
   id: string;
