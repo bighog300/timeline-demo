@@ -7,7 +7,8 @@ import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import { artifactKey, mergeArtifacts } from '../lib/artifactMerge';
-import type { SummaryArtifact } from '../lib/types';
+import { mergeSelectionItems } from '../lib/selectionMerge';
+import type { SelectionSet, SelectionSetItem, SummaryArtifact } from '../lib/types';
 import { isSummaryArtifact, normalizeArtifact } from '../lib/validateArtifact';
 import styles from './timeline.module.css';
 
@@ -37,11 +38,19 @@ type TimelineItem = {
 
 type SummarizeError = 'reconnect_required' | 'drive_not_provisioned' | 'generic' | null;
 type SyncError = 'reconnect_required' | 'drive_not_provisioned' | 'generic' | null;
+type SelectionSetError = 'reconnect_required' | 'drive_not_provisioned' | 'generic' | null;
 
 type FailedItem = {
   source: 'gmail' | 'drive';
   id: string;
   error: string;
+};
+
+type SelectionSetSummary = {
+  driveFileId: string;
+  name: string;
+  updatedAtISO: string;
+  driveWebViewLink?: string;
 };
 
 const GMAIL_KEY = 'timeline.gmailSelections';
@@ -96,6 +105,65 @@ const persistArtifacts = (
   return merged;
 };
 
+const buildSelectionItems = (
+  gmailSelections: GmailSelection[],
+  driveSelections: DriveSelection[],
+): SelectionSetItem[] => [
+  ...gmailSelections.map((message) => ({
+    source: 'gmail' as const,
+    id: message.id,
+    title: message.subject,
+    dateISO: message.date,
+  })),
+  ...driveSelections.map((file) => ({
+    source: 'drive' as const,
+    id: file.id,
+    title: file.name,
+    dateISO: file.modifiedTime,
+  })),
+];
+
+const selectionItemsToSelections = (
+  items: SelectionSetItem[],
+  gmailSelections: GmailSelection[],
+  driveSelections: DriveSelection[],
+) => {
+  const gmailById = new Map(gmailSelections.map((message) => [message.id, message]));
+  const driveById = new Map(driveSelections.map((file) => [file.id, file]));
+
+  const nextGmail: GmailSelection[] = [];
+  const nextDrive: DriveSelection[] = [];
+
+  items.forEach((item) => {
+    if (item.source === 'gmail') {
+      const existing = gmailById.get(item.id);
+      nextGmail.push(
+        existing ?? {
+          id: item.id,
+          threadId: item.id,
+          subject: item.title ?? 'Untitled message',
+          from: 'From unavailable',
+          date: item.dateISO ?? '',
+          snippet: '',
+        },
+      );
+      return;
+    }
+
+    const existing = driveById.get(item.id);
+    nextDrive.push(
+      existing ?? {
+        id: item.id,
+        name: item.title ?? 'Untitled file',
+        mimeType: 'application/octet-stream',
+        modifiedTime: item.dateISO,
+      },
+    );
+  });
+
+  return { gmail: nextGmail, drive: nextDrive };
+};
+
 export default function TimelinePageClient() {
   const [gmailSelections, setGmailSelections] = useState<GmailSelection[]>([]);
   const [driveSelections, setDriveSelections] = useState<DriveSelection[]>([]);
@@ -110,6 +178,19 @@ export default function TimelinePageClient() {
   const [autoSyncOnOpen, setAutoSyncOnOpen] = useState(false);
   const [lastSyncISO, setLastSyncISO] = useState<string | null>(null);
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [selectionSets, setSelectionSets] = useState<SelectionSetSummary[]>([]);
+  const [isLoadingSets, setIsLoadingSets] = useState(false);
+  const [selectionError, setSelectionError] = useState<SelectionSetError>(null);
+  const [selectionMessage, setSelectionMessage] = useState<string | null>(null);
+  const [selectionPreview, setSelectionPreview] = useState<SelectionSet | null>(null);
+  const [previewError, setPreviewError] = useState<SelectionSetError>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const [saveNotes, setSaveNotes] = useState('');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveToExisting, setSaveToExisting] = useState(false);
 
   useEffect(() => {
     setGmailSelections(parseStoredSelections<GmailSelection>(GMAIL_KEY));
@@ -143,6 +224,11 @@ export default function TimelinePageClient() {
       return bTime - aTime;
     });
   }, [driveSelections, gmailSelections]);
+
+  const selectionItems = useMemo(
+    () => buildSelectionItems(gmailSelections, driveSelections),
+    [driveSelections, gmailSelections],
+  );
 
   const summarizedCount = useMemo(
     () =>
@@ -279,14 +365,227 @@ export default function TimelinePageClient() {
     void handleSyncFromDrive();
   }, [autoSyncOnOpen, handleSyncFromDrive, hasHydrated]);
 
+  const persistSelections = (nextGmail: GmailSelection[], nextDrive: DriveSelection[]) => {
+    setGmailSelections(nextGmail);
+    setDriveSelections(nextDrive);
+    window.localStorage.setItem(GMAIL_KEY, JSON.stringify(nextGmail));
+    window.localStorage.setItem(DRIVE_KEY, JSON.stringify(nextDrive));
+  };
+
+  const applySelectionItems = useCallback(
+    (items: SelectionSetItem[], mode: 'replace' | 'merge') => {
+      const nextItems = mode === 'merge' ? mergeSelectionItems(selectionItems, items) : items;
+      const { gmail, drive } = selectionItemsToSelections(
+        nextItems,
+        gmailSelections,
+        driveSelections,
+      );
+      persistSelections(gmail, drive);
+    },
+    [driveSelections, gmailSelections, selectionItems],
+  );
+
+  const fetchSelectionSets = useCallback(async () => {
+    setIsLoadingSets(true);
+    setSelectionError(null);
+    setSelectionMessage(null);
+
+    try {
+      const response = await fetch('/api/timeline/selection/list');
+
+      if (response.status === 401) {
+        setSelectionError('reconnect_required');
+        return;
+      }
+
+      if (response.status === 400) {
+        const payload = (await response.json()) as { error?: string };
+        if (payload?.error === 'drive_not_provisioned') {
+          setSelectionError('drive_not_provisioned');
+          return;
+        }
+        setSelectionError('generic');
+        return;
+      }
+
+      if (!response.ok) {
+        setSelectionError('generic');
+        return;
+      }
+
+      const payload = (await response.json()) as { sets?: SelectionSetSummary[] };
+      setSelectionSets(Array.isArray(payload.sets) ? payload.sets : []);
+    } catch {
+      setSelectionError('generic');
+    } finally {
+      setIsLoadingSets(false);
+    }
+  }, []);
+
+  const loadSelectionSet = useCallback(
+    async (fileId: string, mode?: 'replace' | 'merge') => {
+      setIsPreviewLoading(true);
+      setPreviewError(null);
+      setSelectionMessage(null);
+
+      try {
+        const response = await fetch(`/api/timeline/selection/read?fileId=${fileId}`);
+
+        if (response.status === 401) {
+          setPreviewError('reconnect_required');
+          return;
+        }
+
+        if (response.status === 400) {
+          const payload = (await response.json()) as { error?: string };
+          if (payload?.error === 'drive_not_provisioned') {
+            setPreviewError('drive_not_provisioned');
+            return;
+          }
+          setPreviewError('generic');
+          return;
+        }
+
+        if (!response.ok) {
+          setPreviewError('generic');
+          return;
+        }
+
+        const payload = (await response.json()) as { set?: SelectionSet };
+        if (!payload.set) {
+          setPreviewError('generic');
+          return;
+        }
+
+        setSelectionPreview(payload.set);
+        setSelectionMessage(`Loaded set “${payload.set.name}”`);
+
+        if (mode) {
+          applySelectionItems(payload.set.items, mode);
+        }
+      } catch {
+        setPreviewError('generic');
+      } finally {
+        setIsPreviewLoading(false);
+      }
+    },
+    [applySelectionItems],
+  );
+
+  useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+    void fetchSelectionSets();
+  }, [fetchSelectionSets, hasHydrated]);
+
   const handleAutoSyncToggle = (checked: boolean) => {
     setAutoSyncOnOpen(checked);
     window.localStorage.setItem(AUTO_SYNC_KEY, checked ? 'true' : 'false');
   };
 
+  const handleSaveSelectionSet = async () => {
+    if (!saveName.trim()) {
+      setSaveError('Enter a name for this selection set.');
+      return;
+    }
+
+    if (selectionItems.length === 0) {
+      setSaveError('Select Gmail or Drive items before saving.');
+      return;
+    }
+
+    setSaveError(null);
+    setIsSaving(true);
+    setSelectionMessage(null);
+
+    try {
+      const payload = {
+        name: saveName.trim(),
+        notes: saveNotes.trim() || undefined,
+        items: selectionItems,
+        driveFileId: saveToExisting ? selectionPreview?.driveFileId : undefined,
+      };
+
+      const response = await fetch('/api/timeline/selection/save', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.status === 401) {
+        setSelectionError('reconnect_required');
+        return;
+      }
+
+      if (response.status === 400) {
+        const errorPayload = (await response.json()) as { error?: string; message?: string };
+        if (errorPayload?.error === 'drive_not_provisioned') {
+          setSelectionError('drive_not_provisioned');
+          return;
+        }
+        setSaveError(errorPayload?.message || 'Unable to save selection set.');
+        return;
+      }
+
+      if (!response.ok) {
+        setSaveError('Unable to save selection set.');
+        return;
+      }
+
+      const responsePayload = (await response.json()) as { set?: SelectionSet };
+      if (responsePayload.set) {
+        setSelectionMessage(`Saved set “${responsePayload.set.name}”`);
+        setSelectionPreview(responsePayload.set);
+        setSaveOpen(false);
+        setSaveName('');
+        setSaveNotes('');
+        setSaveToExisting(false);
+        await fetchSelectionSets();
+      }
+    } catch {
+      setSaveError('Unable to save selection set.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const toggleSaveOpen = () => {
+    setSaveOpen((prev) => {
+      const next = !prev;
+      if (next) {
+        setSaveName((current) => current || selectionPreview?.name || '');
+        setSaveNotes((current) => current || selectionPreview?.notes || '');
+      }
+      return next;
+    });
+  };
+
   const lastSyncLabel = lastSyncISO
     ? new Date(lastSyncISO).toLocaleString()
     : 'Not synced yet';
+
+  const previewSummary = useMemo(() => {
+    if (!selectionPreview) {
+      return null;
+    }
+
+    const counts = selectionPreview.items.reduce(
+      (acc, item) => {
+        acc.total += 1;
+        acc[item.source] += 1;
+        return acc;
+      },
+      { total: 0, gmail: 0, drive: 0 },
+    );
+
+    return {
+      ...counts,
+      updatedLabel: selectionPreview.updatedAtISO
+        ? new Date(selectionPreview.updatedAtISO).toLocaleString()
+        : 'Unknown update time',
+    };
+  }, [selectionPreview]);
 
   const reconnectNotice = (
     <div className={styles.notice}>
@@ -309,6 +608,18 @@ export default function TimelinePageClient() {
   const syncProvisionNotice = (
     <div className={styles.notice}>
       Provision a Drive folder to sync summaries. Visit <Link href="/connect">/connect</Link>.
+    </div>
+  );
+
+  const selectionReconnectNotice = (
+    <div className={styles.notice}>
+      Selection sets need a reconnect. Please <Link href="/connect">connect your Google account</Link>.
+    </div>
+  );
+
+  const selectionProvisionNotice = (
+    <div className={styles.notice}>
+      Provision a Drive folder to store selection sets. Visit <Link href="/connect">/connect</Link>.
     </div>
   );
 
@@ -370,6 +681,170 @@ export default function TimelinePageClient() {
         <div className={styles.notice}>Unable to sync from Drive. Please try again.</div>
       ) : null}
       {syncMessage ? <div className={styles.noticeSuccess}>{syncMessage}</div> : null}
+
+      <Card className={styles.selectionPanel}>
+        <div className={styles.selectionHeader}>
+          <div>
+            <h2>Selection sets</h2>
+            <p className={styles.muted}>
+              Save the current selection to Drive, or load a saved set from another device.
+            </p>
+          </div>
+          <div className={styles.selectionActions}>
+            <Button variant="secondary" onClick={toggleSaveOpen}>
+              {saveOpen ? 'Close save form' : 'Save selection set'}
+            </Button>
+            <Button variant="ghost" onClick={fetchSelectionSets} disabled={isLoadingSets}>
+              {isLoadingSets ? 'Refreshing...' : 'Refresh list'}
+            </Button>
+          </div>
+        </div>
+
+        {selectionError === 'reconnect_required' ? selectionReconnectNotice : null}
+        {selectionError === 'drive_not_provisioned' ? selectionProvisionNotice : null}
+        {selectionError === 'generic' ? (
+          <div className={styles.notice}>Unable to load selection sets. Please try again.</div>
+        ) : null}
+        {selectionMessage ? <div className={styles.noticeSuccess}>{selectionMessage}</div> : null}
+
+        {saveOpen ? (
+          <div className={styles.selectionForm}>
+            <label className={styles.field}>
+              <span>Set name</span>
+              <input
+                type="text"
+                value={saveName}
+                onChange={(event) => setSaveName(event.target.value)}
+                placeholder="e.g. Q2 Launch Research"
+              />
+            </label>
+            <label className={styles.field}>
+              <span>Notes (optional)</span>
+              <textarea
+                value={saveNotes}
+                onChange={(event) => setSaveNotes(event.target.value)}
+                placeholder="Why this selection matters"
+                rows={3}
+              />
+            </label>
+            {selectionPreview?.driveFileId ? (
+              <label className={styles.checkboxRow}>
+                <input
+                  type="checkbox"
+                  checked={saveToExisting}
+                  onChange={(event) => setSaveToExisting(event.target.checked)}
+                />
+                Update the loaded set in Drive
+              </label>
+            ) : null}
+            {saveError ? <div className={styles.notice}>{saveError}</div> : null}
+            <div className={styles.formActions}>
+              <Button
+                variant="primary"
+                onClick={handleSaveSelectionSet}
+                disabled={isSaving || selectionItems.length === 0}
+              >
+                {isSaving ? 'Saving...' : 'Save to Drive'}
+              </Button>
+              <span className={styles.muted}>{selectionItems.length} items in selection</span>
+            </div>
+          </div>
+        ) : null}
+
+        <div className={styles.selectionList}>
+          {isLoadingSets ? <p className={styles.muted}>Loading selection sets...</p> : null}
+          {!isLoadingSets && selectionSets.length === 0 ? (
+            <p className={styles.muted}>No saved selection sets yet.</p>
+          ) : null}
+          {selectionSets.map((set) => (
+            <div key={set.driveFileId} className={styles.selectionRow}>
+              <div>
+                <strong>{set.name}</strong>
+                <div className={styles.selectionMeta}>
+                  Updated {new Date(set.updatedAtISO).toLocaleString()}
+                </div>
+              </div>
+              <div className={styles.selectionButtons}>
+                <Button
+                  variant="ghost"
+                  onClick={() => loadSelectionSet(set.driveFileId)}
+                  disabled={isPreviewLoading}
+                >
+                  {isPreviewLoading ? 'Loading...' : 'Load'}
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => loadSelectionSet(set.driveFileId, 'replace')}
+                  disabled={isPreviewLoading}
+                >
+                  Replace selection
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => loadSelectionSet(set.driveFileId, 'merge')}
+                  disabled={isPreviewLoading}
+                >
+                  Merge into selection
+                </Button>
+                {set.driveWebViewLink ? (
+                  <a
+                    className={styles.driveLink}
+                    href={set.driveWebViewLink}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open in Drive
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {previewError === 'reconnect_required' ? selectionReconnectNotice : null}
+        {previewError === 'drive_not_provisioned' ? selectionProvisionNotice : null}
+        {previewError === 'generic' ? (
+          <div className={styles.notice}>Unable to load that selection set.</div>
+        ) : null}
+
+        {selectionPreview && previewSummary ? (
+          <div className={styles.selectionPreview}>
+            <div>
+              <h3>{selectionPreview.name}</h3>
+              <p className={styles.muted}>
+                {previewSummary.total} items ({previewSummary.gmail} Gmail, {previewSummary.drive}{' '}
+                Drive)
+              </p>
+              <p className={styles.muted}>Updated {previewSummary.updatedLabel}</p>
+              {selectionPreview.notes ? <p>{selectionPreview.notes}</p> : null}
+            </div>
+            <div className={styles.selectionButtons}>
+              <Button
+                variant="secondary"
+                onClick={() => applySelectionItems(selectionPreview.items, 'replace')}
+              >
+                Replace selection
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => applySelectionItems(selectionPreview.items, 'merge')}
+              >
+                Merge into selection
+              </Button>
+              {selectionPreview.driveWebViewLink ? (
+                <a
+                  className={styles.driveLink}
+                  href={selectionPreview.driveWebViewLink}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Open in Drive
+                </a>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </Card>
 
       {timelineItems.length === 0 ? (
         <Card className={styles.emptyState}>

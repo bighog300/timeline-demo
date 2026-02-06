@@ -20,3 +20,23 @@ export type SummaryArtifact = {
   model: string;
   version: number;
 };
+
+export type SelectionSetItem = {
+  source: 'gmail' | 'drive';
+  id: string;
+  title?: string;
+  dateISO?: string;
+};
+
+export type SelectionSet = {
+  id: string;
+  name: string;
+  createdAtISO: string;
+  updatedAtISO: string;
+  items: SelectionSetItem[];
+  notes?: string;
+  version: number;
+  driveFolderId: string;
+  driveFileId: string;
+  driveWebViewLink?: string;
+};
