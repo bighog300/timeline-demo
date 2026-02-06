@@ -21,8 +21,7 @@ The Timeline App is well-structured and ready for deployment. All critical files
 ```
 timeline-app/
 ├── apps/
-│   ├── api/          ✅ Express API (13 TypeScript files)
-│   └── web/          ✅ Next.js app (Pages Router)
+│   └── web/          ✅ Next.js app (Pages Router + app/api routes)
 ├── packages/
 │   ├── shared/       ✅ Zod schemas & types
 │   ├── prisma-client/    ℹ️ Workspace shim (dev only)
@@ -33,7 +32,7 @@ timeline-app/
 
 **Analysis:**
 - ✅ Clean monorepo structure using pnpm workspaces
-- ✅ Proper separation of concerns (web/api/shared)
+- ✅ Proper separation of concerns (web/shared, API routes inside web)
 - ✅ Workspace shims present for restricted environments (by design)
 - ✅ No circular dependencies detected
 
@@ -187,27 +186,11 @@ dist/
 
 ---
 
-## 4. API Build Simulation
+## 4. API Routes (Next.js) Simulation
 
 ### Build Process ✅
 
-```bash
-cd apps/api && tsc -p tsconfig.json
-```
-
-**Source Files:** 13 TypeScript files including:
-- ✅ `src/app.ts` - Express application (main logic)
-- ✅ `src/index.ts` - Entry point
-- ✅ `src/db.ts` - Prisma client
-- ✅ `src/googleApi.ts` - Google API integration
-- ✅ `src/openai.ts` - OpenAI integration
-- ✅ `src/sessions.ts` - Session management
-- ✅ `src/crypto.ts` - Encryption utilities
-- ✅ Plus others
-
-**Status:** ✅ Will compile successfully
-
-**Note:** API is deployed separately from Vercel, so not part of web build.
+API routes live under `apps/web/app/api/*` and are built as part of the Next.js application. The Vercel build already includes these route handlers with the web bundle, so no separate API build step is required.
 
 ---
 
@@ -222,31 +205,36 @@ cd apps/api && tsc -p tsconfig.json
   "installCommand": "pnpm run vercel:install",
   "framework": "nextjs",
   "outputDirectory": "apps/web/.next",
-  "rewrites": [
+  "headers": [
     {
       "source": "/api/:path*",
-      "destination": "https://YOUR-API-DOMAIN.com/:path*"
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, must-revalidate"
+        }
+      ]
     }
   ]
 }
 ```
 
 **Status:** ✅ Valid configuration  
-**Action Required:** Replace `YOUR-API-DOMAIN.com` with actual API URL
+**Action Required:** None (API routes ship with the web app under `apps/web/app/api/*`)
 
 ### Build Scripts ✅
 
 **Root package.json:**
 ```json
 {
-  "vercel:install": "corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile --filter ./apps/web...",
+  "vercel:install": "corepack enable && corepack prepare pnpm@9 --activate && pnpm install --frozen-lockfile",
   "vercel:build": "pnpm --filter ./apps/web build"
 }
 ```
 
 **Analysis:**
-- ✅ `vercel:install` properly uses `--filter ./apps/web...` (with three dots)
-- ✅ This installs web + all dependencies + workspaces
+- ✅ `vercel:install` prepares pnpm 9.x via Corepack
+- ✅ This installs all workspace dependencies with the lockfile
 - ✅ `--frozen-lockfile` ensures reproducible builds
 - ✅ `vercel:build` targets only web app
 
@@ -262,7 +250,7 @@ cd apps/api && tsc -p tsconfig.json
    └─ ✅ Valid configuration
 
 3. Vercel runs: pnpm run vercel:install
-   ├─ ✅ Corepack enables pnpm 9.15.9
+   ├─ ✅ Corepack enables pnpm 9.x
    ├─ ✅ Installs web dependencies
    ├─ ✅ Links @timeline/shared workspace
    └─ ✅ Builds shared package first
@@ -309,14 +297,6 @@ cd apps/api && tsc -p tsconfig.json
    
    **Why Critical:** Vercel uses `--frozen-lockfile` which REQUIRES this file.  
    **Without it:** Build will fail immediately with error.
-
-2. **Update vercel.json with API URL**
-   ```json
-   "destination": "https://your-actual-api-url.onrender.com/:path*"
-   ```
-   
-   **Why Important:** API rewrites won't work without correct URL.  
-   **Impact:** Frontend won't be able to communicate with backend.
 
 ---
 
@@ -374,7 +354,7 @@ Unable to proceed with --frozen-lockfile
 ```bash
 cd /path/to/Timeline-main
 corepack enable
-corepack prepare pnpm@9.15.9 --activate
+corepack prepare pnpm@9 --activate
 pnpm install
 git add pnpm-lock.yaml
 git commit -m "Add pnpm lockfile"
@@ -385,22 +365,7 @@ git push
 
 ---
 
-### Issue 2: API URL Placeholder ⚠️ MEDIUM PRIORITY
-
-**Current State:** `vercel.json` contains `YOUR-API-DOMAIN.com`
-
-**Impact:** API requests will fail until updated
-
-**Solution:** After deploying API, update vercel.json:
-```json
-"destination": "https://timeline-api.onrender.com/:path*"
-```
-
-**Status:** Expected - part of normal deployment flow
-
----
-
-### Issue 3: Workspace Shim Packages ℹ️ INFORMATIONAL
+### Issue 2: Workspace Shim Packages ℹ️ INFORMATIONAL
 
 **Observation:** Packages like `packages/prisma-client` are workspace shims
 
@@ -454,10 +419,9 @@ Based on dependencies:
    - Verify .next directory is created
    - Check for any TypeScript errors
 
-3. **Set up API first**
-   - Deploy API to Render/Fly/Railway
-   - Get API URL
-   - Update vercel.json before deploying web
+3. **Confirm API routes live in the web app**
+   - Validate `apps/web/app/api/*` is present in the build
+   - Ensure `/api/*` requests are served by the same Vercel deployment
 
 ### Priority 2: Deployment ℹ️
 
@@ -497,7 +461,7 @@ Based on dependencies:
 | Aspect | Local Build | Vercel Build | Match? |
 |--------|-------------|--------------|--------|
 | Node version | 22.x (compatible) | 20.x | ✅ Compatible |
-| Package manager | pnpm 9.15.9 | pnpm 9.15.9 | ✅ Identical |
+| Package manager | pnpm 9.x | pnpm 9.x | ✅ Identical |
 | Build command | `next build` | `next build` | ✅ Identical |
 | Output directory | `.next` | `.next` | ✅ Identical |
 | Environment | Development | Production | ℹ️ Expected difference |
@@ -570,10 +534,9 @@ Failed to fetch: /api/health
 ```
 
 **Recovery:**
-1. Verify `API_SERVER_ORIGIN` is set in Vercel environment variables
-2. Check `vercel.json` has correct API URL in rewrites
-3. Test API URL directly in browser
-4. Check CORS settings on API
+1. Verify `/api/health` is implemented under `apps/web/app/api/*`
+2. Confirm `API_SERVER_ORIGIN` is set in Vercel environment variables if the app expects it
+3. Check Vercel logs for route handler errors
 
 ---
 
@@ -590,7 +553,7 @@ Before going live:
 ### Configuration ⚠️
 - [ ] pnpm-lock.yaml generated and committed
 - [x] vercel.json present and valid
-- [ ] vercel.json has real API URL (not placeholder)
+- [ ] API routes under `apps/web/app/api/*` are present and functioning
 - [x] .nvmrc specifies Node 20
 - [x] package.json has vercel:install and vercel:build scripts
 
@@ -617,9 +580,8 @@ The Timeline App is **well-architected and ready for production deployment**. Th
 ### Critical Path to Success:
 
 1. **Generate and commit pnpm-lock.yaml** (10 minutes)
-2. **Deploy API first** (30-60 minutes)
-3. **Update vercel.json with API URL** (2 minutes)
-4. **Deploy to Vercel** (5-10 minutes)
+2. **Deploy to Vercel** (5-10 minutes)
+3. **Verify and test** (15 minutes)
 5. **Verify and test** (15 minutes)
 
 **Total time to deployment:** ~2-3 hours
@@ -644,9 +606,8 @@ The Timeline App is **well-architected and ready for production deployment**. Th
 ### Next Steps
 
 1. **Immediate:** Generate pnpm-lock.yaml
-2. **Within 1 hour:** Deploy API and get URL
-3. **Within 2 hours:** Deploy to Vercel
-4. **Within 3 hours:** Full verification
+2. **Within 1 hour:** Deploy to Vercel
+3. **Within 2 hours:** Full verification
 
 ---
 
@@ -704,7 +665,7 @@ Root:
 ## Summary for Quick Reference
 
 🟢 **GREEN (Ready):** Configuration, TypeScript, Dependencies, Structure  
-🟡 **YELLOW (Action Required):** Generate pnpm-lock.yaml, Update API URL  
+🟡 **YELLOW (Action Required):** Generate pnpm-lock.yaml  
 🔴 **RED (Blocking):** None
 
 **Go/No-Go Decision:** ✅ GO (after generating lockfile)

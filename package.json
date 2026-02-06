@@ -17,7 +17,7 @@
     "test": "pnpm -r --if-present test",
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
-    "vercel:install": "corepack enable && corepack prepare pnpm@9.17.0 --activate && pnpm install --frozen-lockfile",
+    "vercel:install": "corepack enable && corepack prepare pnpm@9 --activate && pnpm install --frozen-lockfile",
     "vercel:build": "pnpm --filter ./apps/web build",
     "build:web": "pnpm --filter ./apps/web build"
   },

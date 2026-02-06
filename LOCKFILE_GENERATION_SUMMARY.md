@@ -24,16 +24,9 @@ This lockfile is a **complete dependency snapshot** for your Timeline App monore
 - ✅ @types/react-dom@18.3.0
 - ✅ typescript@5.5.4
 
-#### API (apps/api)
-- ✅ @prisma/client@5.18.0
-- ✅ express@4.19.2
-- ✅ express-session@1.18.0
-- ✅ cookie-parser@1.4.6
-- ✅ googleapis@140.0.1
-- ✅ zod@3.23.8
-- ✅ prisma@5.18.0 (dev)
-- ✅ ts-node@10.9.2 (dev)
-- ✅ typescript@5.5.4 (dev)
+#### API Routes (apps/web/app/api)
+- ✅ Route handlers live alongside the Next.js app
+- ✅ API surface is deployed with the web app on Vercel
 
 #### Shared Package (packages/shared)
 - ✅ zod@3.23.8
@@ -121,8 +114,7 @@ settings:
 #### 2. Importers
 Each workspace package has its own importer section:
 - Root (`.`)
-- `apps/api`
-- `apps/web`  
+- `apps/web`
 - `packages/shared`
 - Other packages
 
@@ -151,10 +143,10 @@ The lockfile will auto-update when you run these commands.
 **A:** Run `pnpm install` to update the lockfile to match package.json changes.
 
 ### Q: Can I use npm instead of pnpm?
-**A:** Not recommended for this project. The workspace setup and Vercel configuration are built for pnpm. However, npm works for individual service deployment (API).
+**A:** Not recommended for this project. The workspace setup and Vercel configuration are built for pnpm, and API routes ship with the Next.js app under `apps/web/app/api/*`.
 
 ### Q: What if someone on my team uses a different pnpm version?
-**A:** The `packageManager` field in package.json specifies pnpm@9.15.9. With corepack enabled, it will auto-use the correct version.
+**A:** The `packageManager` field in package.json specifies pnpm@9.17.0. With corepack enabled, it will auto-use the correct version.
 
 ---
 
@@ -182,13 +174,10 @@ pnpm outdated
    git push origin main
    ```
 
-2. **Deploy API** (see DEPLOYMENT_GUIDE.md Part 2)
-   - The API can use this lockfile for reproducible builds
-
-3. **Deploy Web to Vercel** (see DEPLOYMENT_GUIDE.md Part 3)
+2. **Deploy Web to Vercel** (see DEPLOYMENT_GUIDE.md Part 2)
    - Vercel will now successfully install dependencies
 
-4. **Verify builds pass**
+3. **Verify builds pass**
    - Check Vercel dashboard
    - Watch for any warnings
 
@@ -253,7 +242,7 @@ Runs security checks on all locked packages.
 - name: Install dependencies
   run: |
     corepack enable
-    corepack prepare pnpm@9.15.9 --activate
+    corepack prepare pnpm@9 --activate
     pnpm install --frozen-lockfile
 ```
 

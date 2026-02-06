@@ -22,7 +22,7 @@ Use this checklist to ensure a smooth deployment from GitHub to Vercel.
 ```bash
 cd timeline-app
 corepack enable
-corepack prepare pnpm@9.15.9 --activate
+corepack prepare pnpm@9 --activate
 pnpm install
 ```
 - [ ] Verify `pnpm-lock.yaml` was created
