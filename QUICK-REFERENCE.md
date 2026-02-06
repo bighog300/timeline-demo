@@ -15,7 +15,7 @@
 ```bash
 # Generate lockfile (CRITICAL!)
 corepack enable
-corepack prepare pnpm@9.15.9 --activate
+corepack prepare pnpm@9 --activate
 pnpm install
 
 # Initialize Git

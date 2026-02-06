@@ -37,7 +37,7 @@ mv .github-workflows-ci.yml .github/workflows/ci.yml
 
 # Generate lockfile (CRITICAL!)
 corepack enable
-corepack prepare pnpm@9.15.9 --activate
+corepack prepare pnpm@9 --activate
 pnpm install
 
 # Initialize Git and push
@@ -229,21 +229,10 @@ git push
 
 ---
 
-### 2. API URL in vercel.json
-**Why it's critical:** The web app proxies API requests through Vercel. If the URL is wrong, nothing will work.
+### 2. API routes live in the web app
+**Why it's critical:** The API is served from the same Next.js app under `apps/web/app/api/*`, so `/api/*` requests are handled by the Vercel deployment itself.
 
-**Action:** Update `vercel.json` after deploying your API:
-
-```json
-{
-  "rewrites": [
-    {
-      "source": "/api/:path*",
-      "destination": "https://YOUR-ACTUAL-API-URL.onrender.com/:path*"
-    }
-  ]
-}
-```
+**Action:** Keep API routes inside `apps/web/app/api/*` and deploy from the repo root (no separate API rewrite required).
 
 ---
 
@@ -332,11 +321,9 @@ git push
 2. **Prepare** your repository with new files (10 minutes)
 3. **Set up** PostgreSQL database (5-10 minutes)
 4. **Configure** Google OAuth (10-15 minutes)
-5. **Deploy** API to Render/Fly (20-30 minutes)
-6. **Update** vercel.json with API URL (2 minutes)
-7. **Deploy** web app to Vercel (10-15 minutes)
-8. **Test** end-to-end functionality (10-15 minutes)
-9. **Monitor** for 24 hours
+5. **Deploy** web app to Vercel (10-15 minutes)
+6. **Test** end-to-end functionality (10-15 minutes)
+7. **Monitor** for 24 hours
 
 **Total estimated time:** 2-3 hours for first deployment
 
@@ -464,7 +451,7 @@ You'll know deployment was successful when:
 
 Use this space to document your specific deployment details:
 
-**API URL:** _______________________________________________
+**API routes:** `apps/web/app/api/*`
 
 **Vercel URL:** _______________________________________________
 

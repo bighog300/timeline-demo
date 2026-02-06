@@ -34,7 +34,7 @@ echo ""
 # Enable corepack
 echo "🔧 Enabling corepack..."
 corepack enable
-corepack prepare pnpm@9.15.9 --activate
+corepack prepare pnpm@9 --activate
 echo "✅ pnpm configured"
 echo ""
 

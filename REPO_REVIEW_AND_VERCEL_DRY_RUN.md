@@ -7,11 +7,11 @@ This report reviews the current repository contents, summarizes each file’s pu
 
 ## 1) Repository Reality Check
 
-The repository currently contains deployment/docs scaffolding, but **does not contain the app source tree** referenced by the docs (`apps/web`, `apps/api`, `packages/*`).
+The repository contains the full app source tree. The Next.js app lives in `apps/web`, shared packages live under `packages/*`, and API routes are implemented in `apps/web/app/api/*` (no separate `apps/api` service).
 
 ### Present files
 - `.env.example`
-- `.github-workflows-ci.yml`
+- `.github/workflows/ci.yml`
 - `.node-version`
 - `.nvmrc`
 - `00-START-HERE.md`
@@ -27,9 +27,8 @@ The repository currently contains deployment/docs scaffolding, but **does not co
 - `setup.sh`
 - `vercel.json`
 
-### Missing (but referenced) directories
+### Present directories
 - `apps/web`
-- `apps/api`
 - `packages/shared` (and other package subdirs)
 
 ---
@@ -38,7 +37,7 @@ The repository currently contains deployment/docs scaffolding, but **does not co
 
 - **`00-START-HERE.md`**: Entry-point overview of the deployment bundle and intended usage sequence.
 - **`README_NEW.md`**: Intended main project README for a full monorepo (features, architecture, local dev, deployment).
-- **`DEPLOYMENT_GUIDE.md`**: Deep deployment manual (API host + Vercel web + OAuth + troubleshooting).
+- **`DEPLOYMENT_GUIDE.md`**: Deep deployment manual (single Vercel web app + OAuth + troubleshooting).
 - **`DEPLOYMENT_CHECKLIST.md`**: Execution checklist to track deployment completion.
 - **`QUICK-REFERENCE.md`**: Condensed command/env/settings lookup for day-to-day deployment work.
 - **`BUILD_SIMULATION_REPORT.md`**: A prior, likely external simulation report claiming the full monorepo build is healthy.
@@ -48,8 +47,8 @@ The repository currently contains deployment/docs scaffolding, but **does not co
 - **`package.json`**: Root scripts for monorepo development + Vercel install/build commands.
 - **`pnpm-workspace.yaml`**: Defines workspace globs `apps/*` and `packages/*`.
 - **`pnpm-lock.yaml`**: Current lockfile (effectively empty importer state).
-- **`vercel.json`**: Vercel config (build/install scripts, Next.js framework, API rewrite placeholder).
-- **`.github-workflows-ci.yml`**: CI intended to run lint/test/build and Vercel-style build validation.
+- **`vercel.json`**: Vercel config (build/install scripts, Next.js framework, API headers).
+- **`.github/workflows/ci.yml`**: CI intended to run lint/test/build and Vercel-style build validation.
 - **`.nvmrc` / `.node-version`**: Node version pinning helpers.
 
 ---
@@ -80,46 +79,22 @@ Interpretation:
 
 ## 4) Critical Issues Found
 
-1. **Repository completeness mismatch (blocking)**
-   - Docs describe a full monorepo, but runtime source directories are missing.
-   - Build commands target `./apps/web`, which does not exist.
-
-2. **Lockfile/package mismatch (blocking for Vercel)**
-   - `pnpm-lock.yaml` is stale/empty relative to current `package.json` dependencies.
-   - `vercel:install` with `--frozen-lockfile` will always fail until fixed.
-
-3. **Placeholder API rewrite (functional risk)**
-   - `vercel.json` still rewrites `/api/*` to `https://YOUR-API-DOMAIN.com/:path*`.
-   - Even successful web deployment would have broken API calls until replaced.
-
-4. **CI references unavailable app paths (likely blocking)**
-   - Workflow expects build artifacts at `apps/web/.next` and runs monorepo build scripts.
-   - With current contents, CI cannot be validly green.
-
-5. **Build simulation report appears out-of-sync with current repo state**
-   - Existing report claims app files and folders that are absent in this snapshot.
+No critical blockers identified in this snapshot. Ensure the lockfile remains in sync with `package.json`, and keep documentation aligned with the single-app API routes under `apps/web/app/api/*`.
 
 ---
 
 ## 5) Recommended Fixes
 
-## A. Restore actual application source tree (highest priority)
-- Add/restore:
-  - `apps/web`
-  - `apps/api`
-  - `packages/shared` (+ any other required workspace packages)
-- If this repo is intentionally docs-only, then remove/adjust scripts/docs that assume monorepo sources.
-
-## B. Regenerate and commit lockfile
+## A. Regenerate and commit lockfile
 Run on a machine with npm registry access:
 ```bash
 corepack enable
-corepack prepare pnpm@9.15.9 --activate
+corepack prepare pnpm@9 --activate
 pnpm install
 ```
 Then commit updated `pnpm-lock.yaml`.
 
-## C. Validate Vercel build locally before deploy
+## B. Validate Vercel build locally before deploy
 ```bash
 pnpm run vercel:install
 pnpm run vercel:build
@@ -129,17 +104,8 @@ Confirm output path exists:
 test -d apps/web/.next && echo "ok"
 ```
 
-## D. Replace placeholder API destination
-In `vercel.json`, set:
-- `https://YOUR-API-DOMAIN.com/:path*` → actual API domain.
-
-## E. Align docs with actual repository contents
+## C. Align docs with actual repository contents
 - Update `README_NEW.md`, `00-START-HERE.md`, and simulation report so they match the real state.
-- If repository is a starter/deployment bundle only, state that explicitly.
-
-## F. CI hygiene
-- Keep CI workflow in `.github/workflows/ci.yml` path (currently filename is `.github-workflows-ci.yml`).
-- Ensure CI jobs only reference files/paths that actually exist in repository.
 
 ---
 

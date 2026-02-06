@@ -17,7 +17,7 @@ A privacy-first timeline builder that creates AI-powered summaries from your Gma
 
 This is a **monorepo** with two main components:
 
-- **`apps/web`**: Next.js web application (UI + API routes, deployed to Vercel)
+- **`apps/web`**: Next.js web application (UI + API routes under `apps/web/app/api/*`, deployed to Vercel)
 - **`packages/shared`**: Shared types and Zod schemas
 
 ## 🚀 Quick Start
@@ -25,7 +25,7 @@ This is a **monorepo** with two main components:
 ### Prerequisites
 
 - Node.js 20.x or higher
-- pnpm 9.15.9
+- pnpm 9.x
 - (Optional) Google Cloud Project (for OAuth)
 - (Optional) OpenAI API key
 
@@ -46,7 +46,7 @@ This is a **monorepo** with two main components:
    Or manually:
    ```bash
    corepack enable
-   corepack prepare pnpm@9.15.9 --activate
+   corepack prepare pnpm@9 --activate
    pnpm install
    cp .env.example .env
    # Edit .env with your values
