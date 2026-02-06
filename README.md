@@ -9,6 +9,7 @@ A privacy-first timeline demo that showcases a Next.js App Router UI with API ro
 - **Monorepo Structure**: A single web app in `apps/web` plus shared types in `packages/shared`
 - **Vercel Ready**: Single-project deployment targeting the repo root
 - **Phase 2A Summaries to Drive**: Summaries stored as Markdown + JSON artifacts in your provisioned Drive folder
+- **Phase 2B Sync from Drive**: Rehydrate summaries by listing Summary.json artifacts from the app-managed Drive folder
 
 ## 🏗️ Architecture
 
@@ -99,6 +100,7 @@ they are missing.
 - ✅ Gmail + Drive metadata listing (user-selected items only)
 - ✅ Drive folder provisioning for app-owned artifacts
 - ✅ Phase 2A: summarize selected Gmail/Drive items and write artifacts to Drive
+- ✅ Phase 2B: sync Summary.json artifacts back into `/timeline` (app-managed folder only)
 - ❌ No background scanning (Phase 2A only processes selected items)
 
 ### Phase 2A Summaries to Drive
@@ -115,6 +117,21 @@ they are missing.
   - ⚠️ Other formats (PDFs/images) return an “Unsupported in Phase 2A” placeholder text
 - **Gmail parsing**: Best-effort extraction of `text/plain` with fallback to stripped HTML or message
   snippets.
+
+### Phase 2B Sync from Drive
+
+- **How it works**: On `/timeline`, click “Sync from Drive” to list Summary.json artifacts in the
+  provisioned Drive folder and merge them into the local cache.
+- **No background scanning**: Syncing only reads files within the app-managed Drive folder and only
+  when you click the button (or enable the optional “Auto-sync on open” toggle).
+
+#### Manual Test Steps
+
+1. Connect your Google account and provision the Drive folder.
+2. Generate summaries on `/timeline` so Summary.json files exist in Drive.
+3. Clear localStorage in the browser.
+4. Reload `/timeline` and click “Sync from Drive”.
+5. Confirm the summarized items reappear with Drive links.
 
 ## 🧪 Testing
 
