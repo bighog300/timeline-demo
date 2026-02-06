@@ -28,7 +28,7 @@ jobs:
           cache: 'pnpm'
       
       - name: Install pnpm
-        run: corepack prepare pnpm@9 --activate
+        run: corepack prepare pnpm@9.15.9 --activate
       
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -74,7 +74,7 @@ jobs:
           cache: 'pnpm'
       
       - name: Install pnpm
-        run: corepack prepare pnpm@9 --activate
+        run: corepack prepare pnpm@9.15.9 --activate
       
       - name: Verify lockfile exists
         run: |
