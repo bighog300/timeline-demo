@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 
 import Badge from '../components/ui/Badge';
@@ -32,6 +32,7 @@ const formatDateRange = (start: string, end: string) => {
   const formatter = new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
+    year: 'numeric',
   });
   return `${formatter.format(startDate)} - ${formatter.format(endDate)}`;
 };
@@ -40,6 +41,9 @@ export default function EventsPageClient() {
   const [events, setEvents] = useState<EventItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [tagFilter, setTagFilter] = useState('all');
 
   const loadEvents = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
@@ -67,6 +71,42 @@ export default function EventsPageClient() {
     loadEvents(controller.signal);
     return () => controller.abort();
   }, [loadEvents]);
+
+  const categories = useMemo(() => {
+    const unique = new Set(events.map((eventItem) => eventItem.category).filter(Boolean));
+    return ['all', ...Array.from(unique).sort()];
+  }, [events]);
+
+  const tags = useMemo(() => {
+    const unique = new Set(events.flatMap((eventItem) => eventItem.tags ?? []).filter(Boolean));
+    return ['all', ...Array.from(unique).sort()];
+  }, [events]);
+
+  const normalizedSearch = searchTerm.trim().toLowerCase();
+  const filteredEvents = useMemo(() => {
+    return events.filter((eventItem) => {
+      const matchesCategory =
+        categoryFilter === 'all' || eventItem.category === categoryFilter;
+      const matchesTag =
+        tagFilter === 'all' || eventItem.tags?.includes(tagFilter) === true;
+      const matchesSearch =
+        normalizedSearch.length === 0 ||
+        [eventItem.title, eventItem.venue, eventItem.city, eventItem.category, ...eventItem.tags]
+          .join(' ')
+          .toLowerCase()
+          .includes(normalizedSearch);
+      return matchesCategory && matchesTag && matchesSearch;
+    });
+  }, [events, categoryFilter, tagFilter, normalizedSearch]);
+
+  const hasActiveFilters =
+    searchTerm.trim().length > 0 || categoryFilter !== 'all' || tagFilter !== 'all';
+
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setCategoryFilter('all');
+    setTagFilter('all');
+  };
 
   return (
     <section className={styles.page}>
@@ -105,36 +145,107 @@ export default function EventsPageClient() {
           <p>Check back soon for new experiences added to the timeline.</p>
         </Card>
       ) : (
-        <div className={styles.grid}>
-          {events.map((eventItem) => (
-            <Card key={eventItem.id} className={styles.eventCard}>
-              <div className={styles.cardHeader}>
-                <div>
-                  <h2>{eventItem.title}</h2>
-                  <p className={styles.date}>{formatDateRange(eventItem.start, eventItem.end)}</p>
-                </div>
-                <Badge tone="accent">{eventItem.category}</Badge>
-              </div>
-              <p className={styles.location}>
-                {eventItem.venue} • {eventItem.city}
-              </p>
-              <div className={styles.metaRow}>
-                <span className={styles.price}>{eventItem.price_range}</span>
-                <div className={styles.tagRow}>
-                  {eventItem.tags.map((tag) => (
-                    <Badge key={`${eventItem.id}-${tag}`} tone="neutral">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-              {eventItem.url ? (
-                <Link className={styles.link} href={eventItem.url} target="_blank">
-                  View details
-                </Link>
-              ) : null}
+        <div className={styles.resultsSection}>
+          <div className={styles.filters}>
+            <div className={styles.searchField}>
+              <label className="sr-only" htmlFor="events-search">
+                Search events
+              </label>
+              <input
+                id="events-search"
+                type="search"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Search by title, venue, city, or tag"
+                className={styles.searchInput}
+              />
+            </div>
+            <div className={styles.filterGroup}>
+              <label className={styles.filterLabel} htmlFor="events-category">
+                Category
+              </label>
+              <select
+                id="events-category"
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+                className={styles.select}
+              >
+                {categories.map((category) => (
+                  <option key={category} value={category}>
+                    {category === 'all' ? 'All categories' : category}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className={styles.filterGroup}>
+              <label className={styles.filterLabel} htmlFor="events-tag">
+                Tag
+              </label>
+              <select
+                id="events-tag"
+                value={tagFilter}
+                onChange={(event) => setTagFilter(event.target.value)}
+                className={styles.select}
+              >
+                {tags.map((tag) => (
+                  <option key={tag} value={tag}>
+                    {tag === 'all' ? 'All tags' : tag}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleClearFilters}
+              disabled={!hasActiveFilters}
+            >
+              Clear filters
+            </Button>
+          </div>
+
+          <p className={styles.resultsCount}>{filteredEvents.length} results</p>
+
+          {filteredEvents.length === 0 ? (
+            <Card>
+              <h2>No matches</h2>
+              <p>Try a different search term or adjust the filters.</p>
             </Card>
-          ))}
+          ) : (
+            <div className={styles.grid}>
+              {filteredEvents.map((eventItem) => (
+                <Card key={eventItem.id} className={styles.eventCard}>
+                  <div className={styles.cardHeader}>
+                    <div>
+                      <h2>{eventItem.title}</h2>
+                      <p className={styles.date}>
+                        {formatDateRange(eventItem.start, eventItem.end)}
+                      </p>
+                    </div>
+                    <Badge tone="accent">{eventItem.category}</Badge>
+                  </div>
+                  <p className={styles.location}>
+                    {eventItem.venue} • {eventItem.city}
+                  </p>
+                  <div className={styles.metaRow}>
+                    <span className={styles.price}>{eventItem.price_range}</span>
+                    <div className={styles.tagRow}>
+                      {eventItem.tags.map((tag) => (
+                        <Badge key={`${eventItem.id}-${tag}`} tone="neutral">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                  {eventItem.url ? (
+                    <Link className={styles.link} href={eventItem.url} target="_blank">
+                      View details
+                    </Link>
+                  ) : null}
+                </Card>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </section>

@@ -36,6 +36,13 @@
   gap: 12px;
 }
 
+.chatHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .chatHistory {
   display: grid;
   gap: 12px;
@@ -128,6 +135,11 @@
   display: grid;
   gap: 8px;
   color: var(--text);
+}
+
+.relatedSkeletons {
+  display: grid;
+  gap: 8px;
 }
 
 .emptyMeta {
