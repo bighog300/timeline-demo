@@ -19,6 +19,12 @@ describe('GET /api/timeline/selection/list', () => {
     const response = await GET(new Request('http://localhost/api/timeline/selection/list') as never);
 
     expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({ error: 'reconnect_required' });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'reconnect_required',
+        message: 'Reconnect required.',
+      },
+      error_code: 'reconnect_required',
+    });
   });
 });

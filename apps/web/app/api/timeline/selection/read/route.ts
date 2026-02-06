@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { jsonError } from '../../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../../lib/googleAuth';
 import { createDriveClient } from '../../../../lib/googleDrive';
+import { logGoogleError, mapGoogleError } from '../../../../lib/googleRequest';
 import { readSelectionSetFromDrive } from '../../../../lib/readSelectionSetFromDrive';
 
 export const GET = async (request: NextRequest) => {
@@ -9,16 +11,16 @@ export const GET = async (request: NextRequest) => {
   const accessToken = await getGoogleAccessToken();
 
   if (!session || !accessToken) {
-    return NextResponse.json({ error: 'reconnect_required' }, { status: 401 });
+    return jsonError(401, 'reconnect_required', 'Reconnect required.');
   }
 
   if (!session.driveFolderId) {
-    return NextResponse.json({ error: 'drive_not_provisioned' }, { status: 400 });
+    return jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
   }
 
   const fileId = request.nextUrl.searchParams.get('fileId');
   if (!fileId) {
-    return NextResponse.json({ error: 'missing_file_id' }, { status: 400 });
+    return jsonError(400, 'invalid_request', 'File id is required.');
   }
 
   const drive = createDriveClient(accessToken);
@@ -26,15 +28,13 @@ export const GET = async (request: NextRequest) => {
   try {
     const selectionSet = await readSelectionSetFromDrive(drive, session.driveFolderId, fileId);
     if (!selectionSet) {
-      return NextResponse.json({ error: 'selection_not_found' }, { status: 404 });
+      return jsonError(400, 'invalid_request', 'Selection set not found.');
     }
 
     return NextResponse.json({ set: selectionSet });
   } catch (error) {
-    console.warn('Failed to read selection set', {
-      fileId,
-      error: error instanceof Error ? error.message : 'unknown_error',
-    });
-    return NextResponse.json({ error: 'selection_unavailable' }, { status: 500 });
+    logGoogleError(error, 'drive.files.get');
+    const mapped = mapGoogleError(error, 'drive.files.get');
+    return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
   }
 };

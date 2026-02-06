@@ -153,6 +153,34 @@ they are missing.
   - Summary artifacts: title, summary, highlights, source metadata
   - Selection sets: name, notes, item titles/ids
 
+### Phase 4A Hardening & Rate Limits
+
+- **Standardized API errors**: All Google/Timeline routes return a consistent error payload:
+  ```json
+  {
+    "error": { "code": "rate_limited", "message": "Too many requests." },
+    "error_code": "rate_limited"
+  }
+  ```
+  | Code | Status | Meaning |
+  | --- | --- | --- |
+  | reconnect_required | 401 | Google session missing or expired |
+  | drive_not_provisioned | 400 | Drive folder has not been provisioned |
+  | query_too_short | 400 | Search query is under 2 characters |
+  | too_many_items | 400 | Summarize request exceeded the item cap |
+  | invalid_request | 400 | Request failed validation |
+  | rate_limited | 429 | Too many requests within the rate window |
+  | upstream_timeout | 504 | Google API timed out |
+  | upstream_error | 502 | Google API error |
+- **Best-effort rate limiting**: Timeline routes enforce in-process limits (per-user or per-IP
+  fallback). Because Vercel serverless instances are ephemeral, limits are soft and reset between
+  cold starts.
+- **Retry + timeout behavior**: Google API calls retry on transient failures (429/5xx) with
+  exponential backoff (base 250ms, max 2s, 4 attempts) and honor `Retry-After` when present. Each
+  request is wrapped in an 8s timeout to keep UI errors responsive.
+- **Partial search responses**: Search requests cap Drive JSON downloads per call; when the cap is
+  hit the response is marked `partial` and the UI prompts you to refine the query.
+
 #### Manual Test Steps
 
 1. Connect your Google account and provision the Drive folder.

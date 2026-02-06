@@ -1,5 +1,6 @@
 import type { drive_v3 } from 'googleapis';
 
+import { DEFAULT_GOOGLE_TIMEOUT_MS, withRetry, withTimeout } from './googleRequest';
 import type { SelectionSet } from './types';
 import { isSelectionSet, normalizeSelectionSet } from './validateSelectionSet';
 
@@ -19,17 +20,36 @@ export const readSelectionSetFromDrive = async (
   folderId: string,
   fileId: string,
 ): Promise<SelectionSet | null> => {
-  const metadata = await drive.files.get({
-    fileId,
-    fields: 'id, name, parents, modifiedTime, webViewLink',
-  });
+  const metadata = await withRetry((signal) =>
+    withTimeout(
+      (timeoutSignal) =>
+        drive.files.get(
+          {
+            fileId,
+            fields: 'id, name, parents, modifiedTime, webViewLink',
+          },
+          { signal: timeoutSignal },
+        ),
+      DEFAULT_GOOGLE_TIMEOUT_MS,
+      'upstream_timeout',
+      signal,
+    ),
+  );
 
   const parents = metadata.data.parents ?? [];
   if (!parents.includes(folderId)) {
     return null;
   }
 
-  const contentResponse = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'json' });
+  const contentResponse = await withRetry((signal) =>
+    withTimeout(
+      (timeoutSignal) =>
+        drive.files.get({ fileId, alt: 'media' }, { responseType: 'json', signal: timeoutSignal }),
+      DEFAULT_GOOGLE_TIMEOUT_MS,
+      'upstream_timeout',
+      signal,
+    ),
+  );
   const parsed = parseDriveJson(contentResponse.data);
 
   if (!isSelectionSet(parsed)) {

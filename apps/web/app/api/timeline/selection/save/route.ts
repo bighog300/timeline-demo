@@ -1,8 +1,11 @@
 import { randomUUID } from 'crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { jsonError } from '../../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../../lib/googleAuth';
 import { createDriveClient } from '../../../../lib/googleDrive';
+import { logGoogleError, mapGoogleError } from '../../../../lib/googleRequest';
+import { checkRateLimit, getRateLimitKey } from '../../../../lib/rateLimit';
 import { readSelectionSetFromDrive } from '../../../../lib/readSelectionSetFromDrive';
 import type { SelectionSet, SelectionSetItem } from '../../../../lib/types';
 import { writeSelectionSetToDrive } from '../../../../lib/writeSelectionSetToDrive';
@@ -81,27 +84,35 @@ export const POST = async (request: NextRequest) => {
   const accessToken = await getGoogleAccessToken();
 
   if (!session || !accessToken) {
-    return NextResponse.json({ error: 'reconnect_required' }, { status: 401 });
+    return jsonError(401, 'reconnect_required', 'Reconnect required.');
   }
 
   if (!session.driveFolderId) {
-    return NextResponse.json({ error: 'drive_not_provisioned' }, { status: 400 });
+    return jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
+  }
+
+  const rateKey = getRateLimitKey(request, session);
+  const rateStatus = checkRateLimit(rateKey, { limit: 30, windowMs: 60_000 });
+  if (!rateStatus.allowed) {
+    return jsonError(429, 'rate_limited', 'Too many requests. Try again in a moment.', {
+      retryAfterMs: rateStatus.resetMs,
+    });
   }
 
   let payload: SavePayload = {};
   try {
     payload = (await request.json()) as SavePayload;
   } catch {
-    return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
+    return jsonError(400, 'invalid_request', 'Invalid request payload.');
   }
 
   if (!isRecord(payload)) {
-    return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
+    return jsonError(400, 'invalid_request', 'Invalid request payload.');
   }
 
   const validated = validatePayload(payload);
   if (!validated.ok) {
-    return NextResponse.json({ error: 'invalid_payload', message: validated.error }, { status: 400 });
+    return jsonError(400, 'invalid_request', validated.error);
   }
 
   const drive = createDriveClient(accessToken);
@@ -109,13 +120,20 @@ export const POST = async (request: NextRequest) => {
   let selectionSet = buildSelectionSet(validated.payload, session.driveFolderId, now);
 
   if (validated.payload.driveFileId) {
-    const existing = await readSelectionSetFromDrive(
-      drive,
-      session.driveFolderId,
-      validated.payload.driveFileId,
-    );
+    let existing;
+    try {
+      existing = await readSelectionSetFromDrive(
+        drive,
+        session.driveFolderId,
+        validated.payload.driveFileId,
+      );
+    } catch (error) {
+      logGoogleError(error, 'drive.files.get');
+      const mapped = mapGoogleError(error, 'drive.files.get');
+      return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+    }
     if (!existing) {
-      return NextResponse.json({ error: 'selection_not_found' }, { status: 404 });
+      return jsonError(400, 'invalid_request', 'Selection set not found.');
     }
 
     selectionSet = {
@@ -127,7 +145,14 @@ export const POST = async (request: NextRequest) => {
     };
   }
 
-  const writeResult = await writeSelectionSetToDrive(drive, session.driveFolderId, selectionSet);
+  let writeResult;
+  try {
+    writeResult = await writeSelectionSetToDrive(drive, session.driveFolderId, selectionSet);
+  } catch (error) {
+    logGoogleError(error, 'drive.files.create');
+    const mapped = mapGoogleError(error, 'drive.files.create');
+    return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+  }
 
   const updatedSet = {
     ...selectionSet,

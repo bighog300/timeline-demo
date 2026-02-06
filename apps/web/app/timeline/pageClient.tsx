@@ -7,6 +7,7 @@ import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import { artifactKey, mergeArtifacts } from '../lib/artifactMerge';
+import { parseApiError } from '../lib/apiErrors';
 import { mergeSelectionItems } from '../lib/selectionMerge';
 import type { SelectionSet, SelectionSetItem, SummaryArtifact } from '../lib/types';
 import { isSummaryArtifact, normalizeArtifact } from '../lib/validateArtifact';
@@ -36,9 +37,20 @@ type TimelineItem = {
   timestamp?: string;
 };
 
-type SummarizeError = 'reconnect_required' | 'drive_not_provisioned' | 'generic' | null;
-type SyncError = 'reconnect_required' | 'drive_not_provisioned' | 'generic' | null;
-type SelectionSetError = 'reconnect_required' | 'drive_not_provisioned' | 'generic' | null;
+type ApiSurfaceError =
+  | 'reconnect_required'
+  | 'drive_not_provisioned'
+  | 'rate_limited'
+  | 'upstream_timeout'
+  | 'upstream_error'
+  | 'too_many_items'
+  | 'invalid_request'
+  | 'generic'
+  | null;
+
+type SummarizeError = ApiSurfaceError;
+type SyncError = ApiSurfaceError;
+type SelectionSetError = ApiSurfaceError;
 
 type FailedItem = {
   source: 'gmail' | 'drive';
@@ -70,6 +82,9 @@ type SearchError =
   | 'drive_not_provisioned'
   | 'query_too_short'
   | 'query_too_long'
+  | 'rate_limited'
+  | 'upstream_timeout'
+  | 'upstream_error'
   | 'generic'
   | null;
 
@@ -191,6 +206,7 @@ export default function TimelinePageClient() {
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [error, setError] = useState<SummarizeError>(null);
   const [failedItems, setFailedItems] = useState<FailedItem[]>([]);
+  const [summarizeCooldownUntil, setSummarizeCooldownUntil] = useState<number | null>(null);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<SyncError>(null);
@@ -227,6 +243,21 @@ export default function TimelinePageClient() {
     setLastSyncISO(window.localStorage.getItem(LAST_SYNC_KEY));
     setHasHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!summarizeCooldownUntil) {
+      return;
+    }
+
+    const delay = summarizeCooldownUntil - Date.now();
+    if (delay <= 0) {
+      setSummarizeCooldownUntil(null);
+      return;
+    }
+
+    const handle = window.setTimeout(() => setSummarizeCooldownUntil(null), delay);
+    return () => window.clearTimeout(handle);
+  }, [summarizeCooldownUntil]);
 
   const timelineItems = useMemo(() => {
     const gmailItems: TimelineItem[] = gmailSelections.map((message) => ({
@@ -266,6 +297,7 @@ export default function TimelinePageClient() {
   );
 
   const pendingCount = timelineItems.length - summarizedCount;
+  const isSummarizeCoolingDown = summarizeCooldownUntil !== null;
 
   const toggleExpanded = (key: string) => {
     setExpandedKeys((prev) => {
@@ -297,22 +329,29 @@ export default function TimelinePageClient() {
         }),
       });
 
-      if (response.status === 401) {
-        setError('reconnect_required');
-        return;
-      }
-
-      if (response.status === 400) {
-        const payload = (await response.json()) as { error?: string };
-        if (payload?.error === 'drive_not_provisioned') {
+      if (!response.ok) {
+        const apiError = await parseApiError(response);
+        if (apiError?.code === 'reconnect_required') {
+          setError('reconnect_required');
+          return;
+        }
+        if (apiError?.code === 'drive_not_provisioned') {
           setError('drive_not_provisioned');
           return;
         }
-        setError('generic');
-        return;
-      }
-
-      if (!response.ok) {
+        if (apiError?.code === 'too_many_items') {
+          setError('too_many_items');
+          return;
+        }
+        if (apiError?.code === 'rate_limited') {
+          setError('rate_limited');
+          setSummarizeCooldownUntil(Date.now() + 4000);
+          return;
+        }
+        if (apiError?.code === 'upstream_timeout' || apiError?.code === 'upstream_error') {
+          setError(apiError.code);
+          return;
+        }
         setError('generic');
         return;
       }
@@ -345,22 +384,24 @@ export default function TimelinePageClient() {
     try {
       const response = await fetch('/api/timeline/artifacts/list');
 
-      if (response.status === 401) {
-        setSyncError('reconnect_required');
-        return;
-      }
-
-      if (response.status === 400) {
-        const payload = (await response.json()) as { error?: string };
-        if (payload?.error === 'drive_not_provisioned') {
+      if (!response.ok) {
+        const apiError = await parseApiError(response);
+        if (apiError?.code === 'reconnect_required') {
+          setSyncError('reconnect_required');
+          return;
+        }
+        if (apiError?.code === 'drive_not_provisioned') {
           setSyncError('drive_not_provisioned');
           return;
         }
-        setSyncError('generic');
-        return;
-      }
-
-      if (!response.ok) {
+        if (apiError?.code === 'rate_limited') {
+          setSyncError('rate_limited');
+          return;
+        }
+        if (apiError?.code === 'upstream_timeout' || apiError?.code === 'upstream_error') {
+          setSyncError(apiError.code);
+          return;
+        }
         setSyncError('generic');
         return;
       }
@@ -420,22 +461,24 @@ export default function TimelinePageClient() {
     try {
       const response = await fetch('/api/timeline/selection/list');
 
-      if (response.status === 401) {
-        setSelectionError('reconnect_required');
-        return;
-      }
-
-      if (response.status === 400) {
-        const payload = (await response.json()) as { error?: string };
-        if (payload?.error === 'drive_not_provisioned') {
+      if (!response.ok) {
+        const apiError = await parseApiError(response);
+        if (apiError?.code === 'reconnect_required') {
+          setSelectionError('reconnect_required');
+          return;
+        }
+        if (apiError?.code === 'drive_not_provisioned') {
           setSelectionError('drive_not_provisioned');
           return;
         }
-        setSelectionError('generic');
-        return;
-      }
-
-      if (!response.ok) {
+        if (apiError?.code === 'rate_limited') {
+          setSelectionError('rate_limited');
+          return;
+        }
+        if (apiError?.code === 'upstream_timeout' || apiError?.code === 'upstream_error') {
+          setSelectionError(apiError.code);
+          return;
+        }
         setSelectionError('generic');
         return;
       }
@@ -458,22 +501,24 @@ export default function TimelinePageClient() {
       try {
         const response = await fetch(`/api/timeline/selection/read?fileId=${fileId}`);
 
-        if (response.status === 401) {
-          setPreviewError('reconnect_required');
-          return;
-        }
-
-        if (response.status === 400) {
-          const payload = (await response.json()) as { error?: string };
-          if (payload?.error === 'drive_not_provisioned') {
+        if (!response.ok) {
+          const apiError = await parseApiError(response);
+          if (apiError?.code === 'reconnect_required') {
+            setPreviewError('reconnect_required');
+            return;
+          }
+          if (apiError?.code === 'drive_not_provisioned') {
             setPreviewError('drive_not_provisioned');
             return;
           }
-          setPreviewError('generic');
-          return;
-        }
-
-        if (!response.ok) {
+          if (apiError?.code === 'rate_limited') {
+            setPreviewError('rate_limited');
+            return;
+          }
+          if (apiError?.code === 'upstream_timeout' || apiError?.code === 'upstream_error') {
+            setPreviewError(apiError.code);
+            return;
+          }
           setPreviewError('generic');
           return;
         }
@@ -527,30 +572,28 @@ export default function TimelinePageClient() {
           return;
         }
 
-        if (response.status === 401) {
-          setSearchError('reconnect_required');
-          return;
-        }
-
-        if (response.status === 400) {
-          const payload = (await response.json()) as { error?: string };
-          if (payload?.error === 'drive_not_provisioned') {
+        if (!response.ok) {
+          const apiError = await parseApiError(response);
+          if (apiError?.code === 'reconnect_required') {
+            setSearchError('reconnect_required');
+            return;
+          }
+          if (apiError?.code === 'drive_not_provisioned') {
             setSearchError('drive_not_provisioned');
             return;
           }
-          if (payload?.error === 'query_too_short') {
+          if (apiError?.code === 'query_too_short') {
             setSearchError('query_too_short');
             return;
           }
-          if (payload?.error === 'query_too_long') {
-            setSearchError('query_too_long');
+          if (apiError?.code === 'rate_limited') {
+            setSearchError('rate_limited');
             return;
           }
-          setSearchError('generic');
-          return;
-        }
-
-        if (!response.ok) {
+          if (apiError?.code === 'upstream_timeout' || apiError?.code === 'upstream_error') {
+            setSearchError(apiError.code);
+            return;
+          }
           setSearchError('generic');
           return;
         }
@@ -599,6 +642,14 @@ export default function TimelinePageClient() {
     },
     [clearSearchState, runSearch, searchQuery, searchType],
   );
+
+  const handleSearchRetry = useCallback(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed || trimmed.length < 2 || trimmed.length > 100) {
+      return;
+    }
+    void runSearch(trimmed, searchType);
+  }, [runSearch, searchQuery, searchType]);
 
   const handleViewSummary = useCallback(
     (fileId: string) => {
@@ -704,22 +755,28 @@ export default function TimelinePageClient() {
         body: JSON.stringify(payload),
       });
 
-      if (response.status === 401) {
-        setSelectionError('reconnect_required');
-        return;
-      }
-
-      if (response.status === 400) {
-        const errorPayload = (await response.json()) as { error?: string; message?: string };
-        if (errorPayload?.error === 'drive_not_provisioned') {
+      if (!response.ok) {
+        const apiError = await parseApiError(response);
+        if (apiError?.code === 'reconnect_required') {
+          setSelectionError('reconnect_required');
+          return;
+        }
+        if (apiError?.code === 'drive_not_provisioned') {
           setSelectionError('drive_not_provisioned');
           return;
         }
-        setSaveError(errorPayload?.message || 'Unable to save selection set.');
-        return;
-      }
-
-      if (!response.ok) {
+        if (apiError?.code === 'rate_limited') {
+          setSelectionError('rate_limited');
+          return;
+        }
+        if (apiError?.code === 'upstream_timeout' || apiError?.code === 'upstream_error') {
+          setSelectionError(apiError.code);
+          return;
+        }
+        if (apiError?.code === 'invalid_request' && apiError.message) {
+          setSaveError(apiError.message);
+          return;
+        }
         setSaveError('Unable to save selection set.');
         return;
       }
@@ -841,7 +898,7 @@ export default function TimelinePageClient() {
           <div className={styles.actionRow}>
             <Button
               variant="secondary"
-              disabled={timelineItems.length === 0 || isSummarizing}
+              disabled={timelineItems.length === 0 || isSummarizing || isSummarizeCoolingDown}
               onClick={handleSummarize}
             >
               {isSummarizing ? 'Generating...' : 'Generate summaries'}
@@ -918,12 +975,24 @@ export default function TimelinePageClient() {
 
         {searchError === 'reconnect_required' ? searchReconnectNotice : null}
         {searchError === 'drive_not_provisioned' ? searchProvisionNotice : null}
+        {searchError === 'rate_limited' ? (
+          <div className={styles.notice}>Too many requests — try again in a moment.</div>
+        ) : null}
+        {searchError === 'upstream_timeout' || searchError === 'upstream_error' ? (
+          <div className={styles.notice}>
+            Google returned an error — retry.
+            <Button variant="ghost" onClick={handleSearchRetry} disabled={isSearching}>
+              Retry search
+            </Button>
+          </div>
+        ) : null}
         {searchError === 'generic' ? (
           <div className={styles.notice}>Unable to search right now. Please try again.</div>
         ) : null}
         {searchPartial ? (
           <div className={styles.notice}>
-            Showing matches from a subset of files. Refine your search to see more results.
+            Showing matches from a subset of files due to the download cap. Refine your search to
+            see more results.
           </div>
         ) : null}
 
@@ -982,6 +1051,22 @@ export default function TimelinePageClient() {
 
       {error === 'reconnect_required' ? reconnectNotice : null}
       {error === 'drive_not_provisioned' ? provisionNotice : null}
+      {error === 'rate_limited' ? (
+        <div className={styles.notice}>Too many requests — try again in a moment.</div>
+      ) : null}
+      {error === 'upstream_timeout' || error === 'upstream_error' ? (
+        <div className={styles.notice}>
+          Google returned an error — retry.
+          <Button variant="ghost" onClick={handleSummarize} disabled={isSummarizing}>
+            Retry summaries
+          </Button>
+        </div>
+      ) : null}
+      {error === 'too_many_items' ? (
+        <div className={styles.notice}>
+          Select up to 10 items before generating summaries.
+        </div>
+      ) : null}
       {error === 'generic' ? (
         <div className={styles.notice}>Unable to generate summaries. Please try again.</div>
       ) : null}
@@ -999,6 +1084,17 @@ export default function TimelinePageClient() {
       ) : null}
       {syncError === 'reconnect_required' ? syncReconnectNotice : null}
       {syncError === 'drive_not_provisioned' ? syncProvisionNotice : null}
+      {syncError === 'rate_limited' ? (
+        <div className={styles.notice}>Too many requests — try again in a moment.</div>
+      ) : null}
+      {syncError === 'upstream_timeout' || syncError === 'upstream_error' ? (
+        <div className={styles.notice}>
+          Google returned an error — retry.
+          <Button variant="ghost" onClick={handleSyncFromDrive} disabled={isSyncing}>
+            Retry sync
+          </Button>
+        </div>
+      ) : null}
       {syncError === 'generic' ? (
         <div className={styles.notice}>Unable to sync from Drive. Please try again.</div>
       ) : null}
@@ -1024,6 +1120,17 @@ export default function TimelinePageClient() {
 
         {selectionError === 'reconnect_required' ? selectionReconnectNotice : null}
         {selectionError === 'drive_not_provisioned' ? selectionProvisionNotice : null}
+        {selectionError === 'rate_limited' ? (
+          <div className={styles.notice}>Too many requests — try again in a moment.</div>
+        ) : null}
+        {selectionError === 'upstream_timeout' || selectionError === 'upstream_error' ? (
+          <div className={styles.notice}>
+            Google returned an error — retry.
+            <Button variant="ghost" onClick={fetchSelectionSets} disabled={isLoadingSets}>
+              Retry list
+            </Button>
+          </div>
+        ) : null}
         {selectionError === 'generic' ? (
           <div className={styles.notice}>Unable to load selection sets. Please try again.</div>
         ) : null}
@@ -1125,6 +1232,12 @@ export default function TimelinePageClient() {
 
         {previewError === 'reconnect_required' ? selectionReconnectNotice : null}
         {previewError === 'drive_not_provisioned' ? selectionProvisionNotice : null}
+        {previewError === 'rate_limited' ? (
+          <div className={styles.notice}>Too many requests — try again in a moment.</div>
+        ) : null}
+        {previewError === 'upstream_timeout' || previewError === 'upstream_error' ? (
+          <div className={styles.notice}>Google returned an error — retry.</div>
+        ) : null}
         {previewError === 'generic' ? (
           <div className={styles.notice}>Unable to load that selection set.</div>
         ) : null}

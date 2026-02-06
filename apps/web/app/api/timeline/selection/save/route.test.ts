@@ -24,10 +24,16 @@ describe('POST /api/timeline/selection/save', () => {
     );
 
     expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({ error: 'reconnect_required' });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'reconnect_required',
+        message: 'Reconnect required.',
+      },
+      error_code: 'reconnect_required',
+    });
   });
 
-  it('returns invalid_payload when validation fails', async () => {
+  it('returns invalid_request when validation fails', async () => {
     mockGetGoogleSession.mockResolvedValue({ driveFolderId: 'folder-1' } as never);
     mockGetGoogleAccessToken.mockResolvedValue('token');
 
@@ -40,8 +46,11 @@ describe('POST /api/timeline/selection/save', () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: 'invalid_payload',
-      message: 'Name must be between 1 and 80 characters.',
+      error: {
+        code: 'invalid_request',
+        message: 'Name must be between 1 and 80 characters.',
+      },
+      error_code: 'invalid_request',
     });
   });
 });

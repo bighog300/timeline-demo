@@ -21,7 +21,13 @@ describe('GET /api/timeline/search', () => {
     );
 
     expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({ error: 'reconnect_required' });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'reconnect_required',
+        message: 'Reconnect required.',
+      },
+      error_code: 'reconnect_required',
+    });
   });
 
   it('returns query_too_short for short queries', async () => {
@@ -33,6 +39,12 @@ describe('GET /api/timeline/search', () => {
     );
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: 'query_too_short' });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'query_too_short',
+        message: 'Query must be at least 2 characters.',
+      },
+      error_code: 'query_too_short',
+    });
   });
 });

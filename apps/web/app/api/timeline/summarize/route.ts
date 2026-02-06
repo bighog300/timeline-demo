@@ -1,9 +1,11 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { jsonError } from '../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../lib/googleAuth';
 import { createDriveClient } from '../../../lib/googleDrive';
 import { createGmailClient } from '../../../lib/googleGmail';
 import { fetchDriveFileText, fetchGmailMessageText } from '../../../lib/fetchSourceText';
+import { checkRateLimit, getRateLimitKey } from '../../../lib/rateLimit';
 import { summarizeDeterministic } from '../../../lib/summarize';
 import type { SummaryArtifact } from '../../../lib/types';
 import { writeArtifactToDrive } from '../../../lib/writeArtifactToDrive';
@@ -35,24 +37,34 @@ export const POST = async (request: NextRequest) => {
   const accessToken = await getGoogleAccessToken();
 
   if (!session || !accessToken) {
-    return NextResponse.json({ error: 'reconnect_required' }, { status: 401 });
+    return jsonError(401, 'reconnect_required', 'Reconnect required.');
   }
 
   if (!session.driveFolderId) {
-    return NextResponse.json({ error: 'drive_not_provisioned' }, { status: 400 });
+    return jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
+  }
+
+  const rateKey = getRateLimitKey(request, session);
+  const rateStatus = checkRateLimit(rateKey, { limit: 10, windowMs: 60_000 });
+  if (!rateStatus.allowed) {
+    return jsonError(429, 'rate_limited', 'Too many requests. Try again in a moment.', {
+      retryAfterMs: rateStatus.resetMs,
+    });
   }
 
   let body: SummarizeRequest | null = null;
   try {
     body = (await request.json()) as SummarizeRequest;
   } catch {
-    return NextResponse.json({ error: 'invalid_request' }, { status: 400 });
+    return jsonError(400, 'invalid_request', 'Invalid request payload.');
   }
 
   const items = Array.isArray(body?.items) ? body.items.filter(isValidItem) : [];
 
   if (items.length > MAX_ITEMS) {
-    return NextResponse.json({ error: 'too_many_items' }, { status: 400 });
+    return jsonError(400, 'too_many_items', 'Too many items requested.', {
+      limit: MAX_ITEMS,
+    });
   }
 
   const gmail = createGmailClient(accessToken);
