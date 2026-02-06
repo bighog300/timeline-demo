@@ -25,6 +25,9 @@ type SearchResult = {
   driveWebViewLink?: string;
   title: string;
   updatedAtISO?: string;
+  source?: 'gmail' | 'drive';
+  sourceId?: string;
+  createdAtISO?: string;
   snippet: string;
   matchFields: string[];
 };
@@ -251,6 +254,9 @@ export const GET = async (request: NextRequest | Request) => {
           driveWebViewLink: file.webViewLink ?? normalized.driveWebViewLink ?? undefined,
           title: normalized.title,
           updatedAtISO: file.modifiedTime ?? normalized.createdAtISO,
+          source: normalized.source,
+          sourceId: normalized.sourceId,
+          createdAtISO: normalized.createdAtISO,
           snippet: match.snippet,
           matchFields: match.fields,
         });

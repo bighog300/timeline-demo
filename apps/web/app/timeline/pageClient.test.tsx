@@ -650,4 +650,132 @@ describe('TimelinePageClient', () => {
     expect(previewDetails).toHaveAttribute('open');
     expect(screen.getByText(/preview text from the message body/i)).toBeInTheDocument();
   });
+
+  it('renders grouping controls and switches to weekly view', async () => {
+    setSelections();
+    window.localStorage.setItem(
+      'timeline.driveSelections',
+      JSON.stringify([
+        { id: 'file-1', name: 'Spec', mimeType: 'text/plain', modifiedTime: '2024-01-08T00:00:00Z' },
+      ]),
+    );
+    mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /day/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /week/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /month/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /week/i }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/week of/i).length).toBeGreaterThan(0);
+    });
+  });
+
+  it('filters entries and clears filters', async () => {
+    setSelections();
+    window.localStorage.setItem(
+      'timeline.driveSelections',
+      JSON.stringify([
+        { id: 'file-1', name: 'Spec', mimeType: 'text/plain', modifiedTime: '2024-01-03T00:00:00Z' },
+      ]),
+    );
+    mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Hello' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Spec' })).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText('Source'), {
+      target: { value: 'gmail' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Hello' })).toBeInTheDocument();
+      expect(screen.queryByRole('heading', { name: 'Spec' })).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /clear all filters/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Spec' })).toBeInTheDocument();
+    });
+  });
+
+  it('jumps to a timeline entry from search results', async () => {
+    setSelections();
+    mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url.startsWith('/api/timeline/search')) {
+        return new Response(
+          JSON.stringify({
+            q: 'hello',
+            type: 'summary',
+            results: [
+              {
+                kind: 'summary',
+                driveFileId: 'summary-1',
+                title: 'Hello',
+                updatedAtISO: '2024-01-02T00:00:00Z',
+                snippet: 'Matched',
+                matchFields: ['title'],
+                source: 'gmail',
+                sourceId: 'msg-1',
+                createdAtISO: '2024-01-02T00:00:00Z',
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    const scrollSpy = vi.fn();
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(0);
+      return 0;
+    });
+    Element.prototype.scrollIntoView = scrollSpy;
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Hello' })).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/search summaries or selection sets/i), {
+      target: { value: 'hello' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /search/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /jump to item/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /jump to item/i }));
+
+    await waitFor(() => {
+      expect(scrollSpy).toHaveBeenCalled();
+    });
+  });
 });

@@ -1,13 +1,16 @@
-import React, { type ReactNode } from 'react';
+import React, { type HTMLAttributes, type ReactNode } from 'react';
 
 import styles from './Card.module.css';
 
-type CardProps = {
+type CardProps = HTMLAttributes<HTMLDivElement> & {
   children: ReactNode;
-  className?: string;
 };
 
-export default function Card({ children, className }: CardProps) {
+export default function Card({ children, className, ...props }: CardProps) {
   const classes = [styles.card, className].filter(Boolean).join(' ');
-  return <div className={classes}>{children}</div>;
+  return (
+    <div className={classes} {...props}>
+      {children}
+    </div>
+  );
 }
