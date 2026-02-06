@@ -1,97 +1,61 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-WEB_URL="${WEB_URL:-}"
-API_URL="${API_URL:-}"
-HEALTH_PATH="${HEALTH_PATH:-/api/health}"
+LOG_FILE="./.smoke-server.log"
+HEALTH_URL="http://127.0.0.1:3000/api/health"
+MAX_ATTEMPTS=60
+SLEEP_SECONDS=1
+SERVER_PID=""
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --web-url)
-      WEB_URL="$2"
-      shift 2
-      ;;
-    --api-url)
-      API_URL="$2"
-      shift 2
-      ;;
-    --health-path)
-      HEALTH_PATH="$2"
-      shift 2
-      ;;
-    -h|--help)
-      cat <<'USAGE'
-Usage: scripts/smoke-test.sh --web-url <url> [--api-url <url>] [--health-path /api/health]
-
-Options:
-  --web-url      Base URL for Web app (e.g. https://timeline-app.vercel.app)
-  --api-url      Base URL for API (defaults to web URL)
-  --health-path  Health route path for API (default: /api/health)
-
-You can also provide API_URL, WEB_URL, HEALTH_PATH as environment variables.
-USAGE
-      exit 0
-      ;;
-    *)
-      echo "❌ Unknown argument: $1"
-      exit 1
-      ;;
-  esac
-done
-
-if [[ -z "$WEB_URL" ]]; then
-  echo "❌ Missing required URL. Provide --web-url (or WEB_URL env var)."
-  exit 1
-fi
-
-trim_trailing_slash() {
-  local v="$1"
-  echo "${v%/}"
-}
-
-API_URL="$(trim_trailing_slash "$API_URL")"
-WEB_URL="$(trim_trailing_slash "$WEB_URL")"
-
-if [[ -z "$API_URL" ]]; then
-  API_URL="$WEB_URL"
-fi
-
-api_health_url="${API_URL}${HEALTH_PATH}"
-web_home_url="${WEB_URL}/"
-
-status_code() {
-  local url="$1"
-  local follow_redirects="${2:-false}"
-  if [[ "$follow_redirects" == "true" ]]; then
-    curl -sS -L -o /dev/null -w "%{http_code}" "$url"
-  else
-    curl -sS -o /dev/null -w "%{http_code}" "$url"
+cleanup() {
+  if [[ -n "${SERVER_PID}" ]] && kill -0 "${SERVER_PID}" 2>/dev/null; then
+    kill "${SERVER_PID}" 2>/dev/null || true
+    wait "${SERVER_PID}" 2>/dev/null || true
   fi
 }
 
-is_2xx() {
-  [[ "$1" =~ ^2[0-9][0-9]$ ]]
-}
+trap cleanup EXIT
 
-echo "🔎 Running smoke tests..."
-echo "API health URL: $api_health_url"
-echo "Web home URL:   $web_home_url"
+rm -f "${LOG_FILE}"
 
-api_status="$(status_code "$api_health_url" false)"
-web_status="$(status_code "$web_home_url" true)"
+pnpm --filter ./apps/web start --port 3000 >"${LOG_FILE}" 2>&1 &
+SERVER_PID=$!
 
-if is_2xx "$api_status"; then
-  echo "✅ API health check passed ($api_status)"
+attempt=1
+while [[ ${attempt} -le ${MAX_ATTEMPTS} ]]; do
+  if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
+    if wait "${SERVER_PID}"; then
+      exit_status=0
+    else
+      exit_status=$?
+    fi
+    echo "❌ Server process exited early with status ${exit_status}."
+    echo "--- Last 50 lines of ${LOG_FILE} ---"
+    tail -n 50 "${LOG_FILE}" || true
+    exit 1
+  fi
+
+  if response=$(curl -sS -m 2 "${HEALTH_URL}" 2>/dev/null); then
+    echo "✅ Server is ready. Health response:"
+    echo "${response}"
+    exit 0
+  fi
+
+  sleep "${SLEEP_SECONDS}"
+  attempt=$((attempt + 1))
+done
+
+if kill -0 "${SERVER_PID}" 2>/dev/null; then
+  kill "${SERVER_PID}" 2>/dev/null || true
+fi
+if wait "${SERVER_PID}"; then
+  exit_status=0
 else
-  echo "❌ API health check failed ($api_status) at $api_health_url"
-  exit 1
+  exit_status=$?
 fi
 
-if is_2xx "$web_status"; then
-  echo "✅ Web home check passed ($web_status)"
-else
-  echo "❌ Web home check failed ($web_status) at $web_home_url"
-  exit 1
-fi
-
-echo "✅ Smoke tests passed."
+echo "❌ Server did not become ready within ${MAX_ATTEMPTS} seconds."
+echo "Process exit status: ${exit_status}"
+echo "--- Last 50 lines of ${LOG_FILE} ---"
+tail -n 50 "${LOG_FILE}" || true
+exit 1

@@ -22,7 +22,7 @@ The app deploys as a single Next.js project (UI + API routes) from the repo root
 
 ### 1.2 Post-deploy smoke check
 ```bash
-bash scripts/smoke-test.sh --web-url https://<web-domain>
+bash scripts/smoke-test.sh
 ```
 
 ## 2) Standard Release Procedure
