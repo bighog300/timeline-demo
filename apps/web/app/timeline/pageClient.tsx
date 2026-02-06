@@ -111,6 +111,13 @@ const DEFAULT_FILTERS: TimelineFilters = {
   text: '',
 };
 
+const RequestIdNote = ({ requestId }: { requestId?: string | null }) =>
+  requestId ? (
+    <span className={styles.requestId}>
+      Request ID: <code>{requestId}</code>
+    </span>
+  ) : null;
+
 const parseStoredSelections = <T,>(key: string) => {
   if (typeof window === 'undefined') {
     return [] as T[];
@@ -252,11 +259,13 @@ export default function TimelinePageClient() {
   const [artifacts, setArtifacts] = useState<Record<string, SummaryArtifact>>({});
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [error, setError] = useState<SummarizeError>(null);
+  const [errorRequestId, setErrorRequestId] = useState<string | null>(null);
   const [failedItems, setFailedItems] = useState<FailedItem[]>([]);
   const [summarizeCooldownUntil, setSummarizeCooldownUntil] = useState<number | null>(null);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<SyncError>(null);
+  const [syncRequestId, setSyncRequestId] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [autoSyncOnOpen, setAutoSyncOnOpen] = useState(false);
   const [lastSyncISO, setLastSyncISO] = useState<string | null>(null);
@@ -268,9 +277,11 @@ export default function TimelinePageClient() {
   const [selectionSets, setSelectionSets] = useState<SelectionSetSummary[]>([]);
   const [isLoadingSets, setIsLoadingSets] = useState(false);
   const [selectionError, setSelectionError] = useState<SelectionSetError>(null);
+  const [selectionRequestId, setSelectionRequestId] = useState<string | null>(null);
   const [selectionMessage, setSelectionMessage] = useState<string | null>(null);
   const [selectionPreview, setSelectionPreview] = useState<SelectionSet | null>(null);
   const [previewError, setPreviewError] = useState<SelectionSetError>(null);
+  const [previewRequestId, setPreviewRequestId] = useState<string | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
   const [saveName, setSaveName] = useState('');
@@ -282,6 +293,7 @@ export default function TimelinePageClient() {
   const [searchType, setSearchType] = useState<SearchType>('all');
   const [searchResults, setSearchResults] = useState<TimelineSearchResult[]>([]);
   const [searchError, setSearchError] = useState<SearchError>(null);
+  const [searchRequestId, setSearchRequestId] = useState<string | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [searchPartial, setSearchPartial] = useState(false);
   const searchAbortRef = useRef<AbortController | null>(null);
@@ -290,6 +302,7 @@ export default function TimelinePageClient() {
   const [isIndexLoading, setIsIndexLoading] = useState(false);
   const [isIndexRefreshing, setIsIndexRefreshing] = useState(false);
   const [indexError, setIndexError] = useState<IndexError>(null);
+  const [indexRequestId, setIndexRequestId] = useState<string | null>(null);
   const [indexMessage, setIndexMessage] = useState<string | null>(null);
   const timelineTopRef = useRef<HTMLDivElement | null>(null);
 
@@ -416,6 +429,7 @@ export default function TimelinePageClient() {
 
     setIsSummarizing(true);
     setError(null);
+    setErrorRequestId(null);
     setFailedItems([]);
 
     try {
@@ -429,6 +443,7 @@ export default function TimelinePageClient() {
 
       if (!response.ok) {
         const apiError = await parseApiError(response);
+        setErrorRequestId(apiError?.requestId ?? null);
         if (apiError?.code === 'reconnect_required') {
           setError('reconnect_required');
           return;
@@ -469,6 +484,7 @@ export default function TimelinePageClient() {
       }
     } catch {
       setError('generic');
+      setErrorRequestId(null);
     } finally {
       setIsSummarizing(false);
     }
@@ -477,6 +493,7 @@ export default function TimelinePageClient() {
   const handleSyncFromDrive = useCallback(async () => {
     setIsSyncing(true);
     setSyncError(null);
+    setSyncRequestId(null);
     setSyncMessage(null);
 
     try {
@@ -484,6 +501,7 @@ export default function TimelinePageClient() {
 
       if (!response.ok) {
         const apiError = await parseApiError(response);
+        setSyncRequestId(apiError?.requestId ?? null);
         if (apiError?.code === 'reconnect_required') {
           setSyncError('reconnect_required');
           return;
@@ -519,6 +537,7 @@ export default function TimelinePageClient() {
       setSyncMessage(`Synced ${validArtifacts.length} artifacts from Drive`);
     } catch {
       setSyncError('generic');
+      setSyncRequestId(null);
     } finally {
       setIsSyncing(false);
     }
@@ -586,6 +605,7 @@ export default function TimelinePageClient() {
   const fetchSelectionSets = useCallback(async () => {
     setIsLoadingSets(true);
     setSelectionError(null);
+    setSelectionRequestId(null);
     setSelectionMessage(null);
 
     try {
@@ -593,6 +613,7 @@ export default function TimelinePageClient() {
 
       if (!response.ok) {
         const apiError = await parseApiError(response);
+        setSelectionRequestId(apiError?.requestId ?? null);
         if (apiError?.code === 'reconnect_required') {
           setSelectionError('reconnect_required');
           return;
@@ -617,6 +638,7 @@ export default function TimelinePageClient() {
       setSelectionSets(Array.isArray(payload.sets) ? payload.sets : []);
     } catch {
       setSelectionError('generic');
+      setSelectionRequestId(null);
     } finally {
       setIsLoadingSets(false);
     }
@@ -625,6 +647,7 @@ export default function TimelinePageClient() {
   const loadIndexStatus = useCallback(async () => {
     setIsIndexLoading(true);
     setIndexError(null);
+    setIndexRequestId(null);
     setIndexMessage(null);
 
     try {
@@ -632,6 +655,7 @@ export default function TimelinePageClient() {
 
       if (!response.ok) {
         const apiError = await parseApiError(response);
+        setIndexRequestId(apiError?.requestId ?? null);
         if (apiError?.code === 'reconnect_required') {
           setIndexError('reconnect_required');
           return;
@@ -660,6 +684,7 @@ export default function TimelinePageClient() {
       setIndexStale(Boolean(payload.indexStale));
     } catch {
       setIndexError('generic');
+      setIndexRequestId(null);
     } finally {
       setIsIndexLoading(false);
     }
@@ -668,6 +693,7 @@ export default function TimelinePageClient() {
   const refreshIndex = useCallback(async () => {
     setIsIndexRefreshing(true);
     setIndexError(null);
+    setIndexRequestId(null);
     setIndexMessage(null);
 
     try {
@@ -675,6 +701,7 @@ export default function TimelinePageClient() {
 
       if (!response.ok) {
         const apiError = await parseApiError(response);
+        setIndexRequestId(apiError?.requestId ?? null);
         if (apiError?.code === 'reconnect_required') {
           setIndexError('reconnect_required');
           return;
@@ -703,6 +730,7 @@ export default function TimelinePageClient() {
       }
     } catch {
       setIndexError('generic');
+      setIndexRequestId(null);
     } finally {
       setIsIndexRefreshing(false);
     }
@@ -712,6 +740,7 @@ export default function TimelinePageClient() {
     async (fileId: string, mode?: 'replace' | 'merge') => {
       setIsPreviewLoading(true);
       setPreviewError(null);
+      setPreviewRequestId(null);
       setSelectionMessage(null);
 
       try {
@@ -719,6 +748,7 @@ export default function TimelinePageClient() {
 
         if (!response.ok) {
           const apiError = await parseApiError(response);
+          setPreviewRequestId(apiError?.requestId ?? null);
           if (apiError?.code === 'reconnect_required') {
             setPreviewError('reconnect_required');
             return;
@@ -753,6 +783,7 @@ export default function TimelinePageClient() {
         }
       } catch {
         setPreviewError('generic');
+        setPreviewRequestId(null);
       } finally {
         setIsPreviewLoading(false);
       }
@@ -764,6 +795,7 @@ export default function TimelinePageClient() {
     setSearchResults([]);
     setSearchPartial(false);
     setSearchError(null);
+    setSearchRequestId(null);
   }, []);
 
   const runSearch = useCallback(
@@ -776,6 +808,7 @@ export default function TimelinePageClient() {
       searchAbortRef.current = controller;
       setIsSearching(true);
       setSearchError(null);
+      setSearchRequestId(null);
       setSearchPartial(false);
 
       try {
@@ -790,6 +823,7 @@ export default function TimelinePageClient() {
 
         if (!response.ok) {
           const apiError = await parseApiError(response);
+          setSearchRequestId(apiError?.requestId ?? null);
           if (apiError?.code === 'reconnect_required') {
             setSearchError('reconnect_required');
             return;
@@ -825,6 +859,7 @@ export default function TimelinePageClient() {
           return;
         }
         setSearchError('generic');
+        setSearchRequestId(null);
       } finally {
         if (!controller.signal.aborted) {
           setIsSearching(false);
@@ -844,12 +879,14 @@ export default function TimelinePageClient() {
       }
       if (trimmed.length < 2) {
         setSearchError('query_too_short');
+        setSearchRequestId(null);
         setSearchResults([]);
         setSearchPartial(false);
         return;
       }
       if (trimmed.length > 100) {
         setSearchError('query_too_long');
+        setSearchRequestId(null);
         setSearchResults([]);
         setSearchPartial(false);
         return;
@@ -955,6 +992,7 @@ export default function TimelinePageClient() {
     if (trimmed.length < 2) {
       searchAbortRef.current?.abort();
       setSearchError('query_too_short');
+      setSearchRequestId(null);
       setSearchResults([]);
       setSearchPartial(false);
       setIsSearching(false);
@@ -964,6 +1002,7 @@ export default function TimelinePageClient() {
     if (trimmed.length > 100) {
       searchAbortRef.current?.abort();
       setSearchError('query_too_long');
+      setSearchRequestId(null);
       setSearchResults([]);
       setSearchPartial(false);
       setIsSearching(false);
@@ -971,6 +1010,7 @@ export default function TimelinePageClient() {
     }
 
     setSearchError(null);
+    setSearchRequestId(null);
     const handle = window.setTimeout(() => {
       void runSearch(trimmed, searchType);
     }, 350);
@@ -1010,17 +1050,20 @@ export default function TimelinePageClient() {
   const handleSaveSelectionSet = async () => {
     if (!saveName.trim()) {
       setSaveError('Enter a name for this selection set.');
+      setSelectionRequestId(null);
       return;
     }
 
     if (selectionItems.length === 0) {
       setSaveError('Select Gmail or Drive items before saving.');
+      setSelectionRequestId(null);
       return;
     }
 
     setSaveError(null);
     setIsSaving(true);
     setSelectionMessage(null);
+    setSelectionRequestId(null);
 
     try {
       const payload = {
@@ -1038,6 +1081,7 @@ export default function TimelinePageClient() {
 
       if (!response.ok) {
         const apiError = await parseApiError(response);
+        setSelectionRequestId(apiError?.requestId ?? null);
         if (apiError?.code === 'reconnect_required') {
           setSelectionError('reconnect_required');
           return;
@@ -1074,6 +1118,7 @@ export default function TimelinePageClient() {
       }
     } catch {
       setSaveError('Unable to save selection set.');
+      setSelectionRequestId(null);
     } finally {
       setIsSaving(false);
     }
@@ -1129,64 +1174,75 @@ export default function TimelinePageClient() {
     };
   }, [selectionPreview]);
 
-  const reconnectNotice = (
+  const reconnectNotice = (requestId?: string | null) => (
     <div className={styles.notice}>
       Reconnect required. Please <Link href="/connect">connect your Google account</Link>.
+      <RequestIdNote requestId={requestId} />
     </div>
   );
 
-  const provisionNotice = (
+  const provisionNotice = (requestId?: string | null) => (
     <div className={styles.notice}>
       Provision a Drive folder to store summaries. Visit <Link href="/connect">/connect</Link>.
+      <RequestIdNote requestId={requestId} />
     </div>
   );
 
-  const syncReconnectNotice = (
+  const syncReconnectNotice = (requestId?: string | null) => (
     <div className={styles.notice}>
       Drive sync needs a reconnect. Please <Link href="/connect">connect your Google account</Link>.
+      <RequestIdNote requestId={requestId} />
     </div>
   );
 
-  const syncProvisionNotice = (
+  const syncProvisionNotice = (requestId?: string | null) => (
     <div className={styles.notice}>
       Provision a Drive folder to sync summaries. Visit <Link href="/connect">/connect</Link>.
+      <RequestIdNote requestId={requestId} />
     </div>
   );
 
-  const selectionReconnectNotice = (
+  const selectionReconnectNotice = (requestId?: string | null) => (
     <div className={styles.notice}>
-      Selection sets need a reconnect. Please <Link href="/connect">connect your Google account</Link>.
+      Selection sets need a reconnect. Please <Link href="/connect">connect your Google account</Link>
+      .
+      <RequestIdNote requestId={requestId} />
     </div>
   );
 
-  const selectionProvisionNotice = (
+  const selectionProvisionNotice = (requestId?: string | null) => (
     <div className={styles.notice}>
       Provision a Drive folder to store selection sets. Visit <Link href="/connect">/connect</Link>.
+      <RequestIdNote requestId={requestId} />
     </div>
   );
 
-  const searchReconnectNotice = (
+  const searchReconnectNotice = (requestId?: string | null) => (
     <div className={styles.notice}>
       Search needs a reconnect. Please <Link href="/connect">connect your Google account</Link>.
+      <RequestIdNote requestId={requestId} />
     </div>
   );
 
-  const searchProvisionNotice = (
+  const searchProvisionNotice = (requestId?: string | null) => (
     <div className={styles.notice}>
       Provision a Drive folder to search artifacts. Visit <Link href="/connect">/connect</Link>.
+      <RequestIdNote requestId={requestId} />
     </div>
   );
 
-  const indexReconnectNotice = (
+  const indexReconnectNotice = (requestId?: string | null) => (
     <div className={styles.notice}>
       Index status needs a reconnect. Please <Link href="/connect">connect your Google account</Link>
       .
+      <RequestIdNote requestId={requestId} />
     </div>
   );
 
-  const indexProvisionNotice = (
+  const indexProvisionNotice = (requestId?: string | null) => (
     <div className={styles.notice}>
       Provision a Drive folder to store the index. Visit <Link href="/connect">/connect</Link>.
+      <RequestIdNote requestId={requestId} />
     </div>
   );
 
@@ -1280,10 +1336,13 @@ export default function TimelinePageClient() {
           ) : null}
         </form>
 
-        {searchError === 'reconnect_required' ? searchReconnectNotice : null}
-        {searchError === 'drive_not_provisioned' ? searchProvisionNotice : null}
+        {searchError === 'reconnect_required' ? searchReconnectNotice(searchRequestId) : null}
+        {searchError === 'drive_not_provisioned' ? searchProvisionNotice(searchRequestId) : null}
         {searchError === 'rate_limited' ? (
-          <div className={styles.notice}>Too many requests — try again in a moment.</div>
+          <div className={styles.notice}>
+            Too many requests — try again in a moment.
+            <RequestIdNote requestId={searchRequestId} />
+          </div>
         ) : null}
         {searchError === 'upstream_timeout' || searchError === 'upstream_error' ? (
           <div className={styles.notice}>
@@ -1291,10 +1350,14 @@ export default function TimelinePageClient() {
             <Button variant="ghost" onClick={handleSearchRetry} disabled={isSearching}>
               Retry search
             </Button>
+            <RequestIdNote requestId={searchRequestId} />
           </div>
         ) : null}
         {searchError === 'generic' ? (
-          <div className={styles.notice}>Unable to search right now. Please try again.</div>
+          <div className={styles.notice}>
+            Unable to search right now. Please try again.
+            <RequestIdNote requestId={searchRequestId} />
+          </div>
         ) : null}
         {searchPartial ? (
           <div className={styles.notice}>
@@ -1416,24 +1479,36 @@ export default function TimelinePageClient() {
             Index may be stale. Refresh to pull the latest Drive metadata.
           </div>
         ) : null}
-        {indexError === 'reconnect_required' ? indexReconnectNotice : null}
-        {indexError === 'drive_not_provisioned' ? indexProvisionNotice : null}
+        {indexError === 'reconnect_required' ? indexReconnectNotice(indexRequestId) : null}
+        {indexError === 'drive_not_provisioned' ? indexProvisionNotice(indexRequestId) : null}
         {indexError === 'rate_limited' ? (
-          <div className={styles.notice}>Too many requests — try again in a moment.</div>
+          <div className={styles.notice}>
+            Too many requests — try again in a moment.
+            <RequestIdNote requestId={indexRequestId} />
+          </div>
         ) : null}
         {indexError === 'upstream_timeout' || indexError === 'upstream_error' ? (
-          <div className={styles.notice}>Google returned an error — retry.</div>
+          <div className={styles.notice}>
+            Google returned an error — retry.
+            <RequestIdNote requestId={indexRequestId} />
+          </div>
         ) : null}
         {indexError === 'generic' ? (
-          <div className={styles.notice}>Unable to load the index right now.</div>
+          <div className={styles.notice}>
+            Unable to load the index right now.
+            <RequestIdNote requestId={indexRequestId} />
+          </div>
         ) : null}
         {indexMessage ? <div className={styles.noticeSuccess}>{indexMessage}</div> : null}
       </Card>
 
-      {error === 'reconnect_required' ? reconnectNotice : null}
-      {error === 'drive_not_provisioned' ? provisionNotice : null}
+      {error === 'reconnect_required' ? reconnectNotice(errorRequestId) : null}
+      {error === 'drive_not_provisioned' ? provisionNotice(errorRequestId) : null}
       {error === 'rate_limited' ? (
-        <div className={styles.notice}>Too many requests — try again in a moment.</div>
+        <div className={styles.notice}>
+          Too many requests — try again in a moment.
+          <RequestIdNote requestId={errorRequestId} />
+        </div>
       ) : null}
       {error === 'upstream_timeout' || error === 'upstream_error' ? (
         <div className={styles.notice}>
@@ -1441,15 +1516,20 @@ export default function TimelinePageClient() {
           <Button variant="ghost" onClick={handleSummarize} disabled={isSummarizing}>
             Retry summaries
           </Button>
+          <RequestIdNote requestId={errorRequestId} />
         </div>
       ) : null}
       {error === 'too_many_items' ? (
         <div className={styles.notice}>
           Select up to 10 items before generating summaries.
+          <RequestIdNote requestId={errorRequestId} />
         </div>
       ) : null}
       {error === 'generic' ? (
-        <div className={styles.notice}>Unable to generate summaries. Please try again.</div>
+        <div className={styles.notice}>
+          Unable to generate summaries. Please try again.
+          <RequestIdNote requestId={errorRequestId} />
+        </div>
       ) : null}
       {failedItems.length > 0 ? (
         <div className={styles.notice}>
@@ -1463,10 +1543,13 @@ export default function TimelinePageClient() {
           </ul>
         </div>
       ) : null}
-      {syncError === 'reconnect_required' ? syncReconnectNotice : null}
-      {syncError === 'drive_not_provisioned' ? syncProvisionNotice : null}
+      {syncError === 'reconnect_required' ? syncReconnectNotice(syncRequestId) : null}
+      {syncError === 'drive_not_provisioned' ? syncProvisionNotice(syncRequestId) : null}
       {syncError === 'rate_limited' ? (
-        <div className={styles.notice}>Too many requests — try again in a moment.</div>
+        <div className={styles.notice}>
+          Too many requests — try again in a moment.
+          <RequestIdNote requestId={syncRequestId} />
+        </div>
       ) : null}
       {syncError === 'upstream_timeout' || syncError === 'upstream_error' ? (
         <div className={styles.notice}>
@@ -1474,10 +1557,14 @@ export default function TimelinePageClient() {
           <Button variant="ghost" onClick={handleSyncFromDrive} disabled={isSyncing}>
             Retry sync
           </Button>
+          <RequestIdNote requestId={syncRequestId} />
         </div>
       ) : null}
       {syncError === 'generic' ? (
-        <div className={styles.notice}>Unable to sync from Drive. Please try again.</div>
+        <div className={styles.notice}>
+          Unable to sync from Drive. Please try again.
+          <RequestIdNote requestId={syncRequestId} />
+        </div>
       ) : null}
       {syncMessage ? <div className={styles.noticeSuccess}>{syncMessage}</div> : null}
 
@@ -1499,10 +1586,17 @@ export default function TimelinePageClient() {
           </div>
         </div>
 
-        {selectionError === 'reconnect_required' ? selectionReconnectNotice : null}
-        {selectionError === 'drive_not_provisioned' ? selectionProvisionNotice : null}
+        {selectionError === 'reconnect_required'
+          ? selectionReconnectNotice(selectionRequestId)
+          : null}
+        {selectionError === 'drive_not_provisioned'
+          ? selectionProvisionNotice(selectionRequestId)
+          : null}
         {selectionError === 'rate_limited' ? (
-          <div className={styles.notice}>Too many requests — try again in a moment.</div>
+          <div className={styles.notice}>
+            Too many requests — try again in a moment.
+            <RequestIdNote requestId={selectionRequestId} />
+          </div>
         ) : null}
         {selectionError === 'upstream_timeout' || selectionError === 'upstream_error' ? (
           <div className={styles.notice}>
@@ -1510,10 +1604,14 @@ export default function TimelinePageClient() {
             <Button variant="ghost" onClick={fetchSelectionSets} disabled={isLoadingSets}>
               Retry list
             </Button>
+            <RequestIdNote requestId={selectionRequestId} />
           </div>
         ) : null}
         {selectionError === 'generic' ? (
-          <div className={styles.notice}>Unable to load selection sets. Please try again.</div>
+          <div className={styles.notice}>
+            Unable to load selection sets. Please try again.
+            <RequestIdNote requestId={selectionRequestId} />
+          </div>
         ) : null}
         {selectionMessage ? <div className={styles.noticeSuccess}>{selectionMessage}</div> : null}
 
@@ -1547,7 +1645,12 @@ export default function TimelinePageClient() {
                 Update the loaded set in Drive
               </label>
             ) : null}
-            {saveError ? <div className={styles.notice}>{saveError}</div> : null}
+            {saveError ? (
+              <div className={styles.notice}>
+                {saveError}
+                <RequestIdNote requestId={selectionRequestId} />
+              </div>
+            ) : null}
             <div className={styles.formActions}>
               <Button
                 variant="primary"
@@ -1611,16 +1714,29 @@ export default function TimelinePageClient() {
           ))}
         </div>
 
-        {previewError === 'reconnect_required' ? selectionReconnectNotice : null}
-        {previewError === 'drive_not_provisioned' ? selectionProvisionNotice : null}
+        {previewError === 'reconnect_required'
+          ? selectionReconnectNotice(previewRequestId)
+          : null}
+        {previewError === 'drive_not_provisioned'
+          ? selectionProvisionNotice(previewRequestId)
+          : null}
         {previewError === 'rate_limited' ? (
-          <div className={styles.notice}>Too many requests — try again in a moment.</div>
+          <div className={styles.notice}>
+            Too many requests — try again in a moment.
+            <RequestIdNote requestId={previewRequestId} />
+          </div>
         ) : null}
         {previewError === 'upstream_timeout' || previewError === 'upstream_error' ? (
-          <div className={styles.notice}>Google returned an error — retry.</div>
+          <div className={styles.notice}>
+            Google returned an error — retry.
+            <RequestIdNote requestId={previewRequestId} />
+          </div>
         ) : null}
         {previewError === 'generic' ? (
-          <div className={styles.notice}>Unable to load that selection set.</div>
+          <div className={styles.notice}>
+            Unable to load that selection set.
+            <RequestIdNote requestId={previewRequestId} />
+          </div>
         ) : null}
 
         {selectionPreview && previewSummary ? (

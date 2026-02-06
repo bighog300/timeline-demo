@@ -38,6 +38,7 @@ export const jsonError = (
 };
 
 export const parseApiError = async (response: Response) => {
+  const requestId = response.headers.get('x-request-id') ?? undefined;
   try {
     const payload = (await response.clone().json()) as unknown;
 
@@ -50,7 +51,7 @@ export const parseApiError = async (response: Response) => {
         const code = errorRecord.code;
         const message = errorRecord.message;
         if (typeof code === 'string' && typeof message === 'string') {
-          return { code, message, details: errorRecord.details };
+          return { code, message, details: errorRecord.details, requestId };
         }
       }
 
@@ -61,6 +62,7 @@ export const parseApiError = async (response: Response) => {
           code: errorField,
           message,
           details: record.details,
+          requestId,
         };
       }
 
@@ -73,11 +75,16 @@ export const parseApiError = async (response: Response) => {
           code: record.error_code,
           message,
           details: record.details,
+          requestId,
         };
       }
     }
   } catch {
     return null;
+  }
+
+  if (requestId) {
+    return { code: 'unknown_error', message: 'unknown_error', details: undefined, requestId };
   }
 
   return null;

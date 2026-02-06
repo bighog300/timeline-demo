@@ -15,7 +15,17 @@ export const fetchWithTimeout = async (
   }
 
   try {
-    return await fetch(input, { ...init, signal: controller.signal });
+    const response = await fetch(input, { ...init, signal: controller.signal });
+    if (!response.ok) {
+      const error = new Error(`Request failed with status ${response.status}`) as Error & {
+        status?: number;
+        requestId?: string;
+      };
+      error.status = response.status;
+      error.requestId = response.headers.get('x-request-id') ?? undefined;
+      throw error;
+    }
+    return response;
   } finally {
     clearTimeout(timeoutId);
   }

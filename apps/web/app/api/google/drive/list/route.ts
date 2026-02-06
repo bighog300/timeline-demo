@@ -10,6 +10,8 @@ import {
   withRetry,
   withTimeout,
 } from '../../../../lib/googleRequest';
+import { hashUserHint, logError, logInfo, safeError, time } from '../../../../lib/logger';
+import { createCtx, withRequestId } from '../../../../lib/requestContext';
 
 type DriveFile = {
   id: string;
@@ -20,14 +22,31 @@ type DriveFile = {
 };
 
 export const GET = async (request: NextRequest) => {
+  const ctx = createCtx(request, '/api/google/drive/list');
+  const startedAt = Date.now();
+  const url = request.nextUrl ?? new URL(request.url);
+  const includeFoldersParam = url.searchParams.get('includeFolders') === 'true';
+  const respond = (response: NextResponse) => {
+    withRequestId(response, ctx.requestId);
+    logInfo(ctx, 'request_end', { status: response.status, durationMs: Date.now() - startedAt });
+    return response;
+  };
+
+  logInfo(ctx, 'request_start', {
+    method: request.method,
+    includeFolders: includeFoldersParam,
+  });
+
   const session = await getGoogleSession();
   const accessToken = await getGoogleAccessToken();
 
   if (!session || !accessToken) {
-    return jsonError(401, 'reconnect_required', 'Reconnect required.');
+    return respond(jsonError(401, 'reconnect_required', 'Reconnect required.'));
   }
 
-  const includeFolders = request.nextUrl.searchParams.get('includeFolders') === 'true';
+  ctx.userHint = session.user?.email ? hashUserHint(session.user.email) : 'anon';
+
+  const includeFolders = includeFoldersParam;
   const drive = createDriveClient(accessToken);
 
   const q = includeFolders
@@ -36,28 +55,37 @@ export const GET = async (request: NextRequest) => {
 
   let response;
   try {
-    response = await withRetry((signal) =>
-      withTimeout(
-        (timeoutSignal) =>
-          drive.files.list(
-            {
-              q,
-              fields: 'files(id, name, mimeType, modifiedTime, iconLink)',
-              orderBy: 'modifiedTime desc',
-              pageSize: 20,
-              spaces: 'drive',
-            },
-            { signal: timeoutSignal },
+    response = await time(ctx, 'drive.files.list', () =>
+      withRetry(
+        (signal) =>
+          withTimeout(
+            (timeoutSignal) =>
+              drive.files.list(
+                {
+                  q,
+                  fields: 'files(id, name, mimeType, modifiedTime, iconLink)',
+                  orderBy: 'modifiedTime desc',
+                  pageSize: 20,
+                  spaces: 'drive',
+                },
+                { signal: timeoutSignal },
+              ),
+            DEFAULT_GOOGLE_TIMEOUT_MS,
+            'upstream_timeout',
+            signal,
           ),
-        DEFAULT_GOOGLE_TIMEOUT_MS,
-        'upstream_timeout',
-        signal,
+        { ctx },
       ),
     );
   } catch (error) {
-    logGoogleError(error, 'drive.files.list');
+    logGoogleError(error, 'drive.files.list', ctx);
     const mapped = mapGoogleError(error, 'drive.files.list');
-    return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+    logError(ctx, 'request_error', {
+      status: mapped.status,
+      code: mapped.code,
+      error: safeError(error),
+    });
+    return respond(jsonError(mapped.status, mapped.code, mapped.message, mapped.details));
   }
 
   const files: DriveFile[] = (response.data.files ?? []).map((file) => ({
@@ -68,5 +96,5 @@ export const GET = async (request: NextRequest) => {
     iconLink: file.iconLink ?? undefined,
   }));
 
-  return NextResponse.json({ files });
+  return respond(NextResponse.json({ files }));
 };

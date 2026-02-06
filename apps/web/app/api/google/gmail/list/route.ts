@@ -10,6 +10,8 @@ import {
   withRetry,
   withTimeout,
 } from '../../../../lib/googleRequest';
+import { hashUserHint, logError, logInfo, safeError, time } from '../../../../lib/logger';
+import { createCtx, withRequestId } from '../../../../lib/requestContext';
 
 type GmailMessage = {
   id: string;
@@ -25,36 +27,57 @@ const headerValue = (headers: { name?: string | null; value?: string | null }[],
   return header?.value ?? '';
 };
 
-export const GET = async (_request: NextRequest) => {
+export const GET = async (request: NextRequest) => {
+  const ctx = createCtx(request, '/api/google/gmail/list');
+  const startedAt = Date.now();
+  const respond = (response: NextResponse) => {
+    withRequestId(response, ctx.requestId);
+    logInfo(ctx, 'request_end', { status: response.status, durationMs: Date.now() - startedAt });
+    return response;
+  };
+
+  logInfo(ctx, 'request_start', { method: request.method });
+
   const session = await getGoogleSession();
   const accessToken = await getGoogleAccessToken();
 
   if (!session || !accessToken) {
-    return jsonError(401, 'reconnect_required', 'Reconnect required.');
+    return respond(jsonError(401, 'reconnect_required', 'Reconnect required.'));
   }
+
+  ctx.userHint = session.user?.email ? hashUserHint(session.user.email) : 'anon';
 
   const gmail = createGmailClient(accessToken);
   let listResponse;
   try {
-    listResponse = await withRetry((signal) =>
-      withTimeout(
-        (timeoutSignal) =>
-          gmail.users.messages.list(
-            {
-              userId: 'me',
-              maxResults: 20,
-            },
-            { signal: timeoutSignal },
+    listResponse = await time(ctx, 'gmail.users.messages.list', () =>
+      withRetry(
+        (signal) =>
+          withTimeout(
+            (timeoutSignal) =>
+              gmail.users.messages.list(
+                {
+                  userId: 'me',
+                  maxResults: 20,
+                },
+                { signal: timeoutSignal },
+              ),
+            DEFAULT_GOOGLE_TIMEOUT_MS,
+            'upstream_timeout',
+            signal,
           ),
-        DEFAULT_GOOGLE_TIMEOUT_MS,
-        'upstream_timeout',
-        signal,
+        { ctx },
       ),
     );
   } catch (error) {
-    logGoogleError(error, 'gmail.users.messages.list');
+    logGoogleError(error, 'gmail.users.messages.list', ctx);
     const mapped = mapGoogleError(error, 'gmail.users.messages.list');
-    return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+    logError(ctx, 'request_error', {
+      status: mapped.status,
+      code: mapped.code,
+      error: safeError(error),
+    });
+    return respond(jsonError(mapped.status, mapped.code, mapped.message, mapped.details));
   }
 
   const messageRefs = listResponse.data.messages ?? [];
@@ -63,21 +86,25 @@ export const GET = async (_request: NextRequest) => {
   try {
     messageDetails = await Promise.all(
       messageRefs.map(async (message) => {
-        const detail = await withRetry((signal) =>
-          withTimeout(
-            (timeoutSignal) =>
-              gmail.users.messages.get(
-                {
-                  userId: 'me',
-                  id: message.id ?? '',
-                  format: 'metadata',
-                  metadataHeaders: ['Subject', 'From', 'Date'],
-                },
-                { signal: timeoutSignal },
+        const detail = await time(ctx, 'gmail.users.messages.get', () =>
+          withRetry(
+            (signal) =>
+              withTimeout(
+                (timeoutSignal) =>
+                  gmail.users.messages.get(
+                    {
+                      userId: 'me',
+                      id: message.id ?? '',
+                      format: 'metadata',
+                      metadataHeaders: ['Subject', 'From', 'Date'],
+                    },
+                    { signal: timeoutSignal },
+                  ),
+                DEFAULT_GOOGLE_TIMEOUT_MS,
+                'upstream_timeout',
+                signal,
               ),
-            DEFAULT_GOOGLE_TIMEOUT_MS,
-            'upstream_timeout',
-            signal,
+            { ctx },
           ),
         );
 
@@ -94,10 +121,15 @@ export const GET = async (_request: NextRequest) => {
       }),
     );
   } catch (error) {
-    logGoogleError(error, 'gmail.users.messages.get');
+    logGoogleError(error, 'gmail.users.messages.get', ctx);
     const mapped = mapGoogleError(error, 'gmail.users.messages.get');
-    return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+    logError(ctx, 'request_error', {
+      status: mapped.status,
+      code: mapped.code,
+      error: safeError(error),
+    });
+    return respond(jsonError(mapped.status, mapped.code, mapped.message, mapped.details));
   }
 
-  return NextResponse.json({ messages: messageDetails });
+  return respond(NextResponse.json({ messages: messageDetails }));
 };

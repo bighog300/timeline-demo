@@ -59,9 +59,6 @@ export default function CalendarPageClient() {
 
     try {
       const response = await fetchWithTimeout('/api/calendar', { signal });
-      if (!response.ok) {
-        throw new Error('Unable to load calendar.');
-      }
       const data = (await response.json()) as CalendarResponse;
       setItems(Array.isArray(data.items) ? data.items : []);
     } catch (err) {

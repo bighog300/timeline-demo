@@ -9,6 +9,8 @@ import { checkRateLimit, getRateLimitKey } from '../../../lib/rateLimit';
 import { summarizeDeterministic } from '../../../lib/summarize';
 import type { SummaryArtifact } from '../../../lib/types';
 import { writeArtifactToDrive } from '../../../lib/writeArtifactToDrive';
+import { hashUserHint, logError, logInfo, safeError, time } from '../../../lib/logger';
+import { createCtx, withRequestId } from '../../../lib/requestContext';
 
 type SummarizeRequest = {
   items: Array<{ source: 'gmail' | 'drive'; id: string }>;
@@ -33,39 +35,58 @@ const isValidItem = (value: unknown): value is { source: 'gmail' | 'drive'; id: 
 };
 
 export const POST = async (request: NextRequest) => {
+  const ctx = createCtx(request, '/api/timeline/summarize');
+  const startedAt = Date.now();
+  const respond = (response: NextResponse) => {
+    withRequestId(response, ctx.requestId);
+    logInfo(ctx, 'request_end', { status: response.status, durationMs: Date.now() - startedAt });
+    return response;
+  };
+
+  logInfo(ctx, 'request_start', { method: request.method });
+
   const session = await getGoogleSession();
   const accessToken = await getGoogleAccessToken();
 
   if (!session || !accessToken) {
-    return jsonError(401, 'reconnect_required', 'Reconnect required.');
+    return respond(jsonError(401, 'reconnect_required', 'Reconnect required.'));
   }
 
-  if (!session.driveFolderId) {
-    return jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
+  const driveFolderId = session.driveFolderId;
+  if (!driveFolderId) {
+    return respond(jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.'));
   }
+
+  ctx.userHint = session.user?.email ? hashUserHint(session.user.email) : 'anon';
 
   const rateKey = getRateLimitKey(request, session);
-  const rateStatus = checkRateLimit(rateKey, { limit: 10, windowMs: 60_000 });
+  const rateStatus = checkRateLimit(rateKey, { limit: 10, windowMs: 60_000 }, ctx);
   if (!rateStatus.allowed) {
-    return jsonError(429, 'rate_limited', 'Too many requests. Try again in a moment.', {
-      retryAfterMs: rateStatus.resetMs,
-    });
+    return respond(
+      jsonError(429, 'rate_limited', 'Too many requests. Try again in a moment.', {
+        retryAfterMs: rateStatus.resetMs,
+      }),
+    );
   }
 
   let body: SummarizeRequest | null = null;
   try {
     body = (await request.json()) as SummarizeRequest;
   } catch {
-    return jsonError(400, 'invalid_request', 'Invalid request payload.');
+    return respond(jsonError(400, 'invalid_request', 'Invalid request payload.'));
   }
 
   const items = Array.isArray(body?.items) ? body.items.filter(isValidItem) : [];
 
   if (items.length > MAX_ITEMS) {
-    return jsonError(400, 'too_many_items', 'Too many items requested.', {
-      limit: MAX_ITEMS,
-    });
+    return respond(
+      jsonError(400, 'too_many_items', 'Too many items requested.', {
+        limit: MAX_ITEMS,
+      }),
+    );
   }
+
+  logInfo(ctx, 'summarize_batch', { items: items.length });
 
   const gmail = createGmailClient(accessToken);
   const drive = createDriveClient(accessToken);
@@ -77,13 +98,15 @@ export const POST = async (request: NextRequest) => {
     try {
       const content =
         item.source === 'gmail'
-          ? await fetchGmailMessageText(gmail, item.id)
-          : await fetchDriveFileText(drive, item.id);
+          ? await fetchGmailMessageText(gmail, item.id, ctx)
+          : await fetchDriveFileText(drive, item.id, ctx);
 
-      const { summary, highlights } = summarizeDeterministic({
-        title: content.title,
-        text: content.text,
-      });
+      const { summary, highlights } = await time(ctx, 'summarize', async () =>
+        summarizeDeterministic({
+          title: content.title,
+          text: content.text,
+        }),
+      );
 
       const createdAtISO = new Date().toISOString();
       const sourcePreview =
@@ -100,14 +123,19 @@ export const POST = async (request: NextRequest) => {
         highlights,
         sourceMetadata: content.metadata,
         sourcePreview,
-        driveFolderId: session.driveFolderId,
+        driveFolderId,
         driveFileId: '',
         driveWebViewLink: undefined,
         model: 'stub',
         version: 1,
       };
 
-      const driveResult = await writeArtifactToDrive(drive, session.driveFolderId, artifact);
+      const driveResult = await writeArtifactToDrive(
+        drive,
+        driveFolderId,
+        artifact,
+        ctx,
+      );
 
       artifacts.push({
         ...artifact,
@@ -115,6 +143,10 @@ export const POST = async (request: NextRequest) => {
         driveWebViewLink: driveResult.markdownWebViewLink,
       });
     } catch (error) {
+      logError(ctx, 'summarize_item_failed', {
+        source: item.source,
+        error: safeError(error),
+      });
       failed.push({
         source: item.source,
         id: item.id,
@@ -123,5 +155,5 @@ export const POST = async (request: NextRequest) => {
     }
   }
 
-  return NextResponse.json({ artifacts, failed });
+  return respond(NextResponse.json({ artifacts, failed }));
 };

@@ -1,5 +1,8 @@
 import { createHash } from 'crypto';
 
+import type { LogContext } from './logger';
+import { logWarn } from './logger';
+
 type RateLimitConfig = {
   limit: number;
   windowMs: number;
@@ -44,7 +47,11 @@ export const getRateLimitKey = (request: Request, session?: SessionLike | null) 
   return 'ip:unknown';
 };
 
-export const checkRateLimit = (key: string, config: RateLimitConfig): RateLimitResult => {
+export const checkRateLimit = (
+  key: string,
+  config: RateLimitConfig,
+  ctx?: LogContext,
+): RateLimitResult => {
   const now = Date.now();
   const windowStart = now - config.windowMs;
   const timestamps = (rateLimitStore.get(key) ?? []).filter((ts) => ts > windowStart);
@@ -52,6 +59,14 @@ export const checkRateLimit = (key: string, config: RateLimitConfig): RateLimitR
   if (timestamps.length >= config.limit) {
     const resetMs = timestamps[0] + config.windowMs - now;
     rateLimitStore.set(key, timestamps);
+    if (ctx) {
+      const keyType = key.startsWith('user:') ? 'user' : key.startsWith('ip:') ? 'ip' : 'unknown';
+      logWarn(ctx, 'rate_limit_exceeded', {
+        keyType,
+        windowMs: config.windowMs,
+        limit: config.limit,
+      });
+    }
     return {
       allowed: false,
       remaining: 0,

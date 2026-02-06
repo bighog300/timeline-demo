@@ -51,9 +51,6 @@ export default function EventsPageClient() {
 
     try {
       const response = await fetchWithTimeout('/api/events', { signal });
-      if (!response.ok) {
-        throw new Error('Unable to load events.');
-      }
       const data = (await response.json()) as EventItem[];
       setEvents(Array.isArray(data) ? data : []);
     } catch (err) {

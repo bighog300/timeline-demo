@@ -36,10 +36,6 @@ export default function HomeClient() {
         fetchWithTimeout('/api/calendar', { signal }),
       ]);
 
-      if (!eventsResponse.ok || !calendarResponse.ok) {
-        throw new Error('Unable to load summary data.');
-      }
-
       const eventsData = (await eventsResponse.json()) as Array<{ id: string }>;
       const calendarData = (await calendarResponse.json()) as CalendarResponse;
 

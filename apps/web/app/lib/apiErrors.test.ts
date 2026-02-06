@@ -23,6 +23,7 @@ describe('apiErrors helpers', () => {
       code: 'rate_limited',
       message: 'Too many requests',
       details: undefined,
+      requestId: undefined,
     });
   });
 
@@ -33,6 +34,7 @@ describe('apiErrors helpers', () => {
       code: 'reconnect_required',
       message: 'reconnect required',
       details: undefined,
+      requestId: undefined,
     });
   });
 });
