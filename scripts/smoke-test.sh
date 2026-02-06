@@ -99,3 +99,25 @@ if ! printf '%s' "${summarize_body}" | node -e 'const fs=require("fs");const dat
   fail_response "Timeline summarize (unauth)" "${summarize_body}"
 fi
 echo "✅ /api/timeline/summarize unauth ok"
+
+artifacts_list=$(curl -sS "${BASE_URL}/api/timeline/artifacts/list" -w "\n%{http_code}") || true
+artifacts_list_body=$(printf '%s' "${artifacts_list}" | sed '$d')
+artifacts_list_status=$(printf '%s' "${artifacts_list}" | tail -n 1)
+if [[ "${artifacts_list_status}" != "401" ]]; then
+  fail_response "Timeline artifacts list (unauth)" "${artifacts_list_body}"
+fi
+if ! printf '%s' "${artifacts_list_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+  fail_response "Timeline artifacts list (unauth)" "${artifacts_list_body}"
+fi
+echo "✅ /api/timeline/artifacts/list unauth ok"
+
+artifacts_read=$(curl -sS "${BASE_URL}/api/timeline/artifacts/read?fileId=demo" -w "\n%{http_code}") || true
+artifacts_read_body=$(printf '%s' "${artifacts_read}" | sed '$d')
+artifacts_read_status=$(printf '%s' "${artifacts_read}" | tail -n 1)
+if [[ "${artifacts_read_status}" != "401" ]]; then
+  fail_response "Timeline artifacts read (unauth)" "${artifacts_read_body}"
+fi
+if ! printf '%s' "${artifacts_read_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+  fail_response "Timeline artifacts read (unauth)" "${artifacts_read_body}"
+fi
+echo "✅ /api/timeline/artifacts/read unauth ok"

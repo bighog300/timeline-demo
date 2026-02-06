@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
+import { artifactKey, mergeArtifacts } from '../lib/artifactMerge';
 import type { SummaryArtifact } from '../lib/types';
+import { isSummaryArtifact, normalizeArtifact } from '../lib/validateArtifact';
 import styles from './timeline.module.css';
 
 type GmailSelection = {
@@ -34,6 +36,7 @@ type TimelineItem = {
 };
 
 type SummarizeError = 'reconnect_required' | 'drive_not_provisioned' | 'generic' | null;
+type SyncError = 'reconnect_required' | 'drive_not_provisioned' | 'generic' | null;
 
 type FailedItem = {
   source: 'gmail' | 'drive';
@@ -44,6 +47,8 @@ type FailedItem = {
 const GMAIL_KEY = 'timeline.gmailSelections';
 const DRIVE_KEY = 'timeline.driveSelections';
 const ARTIFACTS_KEY = 'timeline.summaryArtifacts';
+const AUTO_SYNC_KEY = 'timeline.autoSyncOnOpen';
+const LAST_SYNC_KEY = 'timeline.lastSyncISO';
 const ARTIFACT_LIMIT = 100;
 
 const parseStoredSelections = <T,>(key: string) => {
@@ -82,32 +87,13 @@ const parseStoredArtifacts = () => {
   }
 };
 
-const artifactKey = (source: 'gmail' | 'drive', id: string) => `${source}:${id}`;
-
 const persistArtifacts = (
   updates: SummaryArtifact[],
   existing: Record<string, SummaryArtifact>,
 ): Record<string, SummaryArtifact> => {
-  const next = { ...existing };
-  updates.forEach((artifact) => {
-    next[artifactKey(artifact.source, artifact.sourceId)] = artifact;
-  });
-
-  const entries = Object.entries(next);
-  if (entries.length > ARTIFACT_LIMIT) {
-    entries.sort((a, b) => {
-      const aTime = Date.parse(a[1].createdAtISO || '') || 0;
-      const bTime = Date.parse(b[1].createdAtISO || '') || 0;
-      return bTime - aTime;
-    });
-
-    const capped = Object.fromEntries(entries.slice(0, ARTIFACT_LIMIT));
-    window.localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(capped));
-    return capped;
-  }
-
-  window.localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(next));
-  return next;
+  const merged = mergeArtifacts(existing, updates, ARTIFACT_LIMIT);
+  window.localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(merged));
+  return merged;
 };
 
 export default function TimelinePageClient() {
@@ -118,11 +104,20 @@ export default function TimelinePageClient() {
   const [error, setError] = useState<SummarizeError>(null);
   const [failedItems, setFailedItems] = useState<FailedItem[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<SyncError>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [autoSyncOnOpen, setAutoSyncOnOpen] = useState(false);
+  const [lastSyncISO, setLastSyncISO] = useState<string | null>(null);
+  const [hasHydrated, setHasHydrated] = useState(false);
 
   useEffect(() => {
     setGmailSelections(parseStoredSelections<GmailSelection>(GMAIL_KEY));
     setDriveSelections(parseStoredSelections<DriveSelection>(DRIVE_KEY));
     setArtifacts(parseStoredArtifacts());
+    setAutoSyncOnOpen(window.localStorage.getItem(AUTO_SYNC_KEY) === 'true');
+    setLastSyncISO(window.localStorage.getItem(LAST_SYNC_KEY));
+    setHasHydrated(true);
   }, []);
 
   const timelineItems = useMemo(() => {
@@ -229,6 +224,70 @@ export default function TimelinePageClient() {
     }
   };
 
+  const handleSyncFromDrive = useCallback(async () => {
+    setIsSyncing(true);
+    setSyncError(null);
+    setSyncMessage(null);
+
+    try {
+      const response = await fetch('/api/timeline/artifacts/list');
+
+      if (response.status === 401) {
+        setSyncError('reconnect_required');
+        return;
+      }
+
+      if (response.status === 400) {
+        const payload = (await response.json()) as { error?: string };
+        if (payload?.error === 'drive_not_provisioned') {
+          setSyncError('drive_not_provisioned');
+          return;
+        }
+        setSyncError('generic');
+        return;
+      }
+
+      if (!response.ok) {
+        setSyncError('generic');
+        return;
+      }
+
+      const payload = (await response.json()) as { artifacts?: SummaryArtifact[] };
+      const validArtifacts = Array.isArray(payload.artifacts)
+        ? payload.artifacts.filter(isSummaryArtifact).map(normalizeArtifact)
+        : [];
+
+      if (validArtifacts.length > 0) {
+        setArtifacts((prev) => persistArtifacts(validArtifacts, prev));
+      }
+
+      const now = new Date().toISOString();
+      window.localStorage.setItem(LAST_SYNC_KEY, now);
+      setLastSyncISO(now);
+      setSyncMessage(`Synced ${validArtifacts.length} artifacts from Drive`);
+    } catch {
+      setSyncError('generic');
+    } finally {
+      setIsSyncing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hasHydrated || !autoSyncOnOpen) {
+      return;
+    }
+    void handleSyncFromDrive();
+  }, [autoSyncOnOpen, handleSyncFromDrive, hasHydrated]);
+
+  const handleAutoSyncToggle = (checked: boolean) => {
+    setAutoSyncOnOpen(checked);
+    window.localStorage.setItem(AUTO_SYNC_KEY, checked ? 'true' : 'false');
+  };
+
+  const lastSyncLabel = lastSyncISO
+    ? new Date(lastSyncISO).toLocaleString()
+    : 'Not synced yet';
+
   const reconnectNotice = (
     <div className={styles.notice}>
       Reconnect required. Please <Link href="/connect">connect your Google account</Link>.
@@ -241,6 +300,18 @@ export default function TimelinePageClient() {
     </div>
   );
 
+  const syncReconnectNotice = (
+    <div className={styles.notice}>
+      Drive sync needs a reconnect. Please <Link href="/connect">connect your Google account</Link>.
+    </div>
+  );
+
+  const syncProvisionNotice = (
+    <div className={styles.notice}>
+      Provision a Drive folder to sync summaries. Visit <Link href="/connect">/connect</Link>.
+    </div>
+  );
+
   return (
     <section className={styles.page}>
       <div className={styles.header}>
@@ -250,14 +321,30 @@ export default function TimelinePageClient() {
           <p className={styles.counts}>
             {timelineItems.length} selected, {summarizedCount} summarized, {pendingCount} pending
           </p>
+          <p className={styles.syncMeta}>Last synced: {lastSyncLabel}</p>
         </div>
-        <Button
-          variant="secondary"
-          disabled={timelineItems.length === 0 || isSummarizing}
-          onClick={handleSummarize}
-        >
-          {isSummarizing ? 'Generating...' : 'Generate summaries'}
-        </Button>
+        <div className={styles.headerActions}>
+          <div className={styles.actionRow}>
+            <Button
+              variant="secondary"
+              disabled={timelineItems.length === 0 || isSummarizing}
+              onClick={handleSummarize}
+            >
+              {isSummarizing ? 'Generating...' : 'Generate summaries'}
+            </Button>
+            <Button variant="ghost" disabled={isSyncing} onClick={handleSyncFromDrive}>
+              {isSyncing ? 'Syncing...' : 'Sync from Drive'}
+            </Button>
+          </div>
+          <label className={styles.toggle}>
+            <input
+              type="checkbox"
+              checked={autoSyncOnOpen}
+              onChange={(event) => handleAutoSyncToggle(event.target.checked)}
+            />
+            Auto-sync on open
+          </label>
+        </div>
       </div>
 
       {error === 'reconnect_required' ? reconnectNotice : null}
@@ -277,6 +364,12 @@ export default function TimelinePageClient() {
           </ul>
         </div>
       ) : null}
+      {syncError === 'reconnect_required' ? syncReconnectNotice : null}
+      {syncError === 'drive_not_provisioned' ? syncProvisionNotice : null}
+      {syncError === 'generic' ? (
+        <div className={styles.notice}>Unable to sync from Drive. Please try again.</div>
+      ) : null}
+      {syncMessage ? <div className={styles.noticeSuccess}>{syncMessage}</div> : null}
 
       {timelineItems.length === 0 ? (
         <Card className={styles.emptyState}>
