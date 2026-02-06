@@ -7,6 +7,7 @@ describe('GET /api/google/drive/list', () => {
     const response = await GET(new Request('http://localhost/api/google/drive/list') as never);
 
     expect(response.status).toBe(401);
+    expect(response.headers.get('x-request-id')).toBeTruthy();
     await expect(response.json()).resolves.toEqual({
       error: {
         code: 'reconnect_required',

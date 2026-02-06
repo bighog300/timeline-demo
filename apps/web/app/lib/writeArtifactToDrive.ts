@@ -1,6 +1,8 @@
 import type { drive_v3 } from 'googleapis';
 
 import { DEFAULT_GOOGLE_TIMEOUT_MS, withRetry, withTimeout } from './googleRequest';
+import type { LogContext } from './logger';
+import { time } from './logger';
 import type { SummaryArtifact } from './types';
 
 type DriveWriteResult = {
@@ -62,58 +64,71 @@ export const writeArtifactToDrive = async (
   drive: drive_v3.Drive,
   folderId: string,
   artifact: SummaryArtifact,
+  ctx?: LogContext,
 ): Promise<DriveWriteResult> => {
   const baseName = safeFileName(artifact.title);
   const markdownName = `${baseName} - Summary.md`;
   const jsonName = `${baseName} - Summary.json`;
 
-  const markdownResponse = await withRetry((signal) =>
-    withTimeout(
-      (timeoutSignal) =>
-        drive.files.create(
-          {
-            requestBody: {
-              name: markdownName,
-              parents: [folderId],
-              mimeType: 'text/markdown',
-            },
-            media: {
-              mimeType: 'text/markdown',
-              body: buildMarkdown(artifact),
-            },
-            fields: 'id, webViewLink, name',
-          },
-          { signal: timeoutSignal },
+  const markdownOperation = () =>
+    withRetry(
+      (signal) =>
+        withTimeout(
+          (timeoutSignal) =>
+            drive.files.create(
+              {
+                requestBody: {
+                  name: markdownName,
+                  parents: [folderId],
+                  mimeType: 'text/markdown',
+                },
+                media: {
+                  mimeType: 'text/markdown',
+                  body: buildMarkdown(artifact),
+                },
+                fields: 'id, webViewLink, name',
+              },
+              { signal: timeoutSignal },
+            ),
+          DEFAULT_GOOGLE_TIMEOUT_MS,
+          'upstream_timeout',
+          signal,
         ),
-      DEFAULT_GOOGLE_TIMEOUT_MS,
-      'upstream_timeout',
-      signal,
-    ),
-  );
+      { ctx },
+    );
+  const markdownResponse = ctx
+    ? await time(ctx, 'drive.files.create.summary_markdown', markdownOperation)
+    : await markdownOperation();
 
-  const jsonResponse = await withRetry((signal) =>
-    withTimeout(
-      (timeoutSignal) =>
-        drive.files.create(
-          {
-            requestBody: {
-              name: jsonName,
-              parents: [folderId],
-              mimeType: 'application/json',
-            },
-            media: {
-              mimeType: 'application/json',
-              body: JSON.stringify(artifact, null, 2),
-            },
-            fields: 'id, webViewLink, name',
-          },
-          { signal: timeoutSignal },
+  const jsonOperation = () =>
+    withRetry(
+      (signal) =>
+        withTimeout(
+          (timeoutSignal) =>
+            drive.files.create(
+              {
+                requestBody: {
+                  name: jsonName,
+                  parents: [folderId],
+                  mimeType: 'application/json',
+                },
+                media: {
+                  mimeType: 'application/json',
+                  body: JSON.stringify(artifact, null, 2),
+                },
+                fields: 'id, webViewLink, name',
+              },
+              { signal: timeoutSignal },
+            ),
+          DEFAULT_GOOGLE_TIMEOUT_MS,
+          'upstream_timeout',
+          signal,
         ),
-      DEFAULT_GOOGLE_TIMEOUT_MS,
-      'upstream_timeout',
-      signal,
-    ),
-  );
+      { ctx },
+    );
+  const jsonResponse = ctx
+    ? await time(ctx, 'drive.files.create.summary_json', jsonOperation)
+    : await jsonOperation();
 
   return {
     markdownFileId: markdownResponse.data.id ?? '',

@@ -111,10 +111,6 @@ export default function ChatPageClient() {
           body: JSON.stringify({ message: newMessage }),
         });
 
-        if (!response.ok) {
-          throw new Error('Unable to reach the chat service.');
-        }
-
         const data = (await response.json()) as ChatResponse;
         setMessages((prev) => [...prev, createMessage('assistant', data.reply)].slice(-MAX_HISTORY));
         setSuggestions(Array.isArray(data.suggested_actions) ? data.suggested_actions : []);

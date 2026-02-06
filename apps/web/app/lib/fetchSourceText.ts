@@ -3,6 +3,8 @@ import type { drive_v3, gmail_v1 } from 'googleapis';
 import { buildUnsupportedPlaceholder, normalizeJsonText, truncateText } from './driveText';
 import { normalizeWhitespace, stripHtml, trimQuotedReplies } from './gmailText';
 import { DEFAULT_GOOGLE_TIMEOUT_MS, withRetry, withTimeout } from './googleRequest';
+import type { LogContext } from './logger';
+import { time } from './logger';
 import type { SourceMetadata } from './types';
 
 type SourceText = {
@@ -57,23 +59,29 @@ const parseDateISO = (value?: string | null) => {
 export const fetchGmailMessageText = async (
   gmail: gmail_v1.Gmail,
   messageId: string,
+  ctx?: LogContext,
 ): Promise<SourceText> => {
-  const detail = await withRetry((signal) =>
-    withTimeout(
-      (timeoutSignal) =>
-        gmail.users.messages.get(
-          {
-            userId: 'me',
-            id: messageId,
-            format: 'full',
-          },
-          { signal: timeoutSignal },
+  const operation = () =>
+    withRetry(
+      (signal) =>
+        withTimeout(
+          (timeoutSignal) =>
+            gmail.users.messages.get(
+              {
+                userId: 'me',
+                id: messageId,
+                format: 'full',
+              },
+              { signal: timeoutSignal },
+            ),
+          DEFAULT_GOOGLE_TIMEOUT_MS,
+          'upstream_timeout',
+          signal,
         ),
-      DEFAULT_GOOGLE_TIMEOUT_MS,
-      'upstream_timeout',
-      signal,
-    ),
-  );
+      { ctx },
+    );
+
+  const detail = ctx ? await time(ctx, 'gmail.users.messages.get', operation) : await operation();
 
   const payload = detail.data.payload;
   const headers = payload?.headers ?? [];
@@ -117,22 +125,29 @@ export const fetchGmailMessageText = async (
 export const fetchDriveFileText = async (
   drive: drive_v3.Drive,
   fileId: string,
+  ctx?: LogContext,
 ): Promise<SourceText> => {
-  const metadata = await withRetry((signal) =>
-    withTimeout(
-      (timeoutSignal) =>
-        drive.files.get(
-          {
-            fileId,
-            fields: 'id, name, mimeType, modifiedTime, webViewLink',
-          },
-          { signal: timeoutSignal },
+  const metadataOperation = () =>
+    withRetry(
+      (signal) =>
+        withTimeout(
+          (timeoutSignal) =>
+            drive.files.get(
+              {
+                fileId,
+                fields: 'id, name, mimeType, modifiedTime, webViewLink',
+              },
+              { signal: timeoutSignal },
+            ),
+          DEFAULT_GOOGLE_TIMEOUT_MS,
+          'upstream_timeout',
+          signal,
         ),
-      DEFAULT_GOOGLE_TIMEOUT_MS,
-      'upstream_timeout',
-      signal,
-    ),
-  );
+      { ctx },
+    );
+  const metadata = ctx
+    ? await time(ctx, 'drive.files.get.metadata', metadataOperation)
+    : await metadataOperation();
 
   const title = metadata.data.name ?? 'Untitled';
   const mimeType = metadata.data.mimeType ?? 'application/octet-stream';
@@ -151,32 +166,47 @@ export const fetchDriveFileText = async (
   const isCsv = mimeType === 'text/csv';
 
   if (isGoogleDoc) {
-    const exportResponse = await withRetry((signal) =>
-      withTimeout(
-        (timeoutSignal) =>
-          drive.files.export(
-            { fileId, mimeType: 'text/plain' },
-            { responseType: 'text', signal: timeoutSignal },
+    const exportOperation = () =>
+      withRetry(
+        (signal) =>
+          withTimeout(
+            (timeoutSignal) =>
+              drive.files.export(
+                { fileId, mimeType: 'text/plain' },
+                { responseType: 'text', signal: timeoutSignal },
+              ),
+            DEFAULT_GOOGLE_TIMEOUT_MS,
+            'upstream_timeout',
+            signal,
           ),
-        DEFAULT_GOOGLE_TIMEOUT_MS,
-        'upstream_timeout',
-        signal,
-      ),
-    );
+        { ctx },
+      );
+    const exportResponse = ctx
+      ? await time(ctx, 'drive.files.export', exportOperation)
+      : await exportOperation();
     const text = typeof exportResponse.data === 'string' ? exportResponse.data : '';
     return { title, text: truncateText(text), dateISO, metadata: sourceMetadata };
   }
 
   if (isText || isJson || isCsv) {
-    const response = await withRetry((signal) =>
-      withTimeout(
-        (timeoutSignal) =>
-          drive.files.get({ fileId, alt: 'media' }, { responseType: 'text', signal: timeoutSignal }),
-        DEFAULT_GOOGLE_TIMEOUT_MS,
-        'upstream_timeout',
-        signal,
-      ),
-    );
+    const textOperation = () =>
+      withRetry(
+        (signal) =>
+          withTimeout(
+            (timeoutSignal) =>
+              drive.files.get(
+                { fileId, alt: 'media' },
+                { responseType: 'text', signal: timeoutSignal },
+              ),
+            DEFAULT_GOOGLE_TIMEOUT_MS,
+            'upstream_timeout',
+            signal,
+          ),
+        { ctx },
+      );
+    const response = ctx
+      ? await time(ctx, 'drive.files.get.media', textOperation)
+      : await textOperation();
     const rawText = typeof response.data === 'string' ? response.data : '';
     const text = isJson ? normalizeJsonText(rawText) : rawText;
     return { title, text: truncateText(text), dateISO, metadata: sourceMetadata };

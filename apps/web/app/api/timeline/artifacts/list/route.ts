@@ -15,6 +15,8 @@ import { findIndexFile, readIndexFile } from '../../../../lib/indexDrive';
 import { checkRateLimit, getRateLimitKey } from '../../../../lib/rateLimit';
 import type { SummaryArtifact } from '../../../../lib/types';
 import { isSummaryArtifact, normalizeArtifact } from '../../../../lib/validateArtifact';
+import { hashUserHint, logError, logInfo, logWarn, safeError, time } from '../../../../lib/logger';
+import { createCtx, withRequestId } from '../../../../lib/requestContext';
 
 const DEFAULT_PAGE_SIZE = 50;
 const MAX_JSON_DOWNLOADS = 20;
@@ -45,23 +47,38 @@ const parseDriveJson = (data: unknown): unknown => {
 };
 
 export const GET = async (request: NextRequest) => {
+  const ctx = createCtx(request, '/api/timeline/artifacts/list');
+  const startedAt = Date.now();
+  const respond = (response: NextResponse) => {
+    withRequestId(response, ctx.requestId);
+    logInfo(ctx, 'request_end', { status: response.status, durationMs: Date.now() - startedAt });
+    return response;
+  };
+
+  logInfo(ctx, 'request_start', { method: request.method });
+
   const session = await getGoogleSession();
   const accessToken = await getGoogleAccessToken();
 
   if (!session || !accessToken) {
-    return jsonError(401, 'reconnect_required', 'Reconnect required.');
+    return respond(jsonError(401, 'reconnect_required', 'Reconnect required.'));
   }
 
-  if (!session.driveFolderId) {
-    return jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
+  const driveFolderId = session.driveFolderId;
+  if (!driveFolderId) {
+    return respond(jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.'));
   }
+
+  ctx.userHint = session.user?.email ? hashUserHint(session.user.email) : 'anon';
 
   const rateKey = getRateLimitKey(request, session);
-  const rateStatus = checkRateLimit(rateKey, { limit: 60, windowMs: 60_000 });
+  const rateStatus = checkRateLimit(rateKey, { limit: 60, windowMs: 60_000 }, ctx);
   if (!rateStatus.allowed) {
-    return jsonError(429, 'rate_limited', 'Too many requests. Try again in a moment.', {
-      retryAfterMs: rateStatus.resetMs,
-    });
+    return respond(
+      jsonError(429, 'rate_limited', 'Too many requests. Try again in a moment.', {
+        retryAfterMs: rateStatus.resetMs,
+      }),
+    );
   }
 
   const pageToken = request.nextUrl.searchParams.get('pageToken') ?? undefined;
@@ -75,9 +92,9 @@ export const GET = async (request: NextRequest) => {
   let indexStale = false;
 
   try {
-    const indexFile = await findIndexFile(drive, session.driveFolderId);
+    const indexFile = await findIndexFile(drive, driveFolderId, ctx);
     if (indexFile?.id) {
-      const index = await readIndexFile(drive, indexFile.id, session.driveFolderId);
+      const index = await readIndexFile(drive, indexFile.id, driveFolderId, ctx);
       if (index) {
         fromIndex = true;
         indexStale = !isIndexFresh(index, new Date(), DEFAULT_INDEX_MAX_AGE_MINUTES);
@@ -97,36 +114,50 @@ export const GET = async (request: NextRequest) => {
       }
     }
   } catch (error) {
-    logGoogleError(error, 'drive.files.get');
+    logGoogleError(error, 'drive.files.get', ctx);
     const mapped = mapGoogleError(error, 'drive.files.get');
-    return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+    logError(ctx, 'request_error', {
+      status: mapped.status,
+      code: mapped.code,
+      error: safeError(error),
+    });
+    return respond(jsonError(mapped.status, mapped.code, mapped.message, mapped.details));
   }
 
   if (!fromIndex) {
     let listResponse;
     try {
-      listResponse = await withRetry((signal) =>
-        withTimeout(
-          (timeoutSignal) =>
-            drive.files.list(
-              {
-                q: `'${session.driveFolderId}' in parents and trashed=false`,
-                orderBy: 'modifiedTime desc',
-                pageSize,
-                pageToken,
-                fields: 'nextPageToken, files(id, name, mimeType, modifiedTime, webViewLink)',
-              },
-              { signal: timeoutSignal },
+      listResponse = await time(ctx, 'drive.files.list', () =>
+        withRetry(
+          (signal) =>
+            withTimeout(
+              (timeoutSignal) =>
+                drive.files.list(
+                  {
+                    q: `'${driveFolderId}' in parents and trashed=false`,
+                    orderBy: 'modifiedTime desc',
+                    pageSize,
+                    pageToken,
+                    fields: 'nextPageToken, files(id, name, mimeType, modifiedTime, webViewLink)',
+                  },
+                  { signal: timeoutSignal },
+                ),
+              DEFAULT_GOOGLE_TIMEOUT_MS,
+              'upstream_timeout',
+              signal,
             ),
-          DEFAULT_GOOGLE_TIMEOUT_MS,
-          'upstream_timeout',
-          signal,
+          { ctx },
         ),
       );
     } catch (error) {
-      logGoogleError(error, 'drive.files.list');
+      logGoogleError(error, 'drive.files.list', ctx);
       const mapped = mapGoogleError(error, 'drive.files.list');
-      return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+      logError(ctx, 'request_error', {
+        status: mapped.status,
+        code: mapped.code,
+        error: safeError(error),
+      });
+      return respond(jsonError(mapped.status, mapped.code, mapped.message, mapped.details));
     }
 
     const listedFiles = (listResponse.data.files ?? []).filter(isArtifactJson);
@@ -147,16 +178,23 @@ export const GET = async (request: NextRequest) => {
     const fileId = file.id;
 
     try {
-      const contentResponse = await withRetry((signal) =>
-        withTimeout(
-          (timeoutSignal) =>
-            drive.files.get({ fileId, alt: 'media' }, {
-              responseType: 'json',
-              signal: timeoutSignal,
-            }),
-          DEFAULT_GOOGLE_TIMEOUT_MS,
-          'upstream_timeout',
-          signal,
+      const contentResponse = await time(ctx, 'drive.files.get.media', () =>
+        withRetry(
+          (signal) =>
+            withTimeout(
+              (timeoutSignal) =>
+                drive.files.get(
+                  { fileId, alt: 'media' },
+                  {
+                    responseType: 'json',
+                    signal: timeoutSignal,
+                  },
+                ),
+              DEFAULT_GOOGLE_TIMEOUT_MS,
+              'upstream_timeout',
+              signal,
+            ),
+          { ctx },
         ),
       );
       const parsed = parseDriveJson(contentResponse.data);
@@ -169,21 +207,20 @@ export const GET = async (request: NextRequest) => {
           driveWebViewLink: normalized.driveWebViewLink ?? file.webViewLink ?? undefined,
         });
       } else {
-        console.warn('Skipping invalid summary artifact JSON', { fileId: file.id });
+        logWarn(ctx, 'artifact_json_invalid');
       }
     } catch (error) {
-      console.warn('Failed to read summary artifact JSON', {
-        fileId: file.id,
-        error: error instanceof Error ? error.message : 'unknown_error',
-      });
+      logWarn(ctx, 'artifact_json_read_failed', { error: safeError(error) });
     }
   }
 
-  return NextResponse.json({
-    artifacts,
-    files,
-    nextPageToken,
-    fromIndex,
-    indexStale: fromIndex ? indexStale : undefined,
-  });
+  return respond(
+    NextResponse.json({
+      artifacts,
+      files,
+      nextPageToken,
+      fromIndex,
+      indexStale: fromIndex ? indexStale : undefined,
+    }),
+  );
 };

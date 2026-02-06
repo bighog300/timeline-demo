@@ -16,6 +16,8 @@ import { checkRateLimit, getRateLimitKey } from '../../../lib/rateLimit';
 import { matchSelectionSet, matchSummaryArtifact, normalizeQuery } from '../../../lib/searchIndex';
 import { isSummaryArtifact, normalizeArtifact } from '../../../lib/validateArtifact';
 import { isSelectionSet, normalizeSelectionSet } from '../../../lib/validateSelectionSet';
+import { hashUserHint, logError, logInfo, safeError, time } from '../../../lib/logger';
+import { createCtx, withRequestId } from '../../../lib/requestContext';
 
 type SearchType = 'all' | 'summary' | 'selection';
 
@@ -97,36 +99,47 @@ const getRequestUrl = (request: NextRequest | Request) =>
   'nextUrl' in request ? request.nextUrl : new URL(request.url);
 
 export const GET = async (request: NextRequest | Request) => {
+  const ctx = createCtx(request, '/api/timeline/search');
+  const startedAt = Date.now();
+  const respond = (response: NextResponse) => {
+    withRequestId(response, ctx.requestId);
+    logInfo(ctx, 'request_end', { status: response.status, durationMs: Date.now() - startedAt });
+    return response;
+  };
+
   const session = await getGoogleSession();
   const accessToken = await getGoogleAccessToken();
 
   if (!session || !accessToken) {
-    return jsonError(401, 'reconnect_required', 'Reconnect required.');
+    return respond(jsonError(401, 'reconnect_required', 'Reconnect required.'));
   }
 
   if (!session.driveFolderId) {
-    return jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
+    return respond(jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.'));
   }
   const driveFolderId = session.driveFolderId;
+  ctx.userHint = session.user?.email ? hashUserHint(session.user.email) : 'anon';
 
   const url = getRequestUrl(request);
   const qParam = url.searchParams.get('q') ?? '';
   const trimmedQuery = qParam.trim();
 
   if (trimmedQuery.length < 2) {
-    return jsonError(400, 'query_too_short', 'Query must be at least 2 characters.');
+    return respond(jsonError(400, 'query_too_short', 'Query must be at least 2 characters.'));
   }
 
   if (trimmedQuery.length > MAX_QUERY_LENGTH) {
-    return jsonError(400, 'invalid_request', 'Query must be shorter than 100 characters.');
+    return respond(jsonError(400, 'invalid_request', 'Query must be shorter than 100 characters.'));
   }
 
   const rateKey = getRateLimitKey(request, session);
-  const rateStatus = checkRateLimit(rateKey, { limit: 60, windowMs: 60_000 });
+  const rateStatus = checkRateLimit(rateKey, { limit: 60, windowMs: 60_000 }, ctx);
   if (!rateStatus.allowed) {
-    return jsonError(429, 'rate_limited', 'Too many requests. Try again in a moment.', {
-      retryAfterMs: rateStatus.resetMs,
-    });
+    return respond(
+      jsonError(429, 'rate_limited', 'Too many requests. Try again in a moment.', {
+        retryAfterMs: rateStatus.resetMs,
+      }),
+    );
   }
 
   const type = parseType(url.searchParams.get('type'));
@@ -135,6 +148,13 @@ export const GET = async (request: NextRequest | Request) => {
   const safePageSize = Number.isFinite(rawPageSize) ? rawPageSize : DEFAULT_PAGE_SIZE;
   const pageSize = Math.min(Math.max(safePageSize, 1), MAX_PAGE_SIZE);
 
+  logInfo(ctx, 'request_start', {
+    method: request.method,
+    queryLength: trimmedQuery.length,
+    type,
+    pageSize,
+  });
+
   const drive = createDriveClient(accessToken);
   let candidates: DriveCandidate[] = [];
   let nextPageToken: string | undefined;
@@ -142,9 +162,9 @@ export const GET = async (request: NextRequest | Request) => {
   let indexStale = false;
 
   try {
-    const indexFile = await findIndexFile(drive, driveFolderId);
+    const indexFile = await findIndexFile(drive, driveFolderId, ctx);
     if (indexFile?.id) {
-      const index = await readIndexFile(drive, indexFile.id, driveFolderId);
+      const index = await readIndexFile(drive, indexFile.id, driveFolderId, ctx);
       if (index) {
         fromIndex = true;
         indexStale = !isIndexFresh(index, new Date(), DEFAULT_INDEX_MAX_AGE_MINUTES);
@@ -179,36 +199,50 @@ export const GET = async (request: NextRequest | Request) => {
       }
     }
   } catch (error) {
-    logGoogleError(error, 'drive.files.get');
+    logGoogleError(error, 'drive.files.get', ctx);
     const mapped = mapGoogleError(error, 'drive.files.get');
-    return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+    logError(ctx, 'request_error', {
+      status: mapped.status,
+      code: mapped.code,
+      error: safeError(error),
+    });
+    return respond(jsonError(mapped.status, mapped.code, mapped.message, mapped.details));
   }
 
   if (!fromIndex) {
     let response;
     try {
-      response = await withRetry((signal) =>
-        withTimeout(
-          (timeoutSignal) =>
-            drive.files.list(
-              {
-                q: buildDriveQuery(driveFolderId, type),
-                orderBy: 'modifiedTime desc',
-                pageSize,
-                pageToken,
-                fields: 'nextPageToken, files(id, name, modifiedTime, webViewLink)',
-              },
-              { signal: timeoutSignal },
+      response = await time(ctx, 'drive.files.list.search', () =>
+        withRetry(
+          (signal) =>
+            withTimeout(
+              (timeoutSignal) =>
+                drive.files.list(
+                  {
+                    q: buildDriveQuery(driveFolderId, type),
+                    orderBy: 'modifiedTime desc',
+                    pageSize,
+                    pageToken,
+                    fields: 'nextPageToken, files(id, name, modifiedTime, webViewLink)',
+                  },
+                  { signal: timeoutSignal },
+                ),
+              DEFAULT_GOOGLE_TIMEOUT_MS,
+              'upstream_timeout',
+              signal,
             ),
-          DEFAULT_GOOGLE_TIMEOUT_MS,
-          'upstream_timeout',
-          signal,
+          { ctx },
         ),
       );
     } catch (error) {
-      logGoogleError(error, 'drive.files.list');
+      logGoogleError(error, 'drive.files.list', ctx);
       const mapped = mapGoogleError(error, 'drive.files.list');
-      return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+      logError(ctx, 'request_error', {
+        status: mapped.status,
+        code: mapped.code,
+        error: safeError(error),
+      });
+      return respond(jsonError(mapped.status, mapped.code, mapped.message, mapped.details));
     }
 
     candidates = (response.data.files ?? []).filter((file) => file.id) as DriveCandidate[];
@@ -225,22 +259,31 @@ export const GET = async (request: NextRequest | Request) => {
 
     let contentResponse;
     try {
-      contentResponse = await withRetry((signal) =>
-        withTimeout(
-          (timeoutSignal) =>
-            drive.files.get(
-              { fileId: file.id ?? '', alt: 'media' },
-              { responseType: 'json', signal: timeoutSignal },
+      contentResponse = await time(ctx, 'drive.files.get.media', () =>
+        withRetry(
+          (signal) =>
+            withTimeout(
+              (timeoutSignal) =>
+                drive.files.get(
+                  { fileId: file.id ?? '', alt: 'media' },
+                  { responseType: 'json', signal: timeoutSignal },
+                ),
+              DEFAULT_GOOGLE_TIMEOUT_MS,
+              'upstream_timeout',
+              signal,
             ),
-          DEFAULT_GOOGLE_TIMEOUT_MS,
-          'upstream_timeout',
-          signal,
+          { ctx },
         ),
       );
     } catch (error) {
-      logGoogleError(error, 'drive.files.get');
+      logGoogleError(error, 'drive.files.get', ctx);
       const mapped = mapGoogleError(error, 'drive.files.get');
-      return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+      logError(ctx, 'request_error', {
+        status: mapped.status,
+        code: mapped.code,
+        error: safeError(error),
+      });
+      return respond(jsonError(mapped.status, mapped.code, mapped.message, mapped.details));
     }
     const parsed = parseDriveJson(contentResponse.data);
 
@@ -280,13 +323,15 @@ export const GET = async (request: NextRequest | Request) => {
     }
   }
 
-  return NextResponse.json({
-    q: trimmedQuery,
-    type,
-    results: matches,
-    nextPageToken,
-    partial: candidates.length > DOWNLOAD_CAP ? true : undefined,
-    fromIndex,
-    indexStale: fromIndex ? indexStale : undefined,
-  });
+  return respond(
+    NextResponse.json({
+      q: trimmedQuery,
+      type,
+      results: matches,
+      nextPageToken,
+      partial: candidates.length > DOWNLOAD_CAP ? true : undefined,
+      fromIndex,
+      indexStale: fromIndex ? indexStale : undefined,
+    }),
+  );
 };

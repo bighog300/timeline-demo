@@ -1,4 +1,6 @@
 import type { ApiErrorCode } from './apiErrors';
+import type { LogContext } from './logger';
+import { logError, logWarn, safeError } from './logger';
 
 type RetryOptions = {
   requestName?: string;
@@ -7,6 +9,7 @@ type RetryOptions = {
   baseDelayMs?: number;
   maxDelayMs?: number;
   factor?: number;
+  ctx?: LogContext;
 };
 
 const TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504]);
@@ -136,6 +139,7 @@ export const withRetry = async <T>(
     baseDelayMs = 250,
     maxDelayMs = 2000,
     factor = 2,
+    ctx,
   } = opts;
 
   let attempt = 0;
@@ -163,6 +167,26 @@ export const withRetry = async <T>(
       const baseDelay = Math.min(baseDelayMs * factor ** (attempt - 1), maxDelayMs);
       const jitter = baseDelay * (0.5 + Math.random());
       const delay = Math.min(retryAfterMs ?? jitter, maxDelayMs);
+
+      const statusClass =
+        status === 429 ? '429' : typeof status === 'number' && status >= 500 ? '5xx' : 'unknown';
+      if (ctx) {
+        logWarn(ctx, 'google_retry', {
+          attempt,
+          maxAttempts,
+          status,
+          statusClass,
+          backoffMs: Math.round(delay),
+        });
+      } else {
+        console.warn('Google retry', {
+          attempt,
+          maxAttempts,
+          status,
+          statusClass,
+          backoffMs: Math.round(delay),
+        });
+      }
 
       await sleep(delay, signal);
     }
@@ -217,8 +241,16 @@ export const mapGoogleError = (
   };
 };
 
-export const logGoogleError = (error: unknown, requestName: string) => {
+export const logGoogleError = (error: unknown, requestName: string, ctx?: LogContext) => {
   const status = statusFromError(error);
-  const shortMessage = error instanceof Error ? error.message.slice(0, 120) : 'unknown_error';
-  console.warn('Google API request failed', { request: requestName, status, message: shortMessage });
+  if (ctx) {
+    logError(ctx, 'google_request_failed', {
+      request: requestName,
+      status,
+      error: safeError(error),
+    });
+  } else {
+    const shortMessage = error instanceof Error ? error.message.slice(0, 120) : 'unknown_error';
+    console.warn('Google API request failed', { request: requestName, status, message: shortMessage });
+  }
 };

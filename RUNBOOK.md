@@ -25,13 +25,40 @@
 ## How to Diagnose
 
 1. **Check Vercel logs**
-   - Look for `error_code` and any upstream request IDs.
+   - Look for `error_code` and the `requestId` field in JSON logs.
+   - Logs are single-line JSON with `{ level, ts, requestId, route, msg, ... }`.
 2. **Reproduce locally**
    - Use the same env vars as Vercel.
    - Run API routes directly (e.g., `curl` against `/api/timeline/*`).
 3. **Smoke-test script**
    - `bash scripts/smoke-test.sh`
    - Logs (on failure) are written to `./.smoke-server.log`.
+
+## Observability & Safe Logging
+
+### Using Request IDs
+- Every timeline/google API response includes an `x-request-id` header.
+- The Timeline UI surfaces the request ID in error banners (copy/pasteable).
+- Ask users to include the request ID when reporting issues so you can correlate with Vercel logs.
+
+### Where to Find Logs
+- Vercel project logs contain single-line JSON entries.
+- Filter by `requestId` and `route` to trace a request end-to-end.
+
+### What Gets Logged
+- `request_start` and `request_end` with timing/latency.
+- Retry and rate limit events.
+- Timing labels around Google Drive/Gmail calls and summarization.
+
+### What Is Intentionally Not Logged
+- OAuth tokens, cookies, raw email bodies, or full Drive contents.
+- Full search queries (only length/metadata is logged).
+
+### Reporting a Bug
+When filing an issue, include:
+1. Request ID from the UI or response header.
+2. Timestamp of the failure.
+3. The route and action taken (e.g., "Summarize selected Gmail items").
 
 ## Common Developer Tasks
 
