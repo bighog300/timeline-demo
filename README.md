@@ -73,6 +73,33 @@ See the comprehensive [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for detailed in
 
 See [.env.example](.env.example) for optional local overrides.
 
+### Google OAuth (Phase 1 Foundation)
+
+The Phase 1 “real Timeline” foundation uses NextAuth + Google OAuth in the web app:
+
+1. Create OAuth credentials in Google Cloud Console.
+2. Add these redirect URLs:
+   - `http://localhost:3000/api/auth/callback/google` (local)
+   - `https://<your-vercel-domain>/api/auth/callback/google` (production)
+3. Set the required environment variables in Vercel or `.env` locally:
+   - `NEXTAUTH_URL`
+   - `NEXTAUTH_SECRET`
+   - `GOOGLE_CLIENT_ID`
+   - `GOOGLE_CLIENT_SECRET`
+   - `GOOGLE_SCOPES` (Gmail + Drive metadata scopes)
+
+`apps/web` reads these variables at runtime; in Vercel, define them in the project’s environment
+settings (no build-time secrets required). The UI will fall back to a “Not configured” state when
+they are missing.
+
+### Phase 1 Does / Doesn’t Do
+
+- ✅ Google sign-in + connection status
+- ✅ Gmail + Drive metadata listing (user-selected items only)
+- ✅ Drive folder provisioning for app-owned artifacts
+- ❌ No background scanning
+- ❌ No summarization yet (Phase 2)
+
 ## 🧪 Testing
 
 ```bash
