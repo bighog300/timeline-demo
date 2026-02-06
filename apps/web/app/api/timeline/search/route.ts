@@ -10,6 +10,8 @@ import {
   withRetry,
   withTimeout,
 } from '../../../lib/googleRequest';
+import { DEFAULT_INDEX_MAX_AGE_MINUTES, isIndexFresh } from '../../../lib/indexFreshness';
+import { findIndexFile, readIndexFile } from '../../../lib/indexDrive';
 import { checkRateLimit, getRateLimitKey } from '../../../lib/rateLimit';
 import { matchSelectionSet, matchSummaryArtifact, normalizeQuery } from '../../../lib/searchIndex';
 import { isSummaryArtifact, normalizeArtifact } from '../../../lib/validateArtifact';
@@ -25,6 +27,13 @@ type SearchResult = {
   updatedAtISO?: string;
   snippet: string;
   matchFields: string[];
+};
+
+type DriveCandidate = {
+  id: string;
+  name?: string;
+  modifiedTime?: string;
+  webViewLink?: string;
 };
 
 const MAX_QUERY_LENGTH = 100;
@@ -75,6 +84,12 @@ const fileKind = (name?: string): 'summary' | 'selection' | null => {
   return null;
 };
 
+const sortByUpdated = (a?: string, b?: string) => {
+  const aTime = a ? new Date(a).getTime() : 0;
+  const bTime = b ? new Date(b).getTime() : 0;
+  return bTime - aTime;
+};
+
 const getRequestUrl = (request: NextRequest | Request) =>
   'nextUrl' in request ? request.nextUrl : new URL(request.url);
 
@@ -118,33 +133,84 @@ export const GET = async (request: NextRequest | Request) => {
   const pageSize = Math.min(Math.max(safePageSize, 1), MAX_PAGE_SIZE);
 
   const drive = createDriveClient(accessToken);
-  let response;
+  let candidates: DriveCandidate[] = [];
+  let nextPageToken: string | undefined;
+  let fromIndex = false;
+  let indexStale = false;
+
   try {
-    response = await withRetry((signal) =>
-      withTimeout(
-        (timeoutSignal) =>
-          drive.files.list(
-            {
-              q: buildDriveQuery(driveFolderId, type),
-              orderBy: 'modifiedTime desc',
-              pageSize,
-              pageToken,
-              fields: 'nextPageToken, files(id, name, modifiedTime, webViewLink)',
-            },
-            { signal: timeoutSignal },
-          ),
-        DEFAULT_GOOGLE_TIMEOUT_MS,
-        'upstream_timeout',
-        signal,
-      ),
-    );
+    const indexFile = await findIndexFile(drive, driveFolderId);
+    if (indexFile?.id) {
+      const index = await readIndexFile(drive, indexFile.id, driveFolderId);
+      if (index) {
+        fromIndex = true;
+        indexStale = !isIndexFresh(index, new Date(), DEFAULT_INDEX_MAX_AGE_MINUTES);
+        const source =
+          type === 'summary'
+            ? index.summaries
+            : type === 'selection'
+              ? index.selectionSets
+              : [...index.summaries, ...index.selectionSets].sort((a, b) =>
+                  sortByUpdated(a.updatedAtISO, b.updatedAtISO),
+                );
+        const mapped = source.map((entry) =>
+          'title' in entry
+            ? {
+                id: entry.driveFileId,
+                name: `${entry.title} - Summary.json`,
+                modifiedTime: entry.updatedAtISO,
+                webViewLink: entry.webViewLink,
+              }
+            : {
+                id: entry.driveFileId,
+                name: `${entry.name} - Selection.json`,
+                modifiedTime: entry.updatedAtISO,
+                webViewLink: entry.webViewLink,
+              },
+        );
+        const startIndex = pageToken ? Number(pageToken) : 0;
+        const safeStartIndex = Number.isFinite(startIndex) && startIndex >= 0 ? startIndex : 0;
+        candidates = mapped.slice(safeStartIndex, safeStartIndex + pageSize);
+        nextPageToken =
+          safeStartIndex + pageSize < mapped.length ? String(safeStartIndex + pageSize) : undefined;
+      }
+    }
   } catch (error) {
-    logGoogleError(error, 'drive.files.list');
-    const mapped = mapGoogleError(error, 'drive.files.list');
+    logGoogleError(error, 'drive.files.get');
+    const mapped = mapGoogleError(error, 'drive.files.get');
     return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
   }
 
-  const candidates = (response.data.files ?? []).filter((file) => file.id);
+  if (!fromIndex) {
+    let response;
+    try {
+      response = await withRetry((signal) =>
+        withTimeout(
+          (timeoutSignal) =>
+            drive.files.list(
+              {
+                q: buildDriveQuery(driveFolderId, type),
+                orderBy: 'modifiedTime desc',
+                pageSize,
+                pageToken,
+                fields: 'nextPageToken, files(id, name, modifiedTime, webViewLink)',
+              },
+              { signal: timeoutSignal },
+            ),
+          DEFAULT_GOOGLE_TIMEOUT_MS,
+          'upstream_timeout',
+          signal,
+        ),
+      );
+    } catch (error) {
+      logGoogleError(error, 'drive.files.list');
+      const mapped = mapGoogleError(error, 'drive.files.list');
+      return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+    }
+
+    candidates = (response.data.files ?? []).filter((file) => file.id) as DriveCandidate[];
+    nextPageToken = response.data.nextPageToken ?? undefined;
+  }
   const matches: SearchResult[] = [];
   const normalizedQuery = normalizeQuery(trimmedQuery);
 
@@ -212,7 +278,9 @@ export const GET = async (request: NextRequest | Request) => {
     q: trimmedQuery,
     type,
     results: matches,
-    nextPageToken: response.data.nextPageToken ?? undefined,
+    nextPageToken,
     partial: candidates.length > DOWNLOAD_CAP ? true : undefined,
+    fromIndex,
+    indexStale: fromIndex ? indexStale : undefined,
   });
 };

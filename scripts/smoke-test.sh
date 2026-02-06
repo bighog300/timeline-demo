@@ -168,3 +168,25 @@ if ! printf '%s' "${selection_save_body}" | node -e 'const fs=require("fs");cons
   fail_response "Timeline selection save (unauth)" "${selection_save_body}"
 fi
 echo "✅ /api/timeline/selection/save unauth ok"
+
+timeline_index_get=$(curl -sS "${BASE_URL}/api/timeline/index/get" -w "\n%{http_code}") || true
+timeline_index_get_body=$(printf '%s' "${timeline_index_get}" | sed '$d')
+timeline_index_get_status=$(printf '%s' "${timeline_index_get}" | tail -n 1)
+if [[ "${timeline_index_get_status}" != "401" ]]; then
+  fail_response "Timeline index get (unauth)" "${timeline_index_get_body}"
+fi
+if ! printf '%s' "${timeline_index_get_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));const code=data?.error?.code ?? data?.error_code ?? data?.error;if (code !== "reconnect_required") process.exit(1);'; then
+  fail_response "Timeline index get (unauth)" "${timeline_index_get_body}"
+fi
+echo "✅ /api/timeline/index/get unauth ok"
+
+timeline_index_rebuild=$(curl -sS -X POST "${BASE_URL}/api/timeline/index/rebuild" -w "\n%{http_code}") || true
+timeline_index_rebuild_body=$(printf '%s' "${timeline_index_rebuild}" | sed '$d')
+timeline_index_rebuild_status=$(printf '%s' "${timeline_index_rebuild}" | tail -n 1)
+if [[ "${timeline_index_rebuild_status}" != "401" ]]; then
+  fail_response "Timeline index rebuild (unauth)" "${timeline_index_rebuild_body}"
+fi
+if ! printf '%s' "${timeline_index_rebuild_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));const code=data?.error?.code ?? data?.error_code ?? data?.error;if (code !== "reconnect_required") process.exit(1);'; then
+  fail_response "Timeline index rebuild (unauth)" "${timeline_index_rebuild_body}"
+fi
+echo "✅ /api/timeline/index/rebuild unauth ok"

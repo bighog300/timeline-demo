@@ -11,6 +11,15 @@ const mockFetch = (handler: (url: string, init?: RequestInit) => Response) => {
   });
 };
 
+const withIndexGet =
+  (handler: (url: string, init?: RequestInit) => Response) =>
+  (url: string, init?: RequestInit) => {
+    if (url === '/api/timeline/index/get') {
+      return new Response(JSON.stringify({ index: null }), { status: 200 });
+    }
+    return handler(url, init);
+  };
+
 const buildApiError = (status: number, code: string, message: string) =>
   new Response(
     JSON.stringify({
@@ -92,6 +101,30 @@ const selectionSet = {
   driveWebViewLink: 'https://drive.google.com/selection-1',
 };
 
+const indexPayload = {
+  version: 1,
+  updatedAtISO: '2024-03-01T12:00:00Z',
+  driveFolderId: 'folder-1',
+  indexFileId: 'index-1',
+  summaries: [
+    {
+      driveFileId: 'summary-1',
+      title: 'Q1 Plan',
+      source: 'drive',
+      sourceId: 'summary-1',
+      updatedAtISO: '2024-03-01T11:00:00Z',
+    },
+  ],
+  selectionSets: [
+    {
+      driveFileId: 'selection-1',
+      name: 'Sprint 1',
+      updatedAtISO: '2024-03-01T10:00:00Z',
+    },
+  ],
+  stats: { totalSummaries: 1, totalSelectionSets: 1 },
+};
+
 describe('TimelinePageClient', () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -103,7 +136,24 @@ describe('TimelinePageClient', () => {
   });
 
   it('shows an empty state when no selections exist', () => {
+    mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    render(<TimelinePageClient />);
+
+    expect(screen.getByText(/no items selected yet/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /generate summaries/i })).toBeDisabled();
+  });
+
+  it('renders the index panel with status details', async () => {
     mockFetch((url) => {
+      if (url === '/api/timeline/index/get') {
+        return new Response(JSON.stringify({ index: indexPayload }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -112,13 +162,86 @@ describe('TimelinePageClient', () => {
 
     render(<TimelinePageClient />);
 
-    expect(screen.getByText(/no items selected yet/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /generate summaries/i })).toBeDisabled();
+    await waitFor(() => {
+      expect(screen.getByText('Index')).toBeInTheDocument();
+      expect(screen.getByText('Present')).toBeInTheDocument();
+      expect(screen.getAllByText('Summaries').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Selection sets').length).toBeGreaterThan(0);
+    });
+  });
+
+  it('refreshes the index and shows a success banner', async () => {
+    mockFetch((url, init) => {
+      if (url === '/api/timeline/index/get') {
+        return new Response(JSON.stringify({ index: null }), { status: 200 });
+      }
+      if (url === '/api/timeline/index/rebuild' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ index: indexPayload }), { status: 200 });
+      }
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh index/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/index refreshed/i)).toBeInTheDocument();
+    });
+  });
+
+  it('shows rate limited and upstream error notices for index refresh', async () => {
+    mockFetch((url, init) => {
+      if (url === '/api/timeline/index/get') {
+        return new Response(JSON.stringify({ index: null }), { status: 200 });
+      }
+      if (url === '/api/timeline/index/rebuild' && init?.method === 'POST') {
+        return buildApiError(429, 'rate_limited', 'Too many requests. Try again in a moment.');
+      }
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh index/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/too many requests/i)).toBeInTheDocument();
+    });
+  });
+
+  it('shows an upstream error notice for index refresh failures', async () => {
+    mockFetch((url, init) => {
+      if (url === '/api/timeline/index/get') {
+        return new Response(JSON.stringify({ index: null }), { status: 200 });
+      }
+      if (url === '/api/timeline/index/rebuild' && init?.method === 'POST') {
+        return buildApiError(502, 'upstream_error', 'Google API error.');
+      }
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    fireEvent.click(screen.getByRole('button', { name: /refresh index/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/google returned an error/i)).toBeInTheDocument();
+    });
   });
 
   it('shows reconnect CTA when summarize returns 401', async () => {
     setSelections();
-    mockFetch((url) => {
+    mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -126,7 +249,7 @@ describe('TimelinePageClient', () => {
         return buildApiError(401, 'reconnect_required', 'Reconnect required.');
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 
@@ -144,7 +267,7 @@ describe('TimelinePageClient', () => {
 
   it('shows provision CTA when summarize returns drive_not_provisioned', async () => {
     setSelections();
-    mockFetch((url) => {
+    mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -152,7 +275,7 @@ describe('TimelinePageClient', () => {
         return buildApiError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 
@@ -170,7 +293,7 @@ describe('TimelinePageClient', () => {
 
   it('shows a rate limit notice when summarize is rate limited', async () => {
     setSelections();
-    mockFetch((url) => {
+    mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -178,7 +301,7 @@ describe('TimelinePageClient', () => {
         return buildApiError(429, 'rate_limited', 'Too many requests. Try again in a moment.');
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 
@@ -195,7 +318,7 @@ describe('TimelinePageClient', () => {
 
   it('syncs artifacts from Drive when clicking sync button', async () => {
     setSelections();
-    mockFetch((url) => {
+    mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -205,7 +328,7 @@ describe('TimelinePageClient', () => {
         });
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 
@@ -222,7 +345,7 @@ describe('TimelinePageClient', () => {
   });
 
   it('renders search results from Drive-scoped search', async () => {
-    mockFetch((url) => {
+    mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -247,7 +370,7 @@ describe('TimelinePageClient', () => {
         );
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 
@@ -265,12 +388,12 @@ describe('TimelinePageClient', () => {
   });
 
   it('shows an inline hint when the search query is too short', async () => {
-    mockFetch((url) => {
+    mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 
@@ -285,7 +408,7 @@ describe('TimelinePageClient', () => {
   });
 
   it('shows reconnect CTA when search returns 401', async () => {
-    mockFetch((url) => {
+    mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -293,7 +416,7 @@ describe('TimelinePageClient', () => {
         return buildApiError(401, 'reconnect_required', 'Reconnect required.');
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 
@@ -309,7 +432,7 @@ describe('TimelinePageClient', () => {
   });
 
   it('shows an upstream timeout notice when search fails', async () => {
-    mockFetch((url) => {
+    mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -317,7 +440,7 @@ describe('TimelinePageClient', () => {
         return buildApiError(504, 'upstream_timeout', 'Google request timed out. Please retry.');
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 
@@ -334,7 +457,7 @@ describe('TimelinePageClient', () => {
 
   it('shows reconnect CTA when sync returns 401', async () => {
     setSelections();
-    mockFetch((url) => {
+    mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -342,7 +465,7 @@ describe('TimelinePageClient', () => {
         return buildApiError(401, 'reconnect_required', 'Reconnect required.');
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 
@@ -360,7 +483,7 @@ describe('TimelinePageClient', () => {
 
   it('shows provision CTA when sync returns drive_not_provisioned', async () => {
     setSelections();
-    mockFetch((url) => {
+    mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -368,7 +491,7 @@ describe('TimelinePageClient', () => {
         return buildApiError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 
@@ -389,6 +512,9 @@ describe('TimelinePageClient', () => {
     window.localStorage.setItem('timeline.autoSyncOnOpen', 'true');
     const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
       const url = typeof input === 'string' ? input : input.url;
+      if (url === '/api/timeline/index/get') {
+        return new Response(JSON.stringify({ index: null }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -410,7 +536,7 @@ describe('TimelinePageClient', () => {
 
   it('saves a selection set and shows a success banner', async () => {
     setSelections();
-    mockFetch((url, init) => {
+    mockFetch(withIndexGet((url, init) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -418,7 +544,7 @@ describe('TimelinePageClient', () => {
         return new Response(JSON.stringify({ set: selectionSet }), { status: 200 });
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 
@@ -438,7 +564,7 @@ describe('TimelinePageClient', () => {
   });
 
   it('lists saved sets and loads a preview', async () => {
-    mockFetch((url) => {
+    mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: selectionList }), { status: 200 });
       }
@@ -446,7 +572,7 @@ describe('TimelinePageClient', () => {
         return new Response(JSON.stringify({ set: selectionSet }), { status: 200 });
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 
@@ -472,7 +598,7 @@ describe('TimelinePageClient', () => {
       ]),
     );
 
-    mockFetch((url) => {
+    mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: selectionList }), { status: 200 });
       }
@@ -480,7 +606,7 @@ describe('TimelinePageClient', () => {
         return new Response(JSON.stringify({ set: selectionSet }), { status: 200 });
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 
@@ -501,12 +627,12 @@ describe('TimelinePageClient', () => {
   it('renders source metadata and toggles the content preview', async () => {
     setSelections();
     window.localStorage.setItem('timeline.summaryArtifacts', JSON.stringify({ 'gmail:msg-1': artifactWithMetadata }));
-    mockFetch((url) => {
+    mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
       return new Response('Not found', { status: 404 });
-    });
+    }));
 
     render(<TimelinePageClient />);
 

@@ -10,6 +10,8 @@ import {
   withRetry,
   withTimeout,
 } from '../../../../lib/googleRequest';
+import { DEFAULT_INDEX_MAX_AGE_MINUTES, isIndexFresh } from '../../../../lib/indexFreshness';
+import { findIndexFile, readIndexFile } from '../../../../lib/indexDrive';
 import { checkRateLimit, getRateLimitKey } from '../../../../lib/rateLimit';
 import type { SummaryArtifact } from '../../../../lib/types';
 import { isSummaryArtifact, normalizeArtifact } from '../../../../lib/validateArtifact';
@@ -67,39 +69,75 @@ export const GET = async (request: NextRequest) => {
 
   const drive = createDriveClient(accessToken);
 
-  let listResponse;
+  let files: ArtifactFile[] = [];
+  let nextPageToken: string | undefined;
+  let fromIndex = false;
+  let indexStale = false;
+
   try {
-    listResponse = await withRetry((signal) =>
-      withTimeout(
-        (timeoutSignal) =>
-          drive.files.list(
-            {
-              q: `'${session.driveFolderId}' in parents and trashed=false`,
-              orderBy: 'modifiedTime desc',
-              pageSize,
-              pageToken,
-              fields: 'nextPageToken, files(id, name, mimeType, modifiedTime, webViewLink)',
-            },
-            { signal: timeoutSignal },
-          ),
-        DEFAULT_GOOGLE_TIMEOUT_MS,
-        'upstream_timeout',
-        signal,
-      ),
-    );
+    const indexFile = await findIndexFile(drive, session.driveFolderId);
+    if (indexFile?.id) {
+      const index = await readIndexFile(drive, indexFile.id, session.driveFolderId);
+      if (index) {
+        fromIndex = true;
+        indexStale = !isIndexFresh(index, new Date(), DEFAULT_INDEX_MAX_AGE_MINUTES);
+        const startIndex = pageToken ? Number(pageToken) : 0;
+        const safeStartIndex = Number.isFinite(startIndex) && startIndex >= 0 ? startIndex : 0;
+        const page = index.summaries.slice(safeStartIndex, safeStartIndex + pageSize);
+        nextPageToken =
+          safeStartIndex + pageSize < index.summaries.length
+            ? String(safeStartIndex + pageSize)
+            : undefined;
+        files = page.map((summary) => ({
+          id: summary.driveFileId,
+          name: `${summary.title} - Summary.json`,
+          modifiedTime: summary.updatedAtISO ?? undefined,
+          webViewLink: summary.webViewLink ?? undefined,
+        }));
+      }
+    }
   } catch (error) {
-    logGoogleError(error, 'drive.files.list');
-    const mapped = mapGoogleError(error, 'drive.files.list');
+    logGoogleError(error, 'drive.files.get');
+    const mapped = mapGoogleError(error, 'drive.files.get');
     return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
   }
 
-  const files = (listResponse.data.files ?? []).filter(isArtifactJson);
-  const responseFiles: ArtifactFile[] = files.map((file) => ({
-    id: file.id ?? '',
-    name: file.name ?? 'Untitled Summary',
-    modifiedTime: file.modifiedTime ?? undefined,
-    webViewLink: file.webViewLink ?? undefined,
-  }));
+  if (!fromIndex) {
+    let listResponse;
+    try {
+      listResponse = await withRetry((signal) =>
+        withTimeout(
+          (timeoutSignal) =>
+            drive.files.list(
+              {
+                q: `'${session.driveFolderId}' in parents and trashed=false`,
+                orderBy: 'modifiedTime desc',
+                pageSize,
+                pageToken,
+                fields: 'nextPageToken, files(id, name, mimeType, modifiedTime, webViewLink)',
+              },
+              { signal: timeoutSignal },
+            ),
+          DEFAULT_GOOGLE_TIMEOUT_MS,
+          'upstream_timeout',
+          signal,
+        ),
+      );
+    } catch (error) {
+      logGoogleError(error, 'drive.files.list');
+      const mapped = mapGoogleError(error, 'drive.files.list');
+      return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+    }
+
+    const listedFiles = (listResponse.data.files ?? []).filter(isArtifactJson);
+    files = listedFiles.map((file) => ({
+      id: file.id ?? '',
+      name: file.name ?? 'Untitled Summary',
+      modifiedTime: file.modifiedTime ?? undefined,
+      webViewLink: file.webViewLink ?? undefined,
+    }));
+    nextPageToken = listResponse.data.nextPageToken ?? undefined;
+  }
 
   const artifacts: SummaryArtifact[] = [];
   for (const file of files.slice(0, MAX_JSON_DOWNLOADS)) {
@@ -143,7 +181,9 @@ export const GET = async (request: NextRequest) => {
 
   return NextResponse.json({
     artifacts,
-    files: responseFiles,
-    nextPageToken: listResponse.data.nextPageToken ?? undefined,
+    files,
+    nextPageToken,
+    fromIndex,
+    indexStale: fromIndex ? indexStale : undefined,
   });
 };
