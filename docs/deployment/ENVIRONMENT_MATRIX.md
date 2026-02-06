@@ -1,6 +1,6 @@
 # Environment Matrix
 
-This matrix defines required configuration for each runtime surface (`api`, `web`) across environments (`local`, `preview`, `production`).
+This matrix defines configuration for the Next.js app (UI + API routes) across environments (`local`, `preview`, `production`).
 
 > **Policy:** Never commit real secrets. Store production values in your hosting platform secret manager (Render, Vercel, etc.).
 
@@ -14,7 +14,7 @@ This matrix defines required configuration for each runtime surface (`api`, `web
 | OpenAI API key | AI/platform owner | OpenAI dashboard + secret manager |
 | Web runtime config | Frontend/platform owner | Vercel environment variables |
 
-## API Variables
+## Optional Integration Variables
 
 | Variable | Local | Preview | Production | Required | Notes |
 |---|---|---|---|---|---|
@@ -35,8 +35,6 @@ This matrix defines required configuration for each runtime surface (`api`, `web
 
 | Variable | Local | Preview | Production | Required | Notes |
 |---|---|---|---|---|---|
-| `API_SERVER_ORIGIN` | `http://localhost:3001` | Preview API origin | Prod API origin | Yes | Must point to deployed API host. |
-| `NEXT_PUBLIC_API_BASE` | `/api` | `/api` | `/api` | Yes | Keep as `/api` when using Vercel rewrites. |
 | `NEXT_PUBLIC_APP_BASE_URL` | Optional local URL | Preview URL | Production URL | Optional | Useful for absolute links or metadata. |
 
 ## Validation Commands

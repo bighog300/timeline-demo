@@ -92,63 +92,9 @@ openssl rand -base64 32
 
 ---
 
-## 🚀 API Deployment
+## 🌐 Vercel Deployment
 
-### ☐ Step 8: Deploy API to Render (or alternative)
-
-**Using Render:**
-- [ ] Sign in to [Render](https://render.com)
-- [ ] New → Web Service
-- [ ] Connect GitHub repository
-- [ ] Configure:
-  - [ ] Name: `timeline-api`
-  - [ ] Root Directory: `apps/api`
-  - [ ] Runtime: Node
-  - [ ] Build Command:
-    ```bash
-    corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile && pnpm db:generate && pnpm db:migrate && pnpm build
-    ```
-  - [ ] Start Command: `pnpm start`
-
-### ☐ Step 9: Configure API Environment Variables
-In Render dashboard (or your hosting provider), add:
-
-```
-NODE_ENV=production
-DATABASE_URL=<your-database-url>
-SESSION_SECRET=<generated-secret>
-ENCRYPTION_KEY_BASE64=<generated-key>
-KEY_VERSION=1
-GOOGLE_OAUTH_CLIENT_ID=<from-google-console>
-GOOGLE_OAUTH_CLIENT_SECRET=<from-google-console>
-GOOGLE_OAUTH_REDIRECT_URI=https://your-domain.vercel.app/api/auth/callback
-OPENAI_API_KEY=<your-openai-key>
-ADMIN_EMAILS=your-email@example.com
-PORT=3001
-DRIVE_ADAPTER=google
-```
-
-- [ ] All environment variables configured
-- [ ] Click "Deploy"
-- [ ] Wait for deployment to complete
-- [ ] Copy API URL (e.g., `https://timeline-api.onrender.com`)
-- [ ] Test API: `curl https://your-api-url.com/health`
-
----
-
-## 🌐 Vercel Web Deployment
-
-### ☐ Step 10: Update vercel.json
-- [ ] Edit `vercel.json`
-- [ ] Replace `YOUR-API-DOMAIN.com` with your actual API URL
-- [ ] Commit and push:
-  ```bash
-  git add vercel.json
-  git commit -m "Update API URL in vercel.json"
-  git push origin main
-  ```
-
-### ☐ Step 11: Deploy to Vercel
+### ☐ Step 8: Deploy to Vercel
 - [ ] Sign in to [Vercel](https://vercel.com)
 - [ ] New Project
 - [ ] Import GitHub repository
@@ -160,15 +106,8 @@ DRIVE_ADAPTER=google
   - [ ] Output Directory: `apps/web/.next`
   - [ ] Node Version: 20.x
 
-### ☐ Step 12: Configure Vercel Environment Variables
-In Vercel dashboard, add:
-
-```
-API_SERVER_ORIGIN=https://your-api-domain.onrender.com
-NEXT_PUBLIC_API_BASE=/api
-```
-
-- [ ] Environment variables configured
+### ☐ Step 9: Configure Vercel Environment Variables
+- [ ] Add optional integration keys as needed (see `.env.example`)
 - [ ] Click "Deploy"
 - [ ] Wait for deployment to complete
 - [ ] Copy Vercel URL (e.g., `https://timeline-app-xyz.vercel.app`)
@@ -187,17 +126,15 @@ NEXT_PUBLIC_API_BASE=/api
   ```
 - [ ] Save
 
-### ☐ Step 14: Update API Environment Variable
-- [ ] Go to Render (or your API host)
-- [ ] Update `GOOGLE_OAUTH_REDIRECT_URI` to production URL
-- [ ] Trigger redeploy if necessary
+### ☐ Step 14: Update OAuth Redirect URI
+- [ ] Ensure `GOOGLE_OAUTH_REDIRECT_URI` matches your production URL
 
 ---
 
 ## ✅ Post-Deployment Verification
 
 ### ☐ Step 15: Test API
-- [ ] Visit API health endpoint: `https://your-api-url.com/health`
+- [ ] Visit API health endpoint: `https://your-app.vercel.app/api/health`
 - [ ] Should return OK or 200 status
 
 ### ☐ Step 16: Test Web App
@@ -293,9 +230,8 @@ NEXT_PUBLIC_API_BASE=/api
 - Ensure cookies are enabled
 
 **API connection fails:**
-- Verify `API_SERVER_ORIGIN` in Vercel env vars
-- Check API is deployed and healthy
-- Review CORS configuration
+- Check `/api/health` in the Vercel deployment
+- Review Vercel function logs for errors
 
 **Database connection fails:**
 - Check `DATABASE_URL` is correct

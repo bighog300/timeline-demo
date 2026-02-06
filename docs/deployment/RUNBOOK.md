@@ -4,51 +4,25 @@ This runbook is for operators deploying and maintaining Timeline App in preview/
 
 ## 1) First-Time Deployment
 
-Order matters: **deploy API first, then web**.
+The app deploys as a single Next.js project (UI + API routes) from the repo root.
 
-### 1.1 API deploy (Render/Railway/Fly)
-1. Provision PostgreSQL and capture `DATABASE_URL`.
-2. Configure API env vars (at minimum):
-   - `NODE_ENV=production`
-   - `DATABASE_URL`
-   - `SESSION_SECRET`
-   - `ENCRYPTION_KEY_BASE64`
-   - `KEY_VERSION`
-   - `GOOGLE_OAUTH_CLIENT_ID`
-   - `GOOGLE_OAUTH_CLIENT_SECRET`
-   - `GOOGLE_OAUTH_REDIRECT_URI`
-   - `OPENAI_API_KEY`
-   - `ADMIN_EMAILS`
-   - `PORT=3001`
-   - `DRIVE_ADAPTER=google`
-3. Deploy API and verify health endpoint:
-   ```bash
-   curl -i https://<api-domain>/api/health
-   ```
-
-### 1.2 Web deploy (Vercel)
+### 1.1 Web deploy (Vercel)
 > Vercel project setup note: set **Root Directory = `.` (repo root)**.
 > The root `vercel.json` controls install/build/output for `apps/web`.
 
-1. Update `vercel.json` rewrite destination from placeholder to real API origin.
-   - Temporary API domain currently wired: `https://timeline-demo-2ue2e27s6-craigs-projects-bffb1f7c.vercel.app`.
-   - During production cutover, replace this temp domain with the final API origin.
-2. Configure Vercel env vars:
-   - `API_SERVER_ORIGIN=https://<api-domain>`
-   - `NEXT_PUBLIC_API_BASE=/api`
+1. Configure Vercel build settings:
+   - Install: `pnpm run vercel:install`
+   - Build: `pnpm run vercel:build`
+   - Output Directory: `apps/web/.next`
+2. Add optional integration env vars as needed (see `.env.example`).
 3. Deploy and verify:
    ```bash
    curl -I https://<web-domain>/
    ```
 
-### 1.3 API Vercel Project
-1. Create a separate Vercel project with **Root Directory = `apps/api`**.
-2. Vercel function endpoints: `/api/health` and `/api/echo`.
-3. Web `/api/*` rewrite in root `vercel.json` proxies to this API project's `.vercel.app` domain.
-
-### 1.4 Post-deploy smoke check
+### 1.2 Post-deploy smoke check
 ```bash
-bash scripts/smoke-test.sh --api-url https://<api-domain> --web-url https://<web-domain>
+bash scripts/smoke-test.sh --web-url https://<web-domain>
 ```
 
 ## 2) Standard Release Procedure
@@ -57,38 +31,26 @@ bash scripts/smoke-test.sh --api-url https://<api-domain> --web-url https://<web
    ```bash
    node scripts/preflight.mjs
    node scripts/validate-env.mjs --target=web --env-file .env.example
-   # run against real API env in your secret-backed environment before prod cutover
    node scripts/validate-env.mjs --target=api --prod
    ```
-2. Confirm no placeholder API rewrite remains in `vercel.json`.
-3. Deploy API changes first if schema/env changed.
-4. Deploy web.
-5. Run smoke test.
-6. Perform manual OAuth + core functional checks.
+2. Deploy web.
+3. Run smoke test.
+4. Perform manual OAuth + core functional checks.
 
 ## 3) Rollback Procedure
 
-### 3.1 API rollback
-1. Roll back API service to previous successful deploy in your host dashboard.
-2. If migration introduced incompatibility, restore DB backup/snapshot per provider policy.
-3. Re-run API health check.
-
-### 3.2 Web rollback
-1. Promote previous successful Vercel deployment to production.
-2. Confirm `/api` rewrite still targets a healthy API release.
-3. Re-run smoke test.
+1. Promote the previous successful Vercel deployment to production.
+2. Re-run smoke test.
 
 ## 4) Incident Playbooks
 
-### 4.1 Migration failure / API boot failure
-**Symptoms:** API deploy fails, health endpoint non-200, startup errors in logs.
+### 4.1 API route failure
+**Symptoms:** `/api/*` endpoints return non-200 or throw errors.
 
 Actions:
-1. Inspect deploy logs for migration failure.
-2. Verify `DATABASE_URL` and SSL settings.
-3. Roll back API release.
-4. Correct migration/env issue in a patch branch.
-5. Redeploy and verify `/api/health`.
+1. Inspect Vercel function logs for the failing route.
+2. Verify environment variables and integration credentials.
+3. Roll back the Vercel deployment if needed.
 
 ### 4.2 OAuth redirect mismatch
 **Symptoms:** Google OAuth errors (`redirect_uri_mismatch`) during login.
@@ -97,29 +59,20 @@ Actions:
 1. Confirm production callback URL:
    - `https://<web-domain>/api/auth/callback`
 2. Update Google OAuth client authorized redirect URIs.
-3. Ensure API env `GOOGLE_OAUTH_REDIRECT_URI` exactly matches.
-4. Redeploy API if env var changed.
+3. Ensure `GOOGLE_OAUTH_REDIRECT_URI` matches.
 
 ### 4.3 401/403 after deploy
 **Symptoms:** Authenticated endpoints fail unexpectedly.
 
 Actions:
 1. Verify `SESSION_SECRET` and encryption key continuity across deploys.
-2. Check cookie domain/samesite behavior in browser and API logs.
-3. Ensure no accidental key rotation without keyring migration plan.
-
-### 4.4 Vercel web can’t reach API
-**Symptoms:** Web app loads but API calls fail.
-
-Actions:
-1. Verify `API_SERVER_ORIGIN` in Vercel env settings.
-2. Confirm `vercel.json` rewrite destination points to live API.
-3. Validate API CORS policy if direct cross-origin calls are used.
+2. Check cookie domain/samesite behavior in browser logs.
+3. Ensure no accidental key rotation without a migration plan.
 
 ## 5) Verification Checklist (Operational)
 
 After each production deploy:
-1. API health returns 200.
+1. API health returns 200 (`/api/health`).
 2. Web home route returns 200.
 3. OAuth connect flow completes.
 4. Metadata search returns results.

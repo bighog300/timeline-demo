@@ -30,22 +30,16 @@ pnpm build
 
 ## 3) Deployment Readiness Checks
 
-- [ ] `vercel.json` rewrite no longer uses placeholder API domain
-- [ ] API deploy target and DB migrations are reviewed
-- [ ] Vercel env vars are set:
-  - [ ] `API_SERVER_ORIGIN`
-  - [ ] `NEXT_PUBLIC_API_BASE=/api`
-- [ ] API env vars are set for production secrets
+- [ ] Vercel env vars are set for optional integrations
 - [ ] OAuth redirect URI configuration is verified in Google Cloud Console
 
 ## 4) Deployment Steps (Execution Order)
 
-1. [ ] Deploy API first
-2. [ ] Verify API health endpoint returns 200
-3. [ ] Deploy web
-4. [ ] Run smoke test:
+1. [ ] Deploy web
+2. [ ] Verify API health endpoint returns 200 (`/api/health`)
+3. [ ] Run smoke test:
    ```bash
-   bash scripts/smoke-test.sh --api-url https://<api-domain> --web-url https://<web-domain>
+   bash scripts/smoke-test.sh --web-url https://<web-domain>
    ```
 
 ## 5) Post-Deploy Functional Verification
@@ -59,14 +53,12 @@ pnpm build
 
 ## 6) Observability and Security Verification
 
-- [ ] API logs reviewed (no recurring errors)
 - [ ] Web logs reviewed (no failing server actions/functions)
 - [ ] No secrets or tokens appear in logs
 - [ ] Alerts/monitoring remain green after release window
 
 ## 7) Rollback Preparedness
 
-- [ ] Previous stable API deployment identified
 - [ ] Previous stable Vercel deployment identified
 - [ ] DB snapshot/backup restore path confirmed (if schema changed)
 - [ ] Operator on-call assigned for release window
@@ -77,7 +69,6 @@ Record after each release:
 
 - Release date/time:
 - Git SHA:
-- API deployment ID:
 - Web deployment ID:
 - Operator:
 - Notes/issues observed:
