@@ -1,21 +1,17 @@
 # Timeline App 🕐
 
-A privacy-first timeline builder that creates AI-powered summaries from your Gmail and Google Drive data. Every summary is stored in your Google Drive - your data, your control.
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/YOUR_USERNAME/timeline-app)
+A privacy-first timeline demo that showcases a Next.js App Router UI with API routes under `apps/web/app/api/*`.
 
 ## ✨ Features
 
-- **Privacy-First**: No raw content stored - only derived summaries and metadata
-- **Google Integration**: Seamlessly connects with Gmail and Google Drive
-- **AI-Powered Summaries**: Intelligent timeline generation using OpenAI
-- **Drive as System of Record**: All summaries saved to your Google Drive
-- **Secure Sessions**: Server-side session storage with encryption
-- **Admin Controls**: Separate admin interface with strict access controls
+- **Timeline UI**: Example interface for viewing timeline data
+- **App Router API Routes**: JSON endpoints implemented in `apps/web/app/api/*`
+- **Monorepo Structure**: A single web app in `apps/web` plus shared types in `packages/shared`
+- **Vercel Ready**: Single-project deployment targeting the repo root
 
 ## 🏗️ Architecture
 
-This is a **monorepo** with two main components:
+This repository contains one deployable Next.js app and one shared package:
 
 - **`apps/web`**: Next.js web application (UI + API routes under `apps/web/app/api/*`, deployed to Vercel)
 - **`packages/shared`**: Shared types and Zod schemas
@@ -26,41 +22,40 @@ This is a **monorepo** with two main components:
 
 - Node.js 20.x or higher
 - pnpm 9.x
-- (Optional) Google Cloud Project (for OAuth)
-- (Optional) OpenAI API key
 
 ### Local Development Setup
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/YOUR_USERNAME/timeline-app.git
-   cd timeline-app
+   git clone <your-repo-url>
+   cd timeline-demo
    ```
 
-2. **Run the setup script**
-   ```bash
-   chmod +x setup.sh
-   ./setup.sh
-   ```
-
-   Or manually:
+2. **Install dependencies**
    ```bash
    corepack enable
    corepack prepare pnpm@9 --activate
    pnpm install
-   cp .env.example .env
-   # Edit .env with your values
    ```
 
-3. **Start the development servers**
+3. **(Optional) Local environment overrides**
+   ```bash
+   cp .env.example .env
+   # Edit .env with any local-only extensions
+   ```
+   `.env.example` is optional for local extensions; it is not required for builds.
+
+4. **Start the development server**
    ```bash
    pnpm dev:web
    ```
 
-4. **Visit the app**
+5. **Visit the app**
    Open http://localhost:3000
 
 ## 📦 Deployment
+
+This repo is designed for a **single-project deployment on Vercel** from the repository root.
 
 See the comprehensive [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for detailed instructions.
 
@@ -72,16 +67,11 @@ See the comprehensive [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for detailed in
    - Configure build commands:
      - Install: `pnpm run vercel:install`
      - Build: `pnpm run vercel:build`
-   - Set environment variables
    - Deploy
-
-2. **Configure Google OAuth**
-   - Set up OAuth credentials in Google Cloud Console
-   - Add redirect URIs for both development and production
 
 ## 🔑 Environment Variables
 
-See [.env.example](.env.example) for optional integrations (OAuth/OpenAI).
+See [.env.example](.env.example) for optional local overrides.
 
 ## 🧪 Testing
 
@@ -92,48 +82,37 @@ pnpm test
 # Run linting
 pnpm lint
 
-# Build all packages
-pnpm build
+# Build the web app
+pnpm build:web
 ```
 
 ## 📚 Documentation
 
+- [Start Here](00-START-HERE.md) - Deployment package overview
 - [Deployment Guide](DEPLOYMENT_GUIDE.md) - Complete deployment instructions
-- [PRD](PRD.md) - Product requirements
-- [Architecture](ARCHITECTURE.md) - Technical architecture
-- [Runbook](RUNBOOK.md) - Operations guide
-- [API Spec](API_SPEC.md) - API documentation
-- [Environment](ENVIRONMENT.md) - Environment variables reference
+- [Deployment Checklist](DEPLOYMENT_CHECKLIST.md) - Step-by-step checklist
+- [Release Checklist](docs/deployment/RELEASE_CHECKLIST.md) - Release process
+- [Runbook](docs/deployment/RUNBOOK.md) - Operations guide
+- [Environment Matrix](docs/deployment/ENVIRONMENT_MATRIX.md) - Environment references
+- [Quick Reference](QUICK-REFERENCE.md) - Commands and pointers
 
 ## 🏛️ Project Structure
 
 ```
-timeline-app/
+timeline-demo/
 ├── apps/
 │   └── web/              # Next.js web app (UI + API routes)
 │       ├── app/
 │       └── components/
 ├── packages/
-│   ├── shared/           # Shared types and schemas
-│   ├── prisma-client/    # Prisma client wrapper
-│   └── googleapis/       # Google APIs wrapper
+│   └── shared/           # Shared types and schemas
 ├── docs/                 # Documentation
 ├── scripts/              # Utility scripts
-├── .github/              # GitHub Actions workflows
 ├── vercel.json           # Vercel configuration
 ├── package.json          # Root package.json with workspaces
 ├── pnpm-workspace.yaml   # pnpm workspace config
 └── pnpm-lock.yaml        # Lockfile (required for Vercel)
 ```
-
-## 🔒 Privacy & Security
-
-- **No Raw Content Storage**: Only derived summaries and metadata references
-- **Encryption at Rest**: All OAuth tokens encrypted with AES-256-GCM
-- **Explicit User Actions**: No background jobs or automatic scanning
-- **Drive as Source of Truth**: Every summary written to user's Google Drive
-- **Admin Separation**: Strict server-side enforcement of admin access
-- **Structured Logging**: Only counts, durations, and error codes logged
 
 ## 🛠️ Development
 
@@ -156,17 +135,7 @@ pnpm config get registry
 pnpm config set registry https://registry.npmjs.org/
 ```
 
-**Issue: Database connection fails**
-- Ensure PostgreSQL is running
-- Check `DATABASE_URL` in `.env`
-- Try: `pnpm db:reset` (dev only)
-
-**Issue: OAuth fails**
-- Verify redirect URIs in Google Cloud Console
-- Check `GOOGLE_OAUTH_*` environment variables
-- Ensure cookies are enabled
-
-See [RUNBOOK.md](RUNBOOK.md) for more troubleshooting.
+See [docs/deployment/RUNBOOK.md](docs/deployment/RUNBOOK.md) for more troubleshooting.
 
 ## 🤝 Contributing
 
@@ -183,9 +152,7 @@ This project is private and proprietary.
 ## 🙏 Acknowledgments
 
 - Built with [Next.js](https://nextjs.org/)
-- Powered by [OpenAI](https://openai.com/)
 - Hosted on [Vercel](https://vercel.com/)
-- Database by [PostgreSQL](https://www.postgresql.org/)
 
 ---
 

@@ -3,3 +3,13 @@ node_modules/
 dist/
 build/
 .vercel/
+.env
+.env.*
+!.env.example
+*.log
+.DS_Store
+.vscode/
+.idea/
+coverage/
+*.tsbuildinfo
+.smoke-server.log
