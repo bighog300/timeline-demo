@@ -1,0 +1,71 @@
+.page {
+  display: grid;
+  gap: 24px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.eventCard h2 {
+  margin-bottom: 4px;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.date {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.location {
+  font-size: 0.95rem;
+  color: var(--text);
+  margin: 8px 0 12px;
+}
+
+.metaRow {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.price {
+  font-weight: 600;
+  color: var(--success);
+}
+
+.tagRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.link {
+  color: var(--primary);
+  font-weight: 600;
+}

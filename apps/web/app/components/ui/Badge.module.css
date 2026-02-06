@@ -1,0 +1,32 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: #eef1f7;
+  color: var(--text);
+}
+
+.neutral {
+  background: #eef1f7;
+  color: #4b5563;
+}
+
+.accent {
+  background: rgba(18, 181, 203, 0.16);
+  color: #0b6b7a;
+}
+
+.success {
+  background: rgba(46, 175, 125, 0.15);
+  color: #1b7a57;
+}
+
+.warning {
+  background: rgba(245, 159, 0, 0.18);
+  color: #8a5a00;
+}

@@ -1,0 +1,144 @@
+:root {
+  color-scheme: light;
+  --background: #f7f7fb;
+  --surface: #ffffff;
+  --border: #e3e3ef;
+  --text: #1f2430;
+  --muted: #5f6b7a;
+  --primary: #5c6ac4;
+  --primary-dark: #4451a8;
+  --accent: #12b5cb;
+  --success: #2eaf7d;
+  --warning: #f59f00;
+  --danger: #e03131;
+  --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  background: var(--background);
+  color: var(--text);
+  line-height: 1.6;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.9);
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(12px);
+}
+
+.app-header__content {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.app-brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: 0.02em;
+}
+
+.app-nav {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 0.95rem;
+  color: var(--muted);
+}
+
+.app-nav a {
+  padding: 6px 12px;
+  border-radius: 999px;
+  transition: all 0.2s ease;
+}
+
+.app-nav a:hover,
+.app-nav a:focus-visible {
+  background: var(--background);
+  color: var(--text);
+}
+
+.app-main {
+  flex: 1;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+  width: 100%;
+}
+
+.app-footer {
+  border-top: 1px solid var(--border);
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 12px;
+  line-height: 1.2;
+}
+
+p {
+  margin: 0 0 12px;
+  color: var(--muted);
+}
+
+section {
+  margin-bottom: 32px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 720px) {
+  .app-header__content {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .app-main {
+    padding: 24px 16px 48px;
+  }
+}
