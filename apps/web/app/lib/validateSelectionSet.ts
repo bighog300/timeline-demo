@@ -33,9 +33,9 @@ export const isSelectionSet = (value: unknown): value is SelectionSet => {
     Array.isArray(value.items) &&
     value.items.every(isSelectionSetItem) &&
     (value.notes === undefined || typeof value.notes === 'string') &&
-    typeof value.version === 'number' &&
-    typeof value.driveFolderId === 'string' &&
-    typeof value.driveFileId === 'string' &&
+    (value.version === undefined || typeof value.version === 'number') &&
+    (value.driveFolderId === undefined || typeof value.driveFolderId === 'string') &&
+    (value.driveFileId === undefined || typeof value.driveFileId === 'string') &&
     (value.driveWebViewLink === undefined || typeof value.driveWebViewLink === 'string')
   );
 };
