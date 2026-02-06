@@ -8,8 +8,19 @@ describe('GET /api/calendar', () => {
 
     expect(response.status).toBe(200);
 
-    const payload = (await response.json()) as { items: unknown[] };
+    const payload = (await response.json()) as {
+      items: Array<{ id: string; title: string; start: string; end: string; location: string }>;
+    };
 
-    expect(payload).toEqual({ items: [] });
+    expect(payload.items.length).toBeGreaterThan(0);
+    expect(payload.items[0]).toEqual(
+      expect.objectContaining({
+        id: expect.any(String),
+        title: expect.any(String),
+        start: expect.any(String),
+        end: expect.any(String),
+        location: expect.any(String),
+      }),
+    );
   });
 });
