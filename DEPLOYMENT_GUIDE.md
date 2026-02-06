@@ -6,6 +6,7 @@ This guide covers deploying the Timeline App from GitHub to Vercel as a single N
 **Architecture:**
 - **Web + API (Next.js)** → Vercel
 - **Monorepo** managed with pnpm workspaces
+- **Deploy from repo root** on Vercel (Root Directory `/`); API routes are served by Next.js under `apps/web/app/api/*` (no separate API service).
 
 ---
 
@@ -13,7 +14,7 @@ This guide covers deploying the Timeline App from GitHub to Vercel as a single N
 
 ### Tools Required
 - Node.js 20.x
-- pnpm 9.17.0 (or compatible)
+- pnpm 9.15.9 (or pnpm 9.x pinned via packageManager (pnpm@9.15.9))
 - Git
 - GitHub account
 - Vercel account
@@ -77,10 +78,10 @@ This guide covers deploying the Timeline App from GitHub to Vercel as a single N
   "name": "timeline-app",
   "private": true,
   "workspaces": ["apps/*", "packages/*"],
-  "packageManager": "pnpm@9.17.0",
+  "packageManager": "pnpm@9.15.9",
   "engines": {
     "node": ">=20.0.0",
-    "pnpm": "9.17.0"
+    "pnpm": "9.15.9"
   },
   "scripts": {
     "dev:web": "pnpm --filter ./apps/web dev",
@@ -88,7 +89,7 @@ This guide covers deploying the Timeline App from GitHub to Vercel as a single N
     "test": "pnpm -r --if-present test",
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
-    "vercel:install": "corepack enable && corepack prepare pnpm@9.17.0 --activate && pnpm install --frozen-lockfile",
+    "vercel:install": "corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile",
     "vercel:build": "pnpm --filter ./apps/web build"
   }
 }
@@ -101,7 +102,7 @@ This guide covers deploying the Timeline App from GitHub to Vercel as a single N
 ```bash
 # From repo root
 corepack enable
-corepack prepare pnpm@9.17.0 --activate
+corepack prepare pnpm@9.15.9 --activate
 pnpm install
 ```
 
@@ -153,7 +154,7 @@ The API is now served by the Next.js app at `apps/web/app/api/*`, so there is no
 2. Click "New Project"
 3. Import your GitHub repository
 4. **Framework Preset:** Next.js
-5. **Root Directory:** Keep as `.` (repo root)
+5. **Root Directory:** Keep as `/` (repo root)
 6. Click "Configure Project"
 
 ### 3.2 Vercel Build Settings
@@ -214,7 +215,7 @@ curl https://your-app.vercel.app/api/health
 git clone https://github.com/YOUR_USERNAME/timeline-app.git
 cd timeline-app
 corepack enable
-corepack prepare pnpm@9.17.0 --activate
+corepack prepare pnpm@9.15.9 --activate
 pnpm install
 ```
 
