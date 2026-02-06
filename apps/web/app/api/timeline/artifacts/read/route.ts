@@ -1,7 +1,16 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { jsonError } from '../../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../../lib/googleAuth';
 import { createDriveClient } from '../../../../lib/googleDrive';
+import {
+  DEFAULT_GOOGLE_TIMEOUT_MS,
+  logGoogleError,
+  mapGoogleError,
+  withRetry,
+  withTimeout,
+} from '../../../../lib/googleRequest';
+import { checkRateLimit, getRateLimitKey } from '../../../../lib/rateLimit';
 import { isSummaryArtifact, normalizeArtifact } from '../../../../lib/validateArtifact';
 
 const parseDriveJson = (data: unknown): unknown => {
@@ -20,35 +29,79 @@ export const GET = async (request: NextRequest) => {
   const accessToken = await getGoogleAccessToken();
 
   if (!session || !accessToken) {
-    return NextResponse.json({ error: 'reconnect_required' }, { status: 401 });
+    return jsonError(401, 'reconnect_required', 'Reconnect required.');
   }
 
   if (!session.driveFolderId) {
-    return NextResponse.json({ error: 'drive_not_provisioned' }, { status: 400 });
+    return jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
   }
 
   const fileId = request.nextUrl.searchParams.get('fileId');
   if (!fileId) {
-    return NextResponse.json({ error: 'invalid_request' }, { status: 400 });
+    return jsonError(400, 'invalid_request', 'File id is required.');
+  }
+
+  const rateKey = getRateLimitKey(request, session);
+  const rateStatus = checkRateLimit(rateKey, { limit: 60, windowMs: 60_000 });
+  if (!rateStatus.allowed) {
+    return jsonError(429, 'rate_limited', 'Too many requests. Try again in a moment.', {
+      retryAfterMs: rateStatus.resetMs,
+    });
   }
 
   const drive = createDriveClient(accessToken);
 
-  const metaResponse = await drive.files.get({
-    fileId,
-    fields: 'id, name, parents, webViewLink',
-  });
+  let metaResponse;
+  try {
+    metaResponse = await withRetry((signal) =>
+      withTimeout(
+        (timeoutSignal) =>
+          drive.files.get(
+            {
+              fileId,
+              fields: 'id, name, parents, webViewLink',
+            },
+            { signal: timeoutSignal },
+          ),
+        DEFAULT_GOOGLE_TIMEOUT_MS,
+        'upstream_timeout',
+        signal,
+      ),
+    );
+  } catch (error) {
+    logGoogleError(error, 'drive.files.get');
+    const mapped = mapGoogleError(error, 'drive.files.get');
+    return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+  }
 
   const parents = metaResponse.data.parents ?? [];
   if (!parents.includes(session.driveFolderId)) {
-    return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    return jsonError(400, 'invalid_request', 'Artifact not found.');
   }
 
-  const contentResponse = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'json' });
+  let contentResponse;
+  try {
+    contentResponse = await withRetry((signal) =>
+      withTimeout(
+        (timeoutSignal) =>
+          drive.files.get(
+            { fileId, alt: 'media' },
+            { responseType: 'json', signal: timeoutSignal },
+          ),
+        DEFAULT_GOOGLE_TIMEOUT_MS,
+        'upstream_timeout',
+        signal,
+      ),
+    );
+  } catch (error) {
+    logGoogleError(error, 'drive.files.get');
+    const mapped = mapGoogleError(error, 'drive.files.get');
+    return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+  }
   const parsed = parseDriveJson(contentResponse.data);
 
   if (!isSummaryArtifact(parsed)) {
-    return NextResponse.json({ error: 'invalid_artifact' }, { status: 422 });
+    return jsonError(400, 'invalid_request', 'Artifact data was invalid.');
   }
 
   const normalized = normalizeArtifact(parsed);

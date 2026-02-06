@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server';
 
+import { jsonError } from '../../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../../lib/googleAuth';
 import { createDriveClient } from '../../../../lib/googleDrive';
+import { logGoogleError, mapGoogleError } from '../../../../lib/googleRequest';
 import { listSelectionSetsFromDrive } from '../../../../lib/listSelectionSetsFromDrive';
 
 const stripSuffix = (name: string) => name.replace(/ - Selection\.json$/i, '').trim() || 'Untitled';
@@ -11,15 +13,22 @@ export const GET = async () => {
   const accessToken = await getGoogleAccessToken();
 
   if (!session || !accessToken) {
-    return NextResponse.json({ error: 'reconnect_required' }, { status: 401 });
+    return jsonError(401, 'reconnect_required', 'Reconnect required.');
   }
 
   if (!session.driveFolderId) {
-    return NextResponse.json({ error: 'drive_not_provisioned' }, { status: 400 });
+    return jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
   }
 
   const drive = createDriveClient(accessToken);
-  const files = await listSelectionSetsFromDrive(drive, session.driveFolderId);
+  let files;
+  try {
+    files = await listSelectionSetsFromDrive(drive, session.driveFolderId);
+  } catch (error) {
+    logGoogleError(error, 'drive.files.list');
+    const mapped = mapGoogleError(error, 'drive.files.list');
+    return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+  }
 
   return NextResponse.json({
     sets: files.map((file) => ({

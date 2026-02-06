@@ -19,7 +19,13 @@ describe('POST /api/timeline/summarize', () => {
     const response = await POST(new Request('http://localhost/api/timeline/summarize') as never);
 
     expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({ error: 'reconnect_required' });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'reconnect_required',
+        message: 'Reconnect required.',
+      },
+      error_code: 'reconnect_required',
+    });
   });
 
   it('returns drive_not_provisioned when session has no folder', async () => {
@@ -34,6 +40,41 @@ describe('POST /api/timeline/summarize', () => {
     );
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: 'drive_not_provisioned' });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'drive_not_provisioned',
+        message: 'Drive folder not provisioned.',
+      },
+      error_code: 'drive_not_provisioned',
+    });
+  });
+
+  it('returns too_many_items when over the cap', async () => {
+    mockGetGoogleSession.mockResolvedValue({ driveFolderId: 'folder-1' } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+
+    const response = await POST(
+      new Request('http://localhost/api/timeline/summarize', {
+        method: 'POST',
+        body: JSON.stringify({
+          items: Array.from({ length: 11 }, (_, index) => ({
+            source: 'gmail',
+            id: `id-${index}`,
+          })),
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'too_many_items',
+        message: 'Too many items requested.',
+        details: {
+          limit: 10,
+        },
+      },
+      error_code: 'too_many_items',
+    });
   });
 });

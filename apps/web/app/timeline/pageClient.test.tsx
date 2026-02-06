@@ -11,6 +11,15 @@ const mockFetch = (handler: (url: string, init?: RequestInit) => Response) => {
   });
 };
 
+const buildApiError = (status: number, code: string, message: string) =>
+  new Response(
+    JSON.stringify({
+      error: { code, message },
+      error_code: code,
+    }),
+    { status },
+  );
+
 const setSelections = () => {
   window.localStorage.setItem(
     'timeline.gmailSelections',
@@ -114,7 +123,7 @@ describe('TimelinePageClient', () => {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
       if (url === '/api/timeline/summarize') {
-        return new Response(JSON.stringify({ error: 'reconnect_required' }), { status: 401 });
+        return buildApiError(401, 'reconnect_required', 'Reconnect required.');
       }
       return new Response('Not found', { status: 404 });
     });
@@ -140,7 +149,7 @@ describe('TimelinePageClient', () => {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
       if (url === '/api/timeline/summarize') {
-        return new Response(JSON.stringify({ error: 'drive_not_provisioned' }), { status: 400 });
+        return buildApiError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
       }
       return new Response('Not found', { status: 404 });
     });
@@ -156,6 +165,31 @@ describe('TimelinePageClient', () => {
     await waitFor(() => {
       expect(screen.getByText(/provision a drive folder/i)).toBeInTheDocument();
       expect(screen.getByRole('link', { name: /\/connect/i })).toBeInTheDocument();
+    });
+  });
+
+  it('shows a rate limit notice when summarize is rate limited', async () => {
+    setSelections();
+    mockFetch((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url === '/api/timeline/summarize') {
+        return buildApiError(429, 'rate_limited', 'Too many requests. Try again in a moment.');
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /generate summaries/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /generate summaries/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/too many requests/i)).toBeInTheDocument();
     });
   });
 
@@ -256,7 +290,7 @@ describe('TimelinePageClient', () => {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
       if (url.startsWith('/api/timeline/search')) {
-        return new Response(JSON.stringify({ error: 'reconnect_required' }), { status: 401 });
+        return buildApiError(401, 'reconnect_required', 'Reconnect required.');
       }
       return new Response('Not found', { status: 404 });
     });
@@ -274,6 +308,30 @@ describe('TimelinePageClient', () => {
     });
   });
 
+  it('shows an upstream timeout notice when search fails', async () => {
+    mockFetch((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url.startsWith('/api/timeline/search')) {
+        return buildApiError(504, 'upstream_timeout', 'Google request timed out. Please retry.');
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    fireEvent.change(screen.getByPlaceholderText(/search summaries or selection sets/i), {
+      target: { value: 'plan' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /search/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/google returned an error/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /retry search/i })).toBeInTheDocument();
+    });
+  });
+
   it('shows reconnect CTA when sync returns 401', async () => {
     setSelections();
     mockFetch((url) => {
@@ -281,7 +339,7 @@ describe('TimelinePageClient', () => {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
       if (url === '/api/timeline/artifacts/list') {
-        return new Response(JSON.stringify({ error: 'reconnect_required' }), { status: 401 });
+        return buildApiError(401, 'reconnect_required', 'Reconnect required.');
       }
       return new Response('Not found', { status: 404 });
     });
@@ -307,7 +365,7 @@ describe('TimelinePageClient', () => {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
       if (url === '/api/timeline/artifacts/list') {
-        return new Response(JSON.stringify({ error: 'drive_not_provisioned' }), { status: 400 });
+        return buildApiError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
       }
       return new Response('Not found', { status: 404 });
     });

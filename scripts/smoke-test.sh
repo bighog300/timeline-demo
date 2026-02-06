@@ -95,7 +95,7 @@ summarize_status=$(printf '%s' "${summarize}" | tail -n 1)
 if [[ "${summarize_status}" != "401" ]]; then
   fail_response "Timeline summarize (unauth)" "${summarize_body}"
 fi
-if ! printf '%s' "${summarize_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+if ! printf '%s' "${summarize_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));const code=data?.error?.code ?? data?.error_code ?? data?.error;if (code !== "reconnect_required") process.exit(1);'; then
   fail_response "Timeline summarize (unauth)" "${summarize_body}"
 fi
 echo "✅ /api/timeline/summarize unauth ok"
@@ -106,7 +106,7 @@ timeline_search_status=$(printf '%s' "${timeline_search}" | tail -n 1)
 if [[ "${timeline_search_status}" != "401" ]]; then
   fail_response "Timeline search (unauth)" "${timeline_search_body}"
 fi
-if ! printf '%s' "${timeline_search_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+if ! printf '%s' "${timeline_search_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));const code=data?.error?.code ?? data?.error_code ?? data?.error;if (code !== "reconnect_required") process.exit(1);'; then
   fail_response "Timeline search (unauth)" "${timeline_search_body}"
 fi
 echo "✅ /api/timeline/search unauth ok"
@@ -117,7 +117,7 @@ artifacts_list_status=$(printf '%s' "${artifacts_list}" | tail -n 1)
 if [[ "${artifacts_list_status}" != "401" ]]; then
   fail_response "Timeline artifacts list (unauth)" "${artifacts_list_body}"
 fi
-if ! printf '%s' "${artifacts_list_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+if ! printf '%s' "${artifacts_list_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));const code=data?.error?.code ?? data?.error_code ?? data?.error;if (code !== "reconnect_required") process.exit(1);'; then
   fail_response "Timeline artifacts list (unauth)" "${artifacts_list_body}"
 fi
 echo "✅ /api/timeline/artifacts/list unauth ok"
@@ -128,7 +128,7 @@ artifacts_read_status=$(printf '%s' "${artifacts_read}" | tail -n 1)
 if [[ "${artifacts_read_status}" != "401" ]]; then
   fail_response "Timeline artifacts read (unauth)" "${artifacts_read_body}"
 fi
-if ! printf '%s' "${artifacts_read_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+if ! printf '%s' "${artifacts_read_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));const code=data?.error?.code ?? data?.error_code ?? data?.error;if (code !== "reconnect_required") process.exit(1);'; then
   fail_response "Timeline artifacts read (unauth)" "${artifacts_read_body}"
 fi
 echo "✅ /api/timeline/artifacts/read unauth ok"
@@ -139,7 +139,7 @@ selection_list_status=$(printf '%s' "${selection_list}" | tail -n 1)
 if [[ "${selection_list_status}" != "401" ]]; then
   fail_response "Timeline selection list (unauth)" "${selection_list_body}"
 fi
-if ! printf '%s' "${selection_list_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+if ! printf '%s' "${selection_list_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));const code=data?.error?.code ?? data?.error_code ?? data?.error;if (code !== "reconnect_required") process.exit(1);'; then
   fail_response "Timeline selection list (unauth)" "${selection_list_body}"
 fi
 echo "✅ /api/timeline/selection/list unauth ok"
@@ -150,7 +150,7 @@ selection_read_status=$(printf '%s' "${selection_read}" | tail -n 1)
 if [[ "${selection_read_status}" != "401" ]]; then
   fail_response "Timeline selection read (unauth)" "${selection_read_body}"
 fi
-if ! printf '%s' "${selection_read_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+if ! printf '%s' "${selection_read_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));const code=data?.error?.code ?? data?.error_code ?? data?.error;if (code !== "reconnect_required") process.exit(1);'; then
   fail_response "Timeline selection read (unauth)" "${selection_read_body}"
 fi
 echo "✅ /api/timeline/selection/read unauth ok"
@@ -164,7 +164,7 @@ selection_save_status=$(printf '%s' "${selection_save}" | tail -n 1)
 if [[ "${selection_save_status}" != "401" ]]; then
   fail_response "Timeline selection save (unauth)" "${selection_save_body}"
 fi
-if ! printf '%s' "${selection_save_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+if ! printf '%s' "${selection_save_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));const code=data?.error?.code ?? data?.error_code ?? data?.error;if (code !== "reconnect_required") process.exit(1);'; then
   fail_response "Timeline selection save (unauth)" "${selection_save_body}"
 fi
 echo "✅ /api/timeline/selection/save unauth ok"

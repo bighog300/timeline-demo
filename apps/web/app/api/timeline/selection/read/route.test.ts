@@ -21,6 +21,12 @@ describe('GET /api/timeline/selection/read', () => {
     );
 
     expect(response.status).toBe(401);
-    await expect(response.json()).resolves.toEqual({ error: 'reconnect_required' });
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: 'reconnect_required',
+        message: 'Reconnect required.',
+      },
+      error_code: 'reconnect_required',
+    });
   });
 });

@@ -1,7 +1,16 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { jsonError } from '../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../lib/googleAuth';
 import { createDriveClient } from '../../../lib/googleDrive';
+import {
+  DEFAULT_GOOGLE_TIMEOUT_MS,
+  logGoogleError,
+  mapGoogleError,
+  withRetry,
+  withTimeout,
+} from '../../../lib/googleRequest';
+import { checkRateLimit, getRateLimitKey } from '../../../lib/rateLimit';
 import { matchSelectionSet, matchSummaryArtifact, normalizeQuery } from '../../../lib/searchIndex';
 import { isSummaryArtifact, normalizeArtifact } from '../../../lib/validateArtifact';
 import { isSelectionSet, normalizeSelectionSet } from '../../../lib/validateSelectionSet';
@@ -74,23 +83,32 @@ export const GET = async (request: NextRequest | Request) => {
   const accessToken = await getGoogleAccessToken();
 
   if (!session || !accessToken) {
-    return NextResponse.json({ error: 'reconnect_required' }, { status: 401 });
+    return jsonError(401, 'reconnect_required', 'Reconnect required.');
   }
 
   if (!session.driveFolderId) {
-    return NextResponse.json({ error: 'drive_not_provisioned' }, { status: 400 });
+    return jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
   }
+  const driveFolderId = session.driveFolderId;
 
   const url = getRequestUrl(request);
   const qParam = url.searchParams.get('q') ?? '';
   const trimmedQuery = qParam.trim();
 
   if (trimmedQuery.length < 2) {
-    return NextResponse.json({ error: 'query_too_short' }, { status: 400 });
+    return jsonError(400, 'query_too_short', 'Query must be at least 2 characters.');
   }
 
   if (trimmedQuery.length > MAX_QUERY_LENGTH) {
-    return NextResponse.json({ error: 'query_too_long' }, { status: 400 });
+    return jsonError(400, 'invalid_request', 'Query must be shorter than 100 characters.');
+  }
+
+  const rateKey = getRateLimitKey(request, session);
+  const rateStatus = checkRateLimit(rateKey, { limit: 60, windowMs: 60_000 });
+  if (!rateStatus.allowed) {
+    return jsonError(429, 'rate_limited', 'Too many requests. Try again in a moment.', {
+      retryAfterMs: rateStatus.resetMs,
+    });
   }
 
   const type = parseType(url.searchParams.get('type'));
@@ -100,13 +118,31 @@ export const GET = async (request: NextRequest | Request) => {
   const pageSize = Math.min(Math.max(safePageSize, 1), MAX_PAGE_SIZE);
 
   const drive = createDriveClient(accessToken);
-  const response = await drive.files.list({
-    q: buildDriveQuery(session.driveFolderId, type),
-    orderBy: 'modifiedTime desc',
-    pageSize,
-    pageToken,
-    fields: 'nextPageToken, files(id, name, modifiedTime, webViewLink)',
-  });
+  let response;
+  try {
+    response = await withRetry((signal) =>
+      withTimeout(
+        (timeoutSignal) =>
+          drive.files.list(
+            {
+              q: buildDriveQuery(driveFolderId, type),
+              orderBy: 'modifiedTime desc',
+              pageSize,
+              pageToken,
+              fields: 'nextPageToken, files(id, name, modifiedTime, webViewLink)',
+            },
+            { signal: timeoutSignal },
+          ),
+        DEFAULT_GOOGLE_TIMEOUT_MS,
+        'upstream_timeout',
+        signal,
+      ),
+    );
+  } catch (error) {
+    logGoogleError(error, 'drive.files.list');
+    const mapped = mapGoogleError(error, 'drive.files.list');
+    return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+  }
 
   const candidates = (response.data.files ?? []).filter((file) => file.id);
   const matches: SearchResult[] = [];
@@ -118,10 +154,25 @@ export const GET = async (request: NextRequest | Request) => {
       continue;
     }
 
-    const contentResponse = await drive.files.get(
-      { fileId: file.id ?? '', alt: 'media' },
-      { responseType: 'json' },
-    );
+    let contentResponse;
+    try {
+      contentResponse = await withRetry((signal) =>
+        withTimeout(
+          (timeoutSignal) =>
+            drive.files.get(
+              { fileId: file.id ?? '', alt: 'media' },
+              { responseType: 'json', signal: timeoutSignal },
+            ),
+          DEFAULT_GOOGLE_TIMEOUT_MS,
+          'upstream_timeout',
+          signal,
+        ),
+      );
+    } catch (error) {
+      logGoogleError(error, 'drive.files.get');
+      const mapped = mapGoogleError(error, 'drive.files.get');
+      return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+    }
     const parsed = parseDriveJson(contentResponse.data);
 
     if (kind === 'summary' && isSummaryArtifact(parsed)) {

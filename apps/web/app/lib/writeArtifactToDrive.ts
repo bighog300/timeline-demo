@@ -1,5 +1,6 @@
 import type { drive_v3 } from 'googleapis';
 
+import { DEFAULT_GOOGLE_TIMEOUT_MS, withRetry, withTimeout } from './googleRequest';
 import type { SummaryArtifact } from './types';
 
 type DriveWriteResult = {
@@ -66,31 +67,53 @@ export const writeArtifactToDrive = async (
   const markdownName = `${baseName} - Summary.md`;
   const jsonName = `${baseName} - Summary.json`;
 
-  const markdownResponse = await drive.files.create({
-    requestBody: {
-      name: markdownName,
-      parents: [folderId],
-      mimeType: 'text/markdown',
-    },
-    media: {
-      mimeType: 'text/markdown',
-      body: buildMarkdown(artifact),
-    },
-    fields: 'id, webViewLink, name',
-  });
+  const markdownResponse = await withRetry((signal) =>
+    withTimeout(
+      (timeoutSignal) =>
+        drive.files.create(
+          {
+            requestBody: {
+              name: markdownName,
+              parents: [folderId],
+              mimeType: 'text/markdown',
+            },
+            media: {
+              mimeType: 'text/markdown',
+              body: buildMarkdown(artifact),
+            },
+            fields: 'id, webViewLink, name',
+          },
+          { signal: timeoutSignal },
+        ),
+      DEFAULT_GOOGLE_TIMEOUT_MS,
+      'upstream_timeout',
+      signal,
+    ),
+  );
 
-  const jsonResponse = await drive.files.create({
-    requestBody: {
-      name: jsonName,
-      parents: [folderId],
-      mimeType: 'application/json',
-    },
-    media: {
-      mimeType: 'application/json',
-      body: JSON.stringify(artifact, null, 2),
-    },
-    fields: 'id, webViewLink, name',
-  });
+  const jsonResponse = await withRetry((signal) =>
+    withTimeout(
+      (timeoutSignal) =>
+        drive.files.create(
+          {
+            requestBody: {
+              name: jsonName,
+              parents: [folderId],
+              mimeType: 'application/json',
+            },
+            media: {
+              mimeType: 'application/json',
+              body: JSON.stringify(artifact, null, 2),
+            },
+            fields: 'id, webViewLink, name',
+          },
+          { signal: timeoutSignal },
+        ),
+      DEFAULT_GOOGLE_TIMEOUT_MS,
+      'upstream_timeout',
+      signal,
+    ),
+  );
 
   return {
     markdownFileId: markdownResponse.data.id ?? '',

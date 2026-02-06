@@ -1,11 +1,19 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { jsonError } from '../../../../lib/apiErrors';
 import {
   getGoogleAccessToken,
   getGoogleSession,
   persistDriveFolderId,
 } from '../../../../lib/googleAuth';
 import { createDriveClient } from '../../../../lib/googleDrive';
+import {
+  DEFAULT_GOOGLE_TIMEOUT_MS,
+  logGoogleError,
+  mapGoogleError,
+  withRetry,
+  withTimeout,
+} from '../../../../lib/googleRequest';
 
 const FOLDER_NAME = 'Timeline Demo (App Data)';
 
@@ -14,17 +22,35 @@ export const POST = async (request: NextRequest) => {
   const accessToken = await getGoogleAccessToken();
 
   if (!session || !accessToken) {
-    return NextResponse.json({ error: 'reconnect_required' }, { status: 401 });
+    return jsonError(401, 'reconnect_required', 'Reconnect required.');
   }
 
   const drive = createDriveClient(accessToken);
 
-  const existing = await drive.files.list({
-    q: `mimeType = 'application/vnd.google-apps.folder' and name = '${FOLDER_NAME}' and trashed = false`,
-    fields: 'files(id, name)',
-    spaces: 'drive',
-    pageSize: 1,
-  });
+  let existing;
+  try {
+    existing = await withRetry((signal) =>
+      withTimeout(
+        (timeoutSignal) =>
+          drive.files.list(
+            {
+              q: `mimeType = 'application/vnd.google-apps.folder' and name = '${FOLDER_NAME}' and trashed = false`,
+              fields: 'files(id, name)',
+              spaces: 'drive',
+              pageSize: 1,
+            },
+            { signal: timeoutSignal },
+          ),
+        DEFAULT_GOOGLE_TIMEOUT_MS,
+        'upstream_timeout',
+        signal,
+      ),
+    );
+  } catch (error) {
+    logGoogleError(error, 'drive.files.list');
+    const mapped = mapGoogleError(error, 'drive.files.list');
+    return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+  }
 
   const existingFolder = existing.data.files?.[0];
 
@@ -37,13 +63,31 @@ export const POST = async (request: NextRequest) => {
     return response;
   }
 
-  const created = await drive.files.create({
-    requestBody: {
-      name: FOLDER_NAME,
-      mimeType: 'application/vnd.google-apps.folder',
-    },
-    fields: 'id, name',
-  });
+  let created;
+  try {
+    created = await withRetry((signal) =>
+      withTimeout(
+        (timeoutSignal) =>
+          drive.files.create(
+            {
+              requestBody: {
+                name: FOLDER_NAME,
+                mimeType: 'application/vnd.google-apps.folder',
+              },
+              fields: 'id, name',
+            },
+            { signal: timeoutSignal },
+          ),
+        DEFAULT_GOOGLE_TIMEOUT_MS,
+        'upstream_timeout',
+        signal,
+      ),
+    );
+  } catch (error) {
+    logGoogleError(error, 'drive.files.create');
+    const mapped = mapGoogleError(error, 'drive.files.create');
+    return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
+  }
 
   const folderId = created.data.id ?? '';
   const folderName = created.data.name ?? FOLDER_NAME;
