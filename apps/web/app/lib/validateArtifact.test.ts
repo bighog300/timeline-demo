@@ -11,6 +11,12 @@ const baseArtifact: SummaryArtifact = {
   createdAtISO: '2024-01-01T00:00:00Z',
   summary: 'Summary text',
   highlights: ['One'],
+  sourceMetadata: {
+    from: 'alice@example.com',
+    subject: 'Hello',
+    labels: ['INBOX'],
+  },
+  sourcePreview: 'Preview text',
   driveFolderId: 'folder-1',
   driveFileId: 'file-1',
   driveWebViewLink: 'https://drive.google.com/file',
@@ -34,10 +40,14 @@ describe('validateArtifact', () => {
       highlights: ['One', 2 as unknown as string],
       model: '',
       version: 0,
+      sourceMetadata: { from: 'alice@example.com', labels: ['INBOX', 123 as unknown as string] },
+      sourcePreview: 123 as unknown as string,
     });
 
     expect(normalized.highlights).toEqual(['One']);
     expect(normalized.model).toBe('unknown');
     expect(normalized.version).toBe(1);
+    expect(normalized.sourceMetadata?.labels).toEqual(['INBOX']);
+    expect(normalized.sourcePreview).toBeUndefined();
   });
 });

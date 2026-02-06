@@ -860,6 +860,17 @@ export default function TimelinePageClient() {
             const hasSummary = Boolean(artifact);
             const summaryText = artifact?.summary ?? '';
             const summaryExcerpt = summaryText.length > 180 ? `${summaryText.slice(0, 180)}…` : summaryText;
+            const sourceMetadata = artifact?.sourceMetadata;
+            const fromLabel =
+              item.kind === 'gmail' ? sourceMetadata?.from ?? item.subtitle ?? undefined : undefined;
+            const subjectLabel =
+              item.kind === 'gmail' ? sourceMetadata?.subject ?? item.title ?? undefined : undefined;
+            const mimeTypeLabel =
+              item.kind === 'drive' ? sourceMetadata?.mimeType ?? item.subtitle ?? undefined : undefined;
+            const modifiedLabel =
+              item.kind === 'drive'
+                ? sourceMetadata?.driveModifiedTime ?? item.timestamp ?? undefined
+                : undefined;
 
             return (
               <Card key={`${item.kind}-${item.id}`} className={styles.item}>
@@ -872,6 +883,34 @@ export default function TimelinePageClient() {
                   </div>
                   <p className={styles.subtitle}>{item.subtitle}</p>
                   <p className={styles.timestamp}>{item.timestamp ?? '—'}</p>
+                  {(fromLabel || subjectLabel || mimeTypeLabel || modifiedLabel) && (
+                    <div className={styles.metadata}>
+                      {fromLabel ? (
+                        <div className={styles.metaRow}>
+                          <span className={styles.metaLabel}>From</span>
+                          <span>{fromLabel}</span>
+                        </div>
+                      ) : null}
+                      {subjectLabel ? (
+                        <div className={styles.metaRow}>
+                          <span className={styles.metaLabel}>Subject</span>
+                          <span>{subjectLabel}</span>
+                        </div>
+                      ) : null}
+                      {mimeTypeLabel ? (
+                        <div className={styles.metaRow}>
+                          <span className={styles.metaLabel}>MIME type</span>
+                          <span>{mimeTypeLabel}</span>
+                        </div>
+                      ) : null}
+                      {modifiedLabel ? (
+                        <div className={styles.metaRow}>
+                          <span className={styles.metaLabel}>Modified</span>
+                          <span>{modifiedLabel}</span>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
                   {hasSummary ? (
                     <div className={styles.summaryBlock}>
                       <p className={styles.summaryText}>{isExpanded ? summaryText : summaryExcerpt}</p>
@@ -881,6 +920,24 @@ export default function TimelinePageClient() {
                             <li key={`${key}-highlight-${index}`}>{highlight}</li>
                           ))}
                         </ul>
+                      ) : null}
+                      {artifact?.sourcePreview ? (
+                        <details className={styles.preview}>
+                          <summary>Content preview</summary>
+                          <div className={styles.previewContent}>
+                            <p>{artifact.sourcePreview}</p>
+                            {artifact.sourceMetadata?.driveWebViewLink ? (
+                              <a
+                                className={styles.driveLink}
+                                href={artifact.sourceMetadata.driveWebViewLink}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Open source file
+                              </a>
+                            ) : null}
+                          </div>
+                        </details>
                       ) : null}
                       <div className={styles.summaryActions}>
                         <Button variant="ghost" onClick={() => toggleExpanded(key)}>

@@ -6,6 +6,19 @@ export type SelectionItem = {
   metadata?: Record<string, unknown>;
 };
 
+export type SourceMetadata = {
+  from?: string;
+  to?: string;
+  subject?: string;
+  dateISO?: string;
+  threadId?: string;
+  labels?: string[];
+  mimeType?: string;
+  driveName?: string;
+  driveModifiedTime?: string;
+  driveWebViewLink?: string;
+};
+
 export type SummaryArtifact = {
   artifactId: string;
   source: 'gmail' | 'drive';
@@ -14,6 +27,8 @@ export type SummaryArtifact = {
   createdAtISO: string;
   summary: string;
   highlights: string[];
+  sourceMetadata?: SourceMetadata;
+  sourcePreview?: string;
   driveFolderId: string;
   driveFileId: string;
   driveWebViewLink?: string;

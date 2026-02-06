@@ -14,9 +14,47 @@ const safeFileName = (value: string) => {
   return sanitized || 'Timeline Item';
 };
 
+const buildMetadataLines = (artifact: SummaryArtifact) => {
+  const metadata = artifact.sourceMetadata;
+  if (!metadata) {
+    return [];
+  }
+
+  const lines: string[] = [];
+  const pushLine = (label: string, value?: string | string[]) => {
+    if (!value || lines.length >= 6) {
+      return;
+    }
+    const formatted = Array.isArray(value) ? value.join(', ') : value;
+    if (formatted) {
+      lines.push(`- ${label}: ${formatted}`);
+    }
+  };
+
+  if (artifact.source === 'gmail') {
+    pushLine('From', metadata.from);
+    pushLine('To', metadata.to);
+    pushLine('Subject', metadata.subject);
+    pushLine('Date', metadata.dateISO);
+    pushLine('Thread', metadata.threadId);
+    pushLine('Labels', metadata.labels);
+  } else {
+    pushLine('File', metadata.driveName);
+    pushLine('MIME type', metadata.mimeType);
+    pushLine('Modified', metadata.driveModifiedTime);
+    pushLine('Drive link', metadata.driveWebViewLink);
+  }
+
+  return lines;
+};
+
 const buildMarkdown = (artifact: SummaryArtifact) => {
   const highlights = artifact.highlights.map((item) => `- ${item}`).join('\n');
-  return `# ${artifact.title}\n\n${artifact.summary}\n\n## Highlights\n${highlights || '- (none)'}\n`;
+  const metadataLines = buildMetadataLines(artifact);
+  const metadataSection = metadataLines.length
+    ? `\n\n## Source metadata\n${metadataLines.join('\n')}`
+    : '';
+  return `# ${artifact.title}\n\n${artifact.summary}\n\n## Highlights\n${highlights || '- (none)'}${metadataSection}\n`;
 };
 
 export const writeArtifactToDrive = async (

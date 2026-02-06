@@ -19,6 +19,7 @@ type FailedItem = {
 };
 
 const MAX_ITEMS = 10;
+const PREVIEW_CHARS = 600;
 
 const isValidItem = (value: unknown): value is { source: 'gmail' | 'drive'; id: string } => {
   if (!value || typeof value !== 'object') {
@@ -73,6 +74,10 @@ export const POST = async (request: NextRequest) => {
       });
 
       const createdAtISO = new Date().toISOString();
+      const sourcePreview =
+        content.text.length > PREVIEW_CHARS
+          ? `${content.text.slice(0, PREVIEW_CHARS).trimEnd()}…`
+          : content.text;
       const artifact: SummaryArtifact = {
         artifactId: `${item.source}:${item.id}`,
         source: item.source,
@@ -81,6 +86,8 @@ export const POST = async (request: NextRequest) => {
         createdAtISO,
         summary,
         highlights,
+        sourceMetadata: content.metadata,
+        sourcePreview,
         driveFolderId: session.driveFolderId,
         driveFileId: '',
         driveWebViewLink: undefined,
