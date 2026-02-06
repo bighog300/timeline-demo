@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+HOST=127.0.0.1
+PORT=3000
+BASE_URL="http://${HOST}:${PORT}"
 LOG_FILE="./.smoke-server.log"
-HEALTH_URL="http://127.0.0.1:3000/api/health"
-MAX_ATTEMPTS=60
-SLEEP_SECONDS=1
 SERVER_PID=""
 
 cleanup() {
@@ -14,15 +14,27 @@ cleanup() {
   fi
 }
 
+fail_response() {
+  local label=$1
+  local response=$2
+
+  echo "❌ ${label} check failed."
+  echo "Response:"
+  echo "${response}"
+  echo "--- Last 50 lines of ${LOG_FILE} ---"
+  tail -n 50 "${LOG_FILE}" || true
+  exit 1
+}
+
 trap cleanup EXIT
 
 rm -f "${LOG_FILE}"
 
-pnpm --filter ./apps/web start --port 3000 >"${LOG_FILE}" 2>&1 &
+pnpm --filter ./apps/web start --port "${PORT}" >"${LOG_FILE}" 2>&1 &
 SERVER_PID=$!
 
-attempt=1
-while [[ ${attempt} -le ${MAX_ATTEMPTS} ]]; do
+ready=0
+for _ in {1..60}; do
   if ! kill -0 "${SERVER_PID}" 2>/dev/null; then
     if wait "${SERVER_PID}"; then
       exit_status=0
@@ -35,27 +47,41 @@ while [[ ${attempt} -le ${MAX_ATTEMPTS} ]]; do
     exit 1
   fi
 
-  if response=$(curl -sS -m 2 "${HEALTH_URL}" 2>/dev/null); then
-    echo "✅ Server is ready. Health response:"
-    echo "${response}"
-    exit 0
+  if curl -fsS "${BASE_URL}/api/health" >/dev/null 2>/dev/null; then
+    ready=1
+    break
   fi
 
-  sleep "${SLEEP_SECONDS}"
-  attempt=$((attempt + 1))
+  sleep 1
 done
 
-if kill -0 "${SERVER_PID}" 2>/dev/null; then
-  kill "${SERVER_PID}" 2>/dev/null || true
-fi
-if wait "${SERVER_PID}"; then
-  exit_status=0
-else
-  exit_status=$?
+if [[ ${ready} -ne 1 ]]; then
+  echo "❌ Server did not become ready within 60 seconds."
+  echo "--- Last 50 lines of ${LOG_FILE} ---"
+  tail -n 50 "${LOG_FILE}" || true
+  exit 1
 fi
 
-echo "❌ Server did not become ready within ${MAX_ATTEMPTS} seconds."
-echo "Process exit status: ${exit_status}"
-echo "--- Last 50 lines of ${LOG_FILE} ---"
-tail -n 50 "${LOG_FILE}" || true
-exit 1
+health=$(curl -fsS "${BASE_URL}/api/health") || fail_response "Health" ""
+if ! printf '%s' "${health}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.ok !== true) process.exit(1);'; then
+  fail_response "Health" "${health}"
+fi
+echo "✅ /api/health ok"
+
+events=$(curl -fsS "${BASE_URL}/api/events") || fail_response "Events" ""
+if ! printf '%s' "${events}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!Array.isArray(data)) process.exit(1);'; then
+  fail_response "Events" "${events}"
+fi
+echo "✅ /api/events ok"
+
+calendar=$(curl -fsS "${BASE_URL}/api/calendar") || fail_response "Calendar" ""
+if ! printf '%s' "${calendar}" | node -e 'const fs=require("fs");JSON.parse(fs.readFileSync(0,"utf8"));'; then
+  fail_response "Calendar" "${calendar}"
+fi
+echo "✅ /api/calendar ok"
+
+chat=$(curl -fsS -X POST "${BASE_URL}/api/chat" -H 'content-type: application/json' --data '{"message":"ping"}') || fail_response "Chat" ""
+if ! printf '%s' "${chat}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || typeof data.reply !== "string") process.exit(1);'; then
+  fail_response "Chat" "${chat}"
+fi
+echo "✅ /api/chat ok"

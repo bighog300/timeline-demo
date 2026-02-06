@@ -78,3 +78,10 @@ jobs:
 
       - name: Production smoke test
         run: bash scripts/smoke-test.sh
+
+      - name: Upload smoke logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs
+          path: ./.smoke-server.log
