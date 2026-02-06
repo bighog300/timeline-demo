@@ -21,5 +21,8 @@
     "vercel:install": "corepack enable && corepack prepare pnpm@9.15.9 --activate && pnpm install --frozen-lockfile",
     "vercel:build": "pnpm --filter ./apps/web build",
     "build:web": "pnpm --filter ./apps/web build"
+  },
+  "devDependencies": {
+    "next": "^15.1.6"
   }
 }
