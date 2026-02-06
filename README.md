@@ -181,6 +181,17 @@ they are missing.
 - **Partial search responses**: Search requests cap Drive JSON downloads per call; when the cap is
   hit the response is marked `partial` and the UI prompts you to refine the query.
 
+### Phase 4B Drive Index (Speed + Lower Quotas)
+
+- **timeline-index.json**: The app stores a metadata-only index file inside the app-managed Drive
+  folder to avoid repeatedly listing and downloading every Summary/Selection artifact.
+- **Accelerated listing**: `/api/timeline/artifacts/list` and `/api/timeline/selection/list` can use
+  the index directly to avoid extra Drive list calls.
+- **Faster search discovery**: `/api/timeline/search` uses the index to discover candidate file IDs
+  before downloading capped JSON files for matching.
+- **Manual refresh**: The `/timeline` page includes an Index panel so you can rebuild the index on
+  demand. The UI reports stale status if the index is older than ~10 minutes.
+
 #### Manual Test Steps
 
 1. Connect your Google account and provision the Drive folder.
@@ -191,8 +202,9 @@ they are missing.
 6. Visit `/select/gmail` and `/select/drive` to create a selection.
 7. On `/timeline`, open “Selection sets” and save the current selection.
 8. Clear localStorage, reload `/timeline`, and refresh the selection list.
-9. Load the saved set and apply it via Replace or Merge.
-10. Use the Search panel on `/timeline` to find keywords inside Summary.json and Selection.json
+9. Use the Index panel to refresh the Drive index after creating new artifacts or sets.
+10. Load the saved set and apply it via Replace or Merge.
+11. Use the Search panel on `/timeline` to find keywords inside Summary.json and Selection.json
     artifacts, open the Drive files, or load a matching selection set.
 
 ## 🧪 Testing

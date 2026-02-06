@@ -8,6 +8,7 @@ import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import { artifactKey, mergeArtifacts } from '../lib/artifactMerge';
 import { parseApiError } from '../lib/apiErrors';
+import type { TimelineIndex } from '../lib/indexTypes';
 import { mergeSelectionItems } from '../lib/selectionMerge';
 import type { SelectionSet, SelectionSetItem, SummaryArtifact } from '../lib/types';
 import { isSummaryArtifact, normalizeArtifact } from '../lib/validateArtifact';
@@ -87,6 +88,8 @@ type SearchError =
   | 'upstream_error'
   | 'generic'
   | null;
+
+type IndexError = ApiSurfaceError;
 
 const GMAIL_KEY = 'timeline.gmailSelections';
 const DRIVE_KEY = 'timeline.driveSelections';
@@ -234,6 +237,12 @@ export default function TimelinePageClient() {
   const [isSearching, setIsSearching] = useState(false);
   const [searchPartial, setSearchPartial] = useState(false);
   const searchAbortRef = useRef<AbortController | null>(null);
+  const [indexData, setIndexData] = useState<TimelineIndex | null>(null);
+  const [indexStale, setIndexStale] = useState(false);
+  const [isIndexLoading, setIsIndexLoading] = useState(false);
+  const [isIndexRefreshing, setIsIndexRefreshing] = useState(false);
+  const [indexError, setIndexError] = useState<IndexError>(null);
+  const [indexMessage, setIndexMessage] = useState<string | null>(null);
 
   useEffect(() => {
     setGmailSelections(parseStoredSelections<GmailSelection>(GMAIL_KEY));
@@ -492,6 +501,92 @@ export default function TimelinePageClient() {
     }
   }, []);
 
+  const loadIndexStatus = useCallback(async () => {
+    setIsIndexLoading(true);
+    setIndexError(null);
+    setIndexMessage(null);
+
+    try {
+      const response = await fetch('/api/timeline/index/get');
+
+      if (!response.ok) {
+        const apiError = await parseApiError(response);
+        if (apiError?.code === 'reconnect_required') {
+          setIndexError('reconnect_required');
+          return;
+        }
+        if (apiError?.code === 'drive_not_provisioned') {
+          setIndexError('drive_not_provisioned');
+          return;
+        }
+        if (apiError?.code === 'rate_limited') {
+          setIndexError('rate_limited');
+          return;
+        }
+        if (apiError?.code === 'upstream_timeout' || apiError?.code === 'upstream_error') {
+          setIndexError(apiError.code);
+          return;
+        }
+        setIndexError('generic');
+        return;
+      }
+
+      const payload = (await response.json()) as {
+        index?: TimelineIndex | null;
+        indexStale?: boolean;
+      };
+      setIndexData(payload.index ?? null);
+      setIndexStale(Boolean(payload.indexStale));
+    } catch {
+      setIndexError('generic');
+    } finally {
+      setIsIndexLoading(false);
+    }
+  }, []);
+
+  const refreshIndex = useCallback(async () => {
+    setIsIndexRefreshing(true);
+    setIndexError(null);
+    setIndexMessage(null);
+
+    try {
+      const response = await fetch('/api/timeline/index/rebuild', { method: 'POST' });
+
+      if (!response.ok) {
+        const apiError = await parseApiError(response);
+        if (apiError?.code === 'reconnect_required') {
+          setIndexError('reconnect_required');
+          return;
+        }
+        if (apiError?.code === 'drive_not_provisioned') {
+          setIndexError('drive_not_provisioned');
+          return;
+        }
+        if (apiError?.code === 'rate_limited') {
+          setIndexError('rate_limited');
+          return;
+        }
+        if (apiError?.code === 'upstream_timeout' || apiError?.code === 'upstream_error') {
+          setIndexError(apiError.code);
+          return;
+        }
+        setIndexError('generic');
+        return;
+      }
+
+      const payload = (await response.json()) as { index?: TimelineIndex | null };
+      if (payload.index) {
+        setIndexData(payload.index);
+        setIndexStale(false);
+        setIndexMessage('Index refreshed.');
+      }
+    } catch {
+      setIndexError('generic');
+    } finally {
+      setIsIndexRefreshing(false);
+    }
+  }, []);
+
   const loadSelectionSet = useCallback(
     async (fileId: string, mode?: 'replace' | 'merge') => {
       setIsPreviewLoading(true);
@@ -721,6 +816,13 @@ export default function TimelinePageClient() {
     void fetchSelectionSets();
   }, [fetchSelectionSets, hasHydrated]);
 
+  useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+    void loadIndexStatus();
+  }, [hasHydrated, loadIndexStatus]);
+
   const handleAutoSyncToggle = (checked: boolean) => {
     setAutoSyncOnOpen(checked);
     window.localStorage.setItem(AUTO_SYNC_KEY, checked ? 'true' : 'false');
@@ -813,6 +915,19 @@ export default function TimelinePageClient() {
     ? new Date(lastSyncISO).toLocaleString()
     : 'Not synced yet';
 
+  const indexStatusLabel = indexData ? 'Present' : 'Missing';
+  const indexUpdatedLabel = indexData?.updatedAtISO
+    ? new Date(indexData.updatedAtISO).toLocaleString()
+    : '—';
+  const indexCounts = useMemo(() => {
+    if (!indexData) {
+      return { summaries: 0, selections: 0 };
+    }
+    const summaries = indexData.stats?.totalSummaries ?? indexData.summaries.length;
+    const selections = indexData.stats?.totalSelectionSets ?? indexData.selectionSets.length;
+    return { summaries, selections };
+  }, [indexData]);
+
   const previewSummary = useMemo(() => {
     if (!selectionPreview) {
       return null;
@@ -880,6 +995,19 @@ export default function TimelinePageClient() {
   const searchProvisionNotice = (
     <div className={styles.notice}>
       Provision a Drive folder to search artifacts. Visit <Link href="/connect">/connect</Link>.
+    </div>
+  );
+
+  const indexReconnectNotice = (
+    <div className={styles.notice}>
+      Index status needs a reconnect. Please <Link href="/connect">connect your Google account</Link>
+      .
+    </div>
+  );
+
+  const indexProvisionNotice = (
+    <div className={styles.notice}>
+      Provision a Drive folder to store the index. Visit <Link href="/connect">/connect</Link>.
     </div>
   );
 
@@ -1047,6 +1175,60 @@ export default function TimelinePageClient() {
             </div>
           ))}
         </div>
+      </Card>
+
+      <Card className={styles.indexPanel}>
+        <div className={styles.indexHeader}>
+          <div>
+            <h2>Index</h2>
+            <p className={styles.muted}>
+              Metadata index stored in Drive to speed up listing and search.
+            </p>
+          </div>
+          <div className={styles.indexActions}>
+            <Button variant="secondary" onClick={refreshIndex} disabled={isIndexRefreshing}>
+              {isIndexRefreshing ? 'Refreshing...' : 'Refresh index'}
+            </Button>
+            <Button variant="ghost" onClick={loadIndexStatus} disabled={isIndexLoading}>
+              {isIndexLoading ? 'Loading...' : 'Load status'}
+            </Button>
+          </div>
+        </div>
+        <div className={styles.indexGrid}>
+          <div>
+            <p className={styles.muted}>Status</p>
+            <strong>{indexStatusLabel}</strong>
+          </div>
+          <div>
+            <p className={styles.muted}>Last updated</p>
+            <strong>{indexUpdatedLabel}</strong>
+          </div>
+          <div>
+            <p className={styles.muted}>Summaries</p>
+            <strong>{indexCounts.summaries}</strong>
+          </div>
+          <div>
+            <p className={styles.muted}>Selection sets</p>
+            <strong>{indexCounts.selections}</strong>
+          </div>
+        </div>
+        {indexStale ? (
+          <div className={styles.notice}>
+            Index may be stale. Refresh to pull the latest Drive metadata.
+          </div>
+        ) : null}
+        {indexError === 'reconnect_required' ? indexReconnectNotice : null}
+        {indexError === 'drive_not_provisioned' ? indexProvisionNotice : null}
+        {indexError === 'rate_limited' ? (
+          <div className={styles.notice}>Too many requests — try again in a moment.</div>
+        ) : null}
+        {indexError === 'upstream_timeout' || indexError === 'upstream_error' ? (
+          <div className={styles.notice}>Google returned an error — retry.</div>
+        ) : null}
+        {indexError === 'generic' ? (
+          <div className={styles.notice}>Unable to load the index right now.</div>
+        ) : null}
+        {indexMessage ? <div className={styles.noticeSuccess}>{indexMessage}</div> : null}
       </Card>
 
       {error === 'reconnect_required' ? reconnectNotice : null}

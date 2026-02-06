@@ -54,6 +54,31 @@
   gap: 16px;
 }
 
+.indexPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.indexHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.indexActions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.indexGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
 .searchHeader {
   display: flex;
   justify-content: space-between;
