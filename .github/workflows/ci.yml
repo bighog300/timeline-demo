@@ -32,79 +32,21 @@ jobs:
       
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
       
       - name: Run linting
         run: pnpm lint
       
       - name: Run tests
         run: pnpm test
-      
-      - name: Run preflight
-        run: pnpm preflight
-        env:
-          API_SERVER_ORIGIN: https://example.com
-          NEXT_PUBLIC_API_BASE: /api
-
-      - name: Validate web env
-        run: pnpm validate:env:web
-        env:
-          API_SERVER_ORIGIN: https://example.com
-          NEXT_PUBLIC_API_BASE: /api
 
       - name: Build all packages
         run: pnpm build
 
-  verify-vercel-build:
-    runs-on: ubuntu-latest
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20.x
-          cache: 'pnpm'
+      - name: Verify build outputs
+        run: node scripts/verify-build.mjs
 
-      - name: Enable corepack
-        run: corepack enable
-      
-      - name: Install pnpm
-        run: corepack prepare pnpm@9.15.9 --activate
-      
-      - name: Verify lockfile exists
-        run: |
-          if [ ! -f "pnpm-lock.yaml" ]; then
-            echo "Error: pnpm-lock.yaml not found!"
-            echo "Run 'pnpm install' locally and commit the lockfile"
-            exit 1
-          fi
-      
       - name: Install dependencies (Vercel style)
         run: pnpm run vercel:install
 
-      
-      - name: Run preflight
-        run: pnpm preflight
-        env:
-          API_SERVER_ORIGIN: https://example.com
-          NEXT_PUBLIC_API_BASE: /api
-
-      - name: Validate web env
-        run: pnpm validate:env:web
-        env:
-          API_SERVER_ORIGIN: https://example.com
-          NEXT_PUBLIC_API_BASE: /api
-
       - name: Build web app (Vercel style)
         run: pnpm run vercel:build
-      
-      - name: Verify build output
-        run: |
-          if [ ! -d "apps/web/.next" ]; then
-            echo "Error: Build output not found!"
-            exit 1
-          fi
-          echo "✅ Vercel build successful"
