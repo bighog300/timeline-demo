@@ -177,7 +177,8 @@
 }
 
 .field input,
-.field textarea {
+.field textarea,
+.field select {
   padding: 10px 12px;
   border-radius: 10px;
   border: 1px solid rgba(148, 163, 184, 0.35);
@@ -257,6 +258,89 @@
   gap: 16px;
 }
 
+.timelineSection {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.toolbarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.toolbarCount {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.toolbarRow {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.toolbarFilters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  flex: 1;
+}
+
+.segmentedControl {
+  display: inline-flex;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.15);
+}
+
+.segmentedActive {
+  background: #fff;
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.groupList {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.groupHeader {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(59, 130, 246, 0.12);
+  color: #1e3a8a;
+  font-weight: 600;
+}
+
+.groupEntries {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
 .item {
   display: flex;
   gap: 16px;
@@ -268,9 +352,16 @@
 
 .itemHeader {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+}
+
+.badgeRow {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
 }
 
 .subtitle {
@@ -324,6 +415,12 @@
 .summaryActions {
   display: flex;
   align-items: center;
+  gap: 12px;
+}
+
+.pendingActions {
+  margin-top: 12px;
+  display: flex;
   gap: 12px;
 }
 

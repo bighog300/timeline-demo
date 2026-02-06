@@ -10,6 +10,15 @@ import { artifactKey, mergeArtifacts } from '../lib/artifactMerge';
 import { parseApiError } from '../lib/apiErrors';
 import type { TimelineIndex } from '../lib/indexTypes';
 import { mergeSelectionItems } from '../lib/selectionMerge';
+import {
+  buildTimelineEntries,
+  filterEntries,
+  groupEntries,
+  sortEntries,
+  type TimelineFilters,
+  type TimelineGroupMode,
+  type TimelineSelectionInput,
+} from '../lib/timelineView';
 import type { SelectionSet, SelectionSetItem, SummaryArtifact } from '../lib/types';
 import { isSummaryArtifact, normalizeArtifact } from '../lib/validateArtifact';
 import styles from './timeline.module.css';
@@ -28,14 +37,6 @@ type DriveSelection = {
   name: string;
   mimeType: string;
   modifiedTime?: string;
-};
-
-type TimelineItem = {
-  kind: 'gmail' | 'drive';
-  id: string;
-  title: string;
-  subtitle: string;
-  timestamp?: string;
 };
 
 type ApiSurfaceError =
@@ -74,6 +75,9 @@ type TimelineSearchResult = {
   driveWebViewLink?: string;
   title: string;
   updatedAtISO?: string;
+  source?: 'gmail' | 'drive';
+  sourceId?: string;
+  createdAtISO?: string;
   snippet: string;
   matchFields: string[];
 };
@@ -96,7 +100,16 @@ const DRIVE_KEY = 'timeline.driveSelections';
 const ARTIFACTS_KEY = 'timeline.summaryArtifacts';
 const AUTO_SYNC_KEY = 'timeline.autoSyncOnOpen';
 const LAST_SYNC_KEY = 'timeline.lastSyncISO';
+const GROUPING_KEY = 'timeline.groupingMode';
+const FILTERS_KEY = 'timeline.filters';
 const ARTIFACT_LIMIT = 100;
+const DEFAULT_FILTERS: TimelineFilters = {
+  source: 'all',
+  status: 'all',
+  kind: 'all',
+  tag: 'all',
+  text: '',
+};
 
 const parseStoredSelections = <T,>(key: string) => {
   if (typeof window === 'undefined') {
@@ -131,6 +144,37 @@ const parseStoredArtifacts = () => {
     return parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
     return {} as Record<string, SummaryArtifact>;
+  }
+};
+
+const parseStoredGrouping = (): TimelineGroupMode => {
+  if (typeof window === 'undefined') {
+    return 'day';
+  }
+  const stored = window.localStorage.getItem(GROUPING_KEY);
+  if (stored === 'day' || stored === 'week' || stored === 'month') {
+    return stored;
+  }
+  return 'day';
+};
+
+const parseStoredFilters = (): TimelineFilters => {
+  if (typeof window === 'undefined') {
+    return DEFAULT_FILTERS;
+  }
+  const stored = window.localStorage.getItem(FILTERS_KEY);
+  if (!stored) {
+    return DEFAULT_FILTERS;
+  }
+  try {
+    const parsed = JSON.parse(stored) as Partial<TimelineFilters>;
+    return {
+      ...DEFAULT_FILTERS,
+      ...parsed,
+      text: typeof parsed?.text === 'string' ? parsed.text : '',
+    };
+  } catch {
+    return DEFAULT_FILTERS;
   }
 };
 
@@ -217,6 +261,10 @@ export default function TimelinePageClient() {
   const [autoSyncOnOpen, setAutoSyncOnOpen] = useState(false);
   const [lastSyncISO, setLastSyncISO] = useState<string | null>(null);
   const [hasHydrated, setHasHydrated] = useState(false);
+  const [groupingMode, setGroupingMode] = useState<TimelineGroupMode>('day');
+  const [filters, setFilters] = useState<TimelineFilters>(DEFAULT_FILTERS);
+  const [appliedSetMessage, setAppliedSetMessage] = useState<string | null>(null);
+  const [pendingScrollKey, setPendingScrollKey] = useState<string | null>(null);
   const [selectionSets, setSelectionSets] = useState<SelectionSetSummary[]>([]);
   const [isLoadingSets, setIsLoadingSets] = useState(false);
   const [selectionError, setSelectionError] = useState<SelectionSetError>(null);
@@ -243,6 +291,7 @@ export default function TimelinePageClient() {
   const [isIndexRefreshing, setIsIndexRefreshing] = useState(false);
   const [indexError, setIndexError] = useState<IndexError>(null);
   const [indexMessage, setIndexMessage] = useState<string | null>(null);
+  const timelineTopRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setGmailSelections(parseStoredSelections<GmailSelection>(GMAIL_KEY));
@@ -250,6 +299,8 @@ export default function TimelinePageClient() {
     setArtifacts(parseStoredArtifacts());
     setAutoSyncOnOpen(window.localStorage.getItem(AUTO_SYNC_KEY) === 'true');
     setLastSyncISO(window.localStorage.getItem(LAST_SYNC_KEY));
+    setGroupingMode(parseStoredGrouping());
+    setFilters(parseStoredFilters());
     setHasHydrated(true);
   }, []);
 
@@ -268,29 +319,46 @@ export default function TimelinePageClient() {
     return () => window.clearTimeout(handle);
   }, [summarizeCooldownUntil]);
 
-  const timelineItems = useMemo(() => {
-    const gmailItems: TimelineItem[] = gmailSelections.map((message) => ({
-      kind: 'gmail',
-      id: message.id,
-      title: message.subject,
-      subtitle: message.from,
-      timestamp: message.date,
-    }));
+  const selectionInputs = useMemo<TimelineSelectionInput[]>(
+    () => [
+      ...gmailSelections.map((message) => ({
+        source: 'gmail' as const,
+        id: message.id,
+        title: message.subject,
+        dateISO: message.date,
+        metadata: {
+          from: message.from,
+          subject: message.subject,
+        },
+      })),
+      ...driveSelections.map((file) => ({
+        source: 'drive' as const,
+        id: file.id,
+        title: file.name,
+        dateISO: file.modifiedTime,
+        metadata: {
+          mimeType: file.mimeType,
+          modifiedTime: file.modifiedTime,
+        },
+      })),
+    ],
+    [driveSelections, gmailSelections],
+  );
 
-    const driveItems: TimelineItem[] = driveSelections.map((file) => ({
-      kind: 'drive',
-      id: file.id,
-      title: file.name,
-      subtitle: file.mimeType,
-      timestamp: file.modifiedTime,
-    }));
+  const timelineEntries = useMemo(
+    () => buildTimelineEntries(selectionInputs, artifacts, indexData),
+    [artifacts, indexData, selectionInputs],
+  );
 
-    return [...gmailItems, ...driveItems].sort((a, b) => {
-      const aTime = a.timestamp ? new Date(a.timestamp).getTime() : 0;
-      const bTime = b.timestamp ? new Date(b.timestamp).getTime() : 0;
-      return bTime - aTime;
-    });
-  }, [driveSelections, gmailSelections]);
+  const sortedEntries = useMemo(() => sortEntries(timelineEntries), [timelineEntries]);
+  const filteredEntries = useMemo(
+    () => filterEntries(sortedEntries, filters),
+    [filters, sortedEntries],
+  );
+  const groupedEntries = useMemo(
+    () => groupEntries(filteredEntries, groupingMode),
+    [filteredEntries, groupingMode],
+  );
 
   const selectionItems = useMemo(
     () => buildSelectionItems(gmailSelections, driveSelections),
@@ -298,15 +366,36 @@ export default function TimelinePageClient() {
   );
 
   const summarizedCount = useMemo(
-    () =>
-      timelineItems.filter((item) =>
-        Boolean(artifacts[artifactKey(item.kind, item.id)]?.summary),
-      ).length,
-    [artifacts, timelineItems],
+    () => timelineEntries.filter((entry) => entry.status === 'summarized').length,
+    [timelineEntries],
   );
 
-  const pendingCount = timelineItems.length - summarizedCount;
+  const pendingCount = timelineEntries.length - summarizedCount;
   const isSummarizeCoolingDown = summarizeCooldownUntil !== null;
+  const entryKeys = useMemo(
+    () => new Set(timelineEntries.map((entry) => entry.key)),
+    [timelineEntries],
+  );
+  const tagOptions = useMemo(() => {
+    const tags = new Set<string>();
+    timelineEntries.forEach((entry) => {
+      entry.tags.forEach((tag) => tags.add(tag));
+    });
+    return Array.from(tags).sort((a, b) => a.localeCompare(b));
+  }, [timelineEntries]);
+  const visibleCountLabel = `${filteredEntries.length} shown of ${timelineEntries.length} total`;
+  const filtersActive =
+    filters.source !== 'all' ||
+    filters.status !== 'all' ||
+    filters.kind !== 'all' ||
+    filters.tag !== 'all' ||
+    filters.text.trim().length > 0;
+
+  useEffect(() => {
+    if (filters.tag !== 'all' && !tagOptions.includes(filters.tag)) {
+      setFilters((prev) => ({ ...prev, tag: 'all' }));
+    }
+  }, [filters.tag, tagOptions]);
 
   const toggleExpanded = (key: string) => {
     setExpandedKeys((prev) => {
@@ -321,7 +410,7 @@ export default function TimelinePageClient() {
   };
 
   const handleSummarize = async () => {
-    if (timelineItems.length === 0) {
+    if (selectionItems.length === 0) {
       return;
     }
 
@@ -334,7 +423,7 @@ export default function TimelinePageClient() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          items: timelineItems.map((item) => ({ source: item.kind, id: item.id })),
+          items: selectionItems.map((item) => ({ source: item.source, id: item.id })),
         }),
       });
 
@@ -442,6 +531,20 @@ export default function TimelinePageClient() {
     void handleSyncFromDrive();
   }, [autoSyncOnOpen, handleSyncFromDrive, hasHydrated]);
 
+  useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+    window.localStorage.setItem(GROUPING_KEY, groupingMode);
+  }, [groupingMode, hasHydrated]);
+
+  useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+    window.localStorage.setItem(FILTERS_KEY, JSON.stringify(filters));
+  }, [filters, hasHydrated]);
+
   const persistSelections = (nextGmail: GmailSelection[], nextDrive: DriveSelection[]) => {
     setGmailSelections(nextGmail);
     setDriveSelections(nextDrive);
@@ -460,6 +563,21 @@ export default function TimelinePageClient() {
       persistSelections(gmail, drive);
     },
     [driveSelections, gmailSelections, selectionItems],
+  );
+
+  const scrollToTimelineTop = useCallback(() => {
+    requestAnimationFrame(() => {
+      timelineTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }, []);
+
+  const applySelectionWithMessage = useCallback(
+    (items: SelectionSetItem[], mode: 'replace' | 'merge', name: string) => {
+      applySelectionItems(items, mode);
+      setAppliedSetMessage(`Applied set “${name}”.`);
+      scrollToTimelineTop();
+    },
+    [applySelectionItems, scrollToTimelineTop],
   );
 
   const fetchSelectionSets = useCallback(async () => {
@@ -628,7 +746,7 @@ export default function TimelinePageClient() {
         setSelectionMessage(`Loaded set “${payload.set.name}”`);
 
         if (mode) {
-          applySelectionItems(payload.set.items, mode);
+          applySelectionWithMessage(payload.set.items, mode, payload.set.name);
         }
       } catch {
         setPreviewError('generic');
@@ -636,7 +754,7 @@ export default function TimelinePageClient() {
         setIsPreviewLoading(false);
       }
     },
-    [applySelectionItems],
+    [applySelectionWithMessage],
   );
 
   const clearSearchState = useCallback(() => {
@@ -746,24 +864,64 @@ export default function TimelinePageClient() {
     void runSearch(trimmed, searchType);
   }, [runSearch, searchQuery, searchType]);
 
+  const scrollToEntry = useCallback((key: string) => {
+    requestAnimationFrame(() => {
+      const element = document.querySelector(`[data-entry-key="${key}"]`);
+      if (element instanceof HTMLElement) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  }, []);
+
+  const handleJumpToEntry = useCallback(
+    (key: string) => {
+      setExpandedKeys((prev) => new Set(prev).add(key));
+      scrollToEntry(key);
+    },
+    [scrollToEntry],
+  );
+
   const handleViewSummary = useCallback(
-    (fileId: string) => {
+    (result: TimelineSearchResult) => {
+      const entryKey =
+        result.source && result.sourceId ? artifactKey(result.source, result.sourceId) : null;
+      if (entryKey && entryKeys.has(entryKey)) {
+        handleJumpToEntry(entryKey);
+        return;
+      }
       const entry = Object.entries(artifacts).find(([, artifact]) => {
-        return artifact.driveFileId === fileId;
+        return artifact.driveFileId === result.driveFileId;
       });
       if (!entry) {
         return;
       }
-      const [key] = entry;
-      setExpandedKeys((prev) => new Set(prev).add(key));
-      requestAnimationFrame(() => {
-        const element = document.querySelector(`[data-timeline-key="${key}"]`);
-        if (element instanceof HTMLElement) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-      });
+      handleJumpToEntry(entry[0]);
     },
-    [artifacts],
+    [artifacts, entryKeys, handleJumpToEntry],
+  );
+
+  const handleAddSummaryResult = useCallback(
+    (result: TimelineSearchResult) => {
+      if (!result.source || !result.sourceId) {
+        return;
+      }
+      const key = artifactKey(result.source, result.sourceId);
+      applySelectionItems(
+        [
+          {
+            source: result.source,
+            id: result.sourceId,
+            title: result.title,
+            dateISO: result.createdAtISO,
+          },
+        ],
+        'merge',
+      );
+      setAppliedSetMessage(`Added “${result.title}” to selection.`);
+      setPendingScrollKey(key);
+      scrollToTimelineTop();
+    },
+    [applySelectionItems, scrollToTimelineTop],
   );
 
   useEffect(() => {
@@ -771,6 +929,16 @@ export default function TimelinePageClient() {
       searchAbortRef.current?.abort();
     };
   }, []);
+
+  useEffect(() => {
+    if (!pendingScrollKey) {
+      return;
+    }
+    if (entryKeys.has(pendingScrollKey)) {
+      handleJumpToEntry(pendingScrollKey);
+      setPendingScrollKey(null);
+    }
+  }, [entryKeys, handleJumpToEntry, pendingScrollKey]);
 
   useEffect(() => {
     const trimmed = searchQuery.trim();
@@ -826,6 +994,14 @@ export default function TimelinePageClient() {
   const handleAutoSyncToggle = (checked: boolean) => {
     setAutoSyncOnOpen(checked);
     window.localStorage.setItem(AUTO_SYNC_KEY, checked ? 'true' : 'false');
+  };
+
+  const updateFilters = (next: Partial<TimelineFilters>) => {
+    setFilters((prev) => ({ ...prev, ...next }));
+  };
+
+  const clearFilters = () => {
+    setFilters(DEFAULT_FILTERS);
   };
 
   const handleSaveSelectionSet = async () => {
@@ -1018,7 +1194,7 @@ export default function TimelinePageClient() {
           <p>Unified view of the items you selected from Gmail and Drive.</p>
           <h1>Timeline selection</h1>
           <p className={styles.counts}>
-            {timelineItems.length} selected, {summarizedCount} summarized, {pendingCount} pending
+            {timelineEntries.length} selected, {summarizedCount} summarized, {pendingCount} pending
           </p>
           <p className={styles.syncMeta}>Last synced: {lastSyncLabel}</p>
         </div>
@@ -1026,7 +1202,7 @@ export default function TimelinePageClient() {
           <div className={styles.actionRow}>
             <Button
               variant="secondary"
-              disabled={timelineItems.length === 0 || isSummarizing || isSummarizeCoolingDown}
+              disabled={timelineEntries.length === 0 || isSummarizing || isSummarizeCoolingDown}
               onClick={handleSummarize}
             >
               {isSummarizing ? 'Generating...' : 'Generate summaries'}
@@ -1129,51 +1305,71 @@ export default function TimelinePageClient() {
           {!isSearching && searchResults.length === 0 && searchQuery.trim().length >= 2 ? (
             <p className={styles.muted}>No matches yet. Try another keyword.</p>
           ) : null}
-          {searchResults.map((result) => (
-            <div key={`${result.kind}-${result.driveFileId}`} className={styles.searchResult}>
-              <div className={styles.searchResultHeader}>
-                <Badge tone={result.kind === 'summary' ? 'accent' : 'neutral'}>
-                  {result.kind === 'summary' ? 'Summary' : 'Selection Set'}
-                </Badge>
-                <div>
-                  <strong>{result.title}</strong>
-                  {result.updatedAtISO ? (
-                    <div className={styles.selectionMeta}>
-                      Updated {new Date(result.updatedAtISO).toLocaleString()}
-                    </div>
+          {searchResults.map((result) => {
+            const entryKey =
+              result.source && result.sourceId
+                ? artifactKey(result.source, result.sourceId)
+                : null;
+            const canAddSelection = Boolean(
+              result.kind === 'summary' && entryKey && !entryKeys.has(entryKey),
+            );
+
+            return (
+              <div key={`${result.kind}-${result.driveFileId}`} className={styles.searchResult}>
+                <div className={styles.searchResultHeader}>
+                  <Badge tone={result.kind === 'summary' ? 'accent' : 'neutral'}>
+                    {result.kind === 'summary' ? 'Summary' : 'Selection Set'}
+                  </Badge>
+                  <div>
+                    <strong>{result.title}</strong>
+                    {result.updatedAtISO ? (
+                      <div className={styles.selectionMeta}>
+                        Updated {new Date(result.updatedAtISO).toLocaleString()}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+                <p className={styles.searchSnippet}>
+                  {result.snippet || 'No preview available for this match.'}
+                </p>
+                <div className={styles.searchActions}>
+                  {result.kind === 'selection' ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => loadSelectionSet(result.driveFileId, 'replace')}
+                      disabled={isPreviewLoading}
+                    >
+                      {isPreviewLoading ? 'Loading...' : 'Load set'}
+                    </Button>
+                  ) : (
+                    <>
+                      <Button variant="ghost" onClick={() => handleViewSummary(result)}>
+                        Jump to item
+                      </Button>
+                      {canAddSelection ? (
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleAddSummaryResult(result)}
+                        >
+                          Add to selection
+                        </Button>
+                      ) : null}
+                    </>
+                  )}
+                  {result.driveWebViewLink ? (
+                    <a
+                      className={styles.driveLink}
+                      href={result.driveWebViewLink}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open in Drive
+                    </a>
                   ) : null}
                 </div>
               </div>
-              <p className={styles.searchSnippet}>
-                {result.snippet || 'No preview available for this match.'}
-              </p>
-              <div className={styles.searchActions}>
-                {result.kind === 'selection' ? (
-                  <Button
-                    variant="secondary"
-                    onClick={() => loadSelectionSet(result.driveFileId, 'replace')}
-                    disabled={isPreviewLoading}
-                  >
-                    {isPreviewLoading ? 'Loading...' : 'Load set'}
-                  </Button>
-                ) : (
-                  <Button variant="ghost" onClick={() => handleViewSummary(result.driveFileId)}>
-                    View in timeline
-                  </Button>
-                )}
-                {result.driveWebViewLink ? (
-                  <a
-                    className={styles.driveLink}
-                    href={result.driveWebViewLink}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open in Drive
-                  </a>
-                ) : null}
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </Card>
 
@@ -1438,13 +1634,21 @@ export default function TimelinePageClient() {
             <div className={styles.selectionButtons}>
               <Button
                 variant="secondary"
-                onClick={() => applySelectionItems(selectionPreview.items, 'replace')}
+                onClick={() =>
+                  applySelectionWithMessage(
+                    selectionPreview.items,
+                    'replace',
+                    selectionPreview.name,
+                  )
+                }
               >
                 Replace selection
               </Button>
               <Button
                 variant="secondary"
-                onClick={() => applySelectionItems(selectionPreview.items, 'merge')}
+                onClick={() =>
+                  applySelectionWithMessage(selectionPreview.items, 'merge', selectionPreview.name)
+                }
               >
                 Merge into selection
               </Button>
@@ -1463,126 +1667,257 @@ export default function TimelinePageClient() {
         ) : null}
       </Card>
 
-      {timelineItems.length === 0 ? (
-        <Card className={styles.emptyState}>
-          <h2>No items selected yet</h2>
-          <p>Pick Gmail and Drive items to create your first Timeline selection.</p>
-        </Card>
-      ) : (
-        <div className={styles.list}>
-          {timelineItems.map((item) => {
-            const key = artifactKey(item.kind, item.id);
-            const artifact = artifacts[key];
-            const isExpanded = expandedKeys.has(key);
-            const hasSummary = Boolean(artifact);
-            const summaryText = artifact?.summary ?? '';
-            const summaryExcerpt = summaryText.length > 180 ? `${summaryText.slice(0, 180)}…` : summaryText;
-            const sourceMetadata = artifact?.sourceMetadata;
-            const fromLabel =
-              item.kind === 'gmail' ? sourceMetadata?.from ?? item.subtitle ?? undefined : undefined;
-            const subjectLabel =
-              item.kind === 'gmail' ? sourceMetadata?.subject ?? item.title ?? undefined : undefined;
-            const mimeTypeLabel =
-              item.kind === 'drive' ? sourceMetadata?.mimeType ?? item.subtitle ?? undefined : undefined;
-            const modifiedLabel =
-              item.kind === 'drive'
-                ? sourceMetadata?.driveModifiedTime ?? item.timestamp ?? undefined
-                : undefined;
+      <div ref={timelineTopRef} className={styles.timelineSection}>
+        {timelineEntries.length > 0 ? (
+          <Card className={styles.toolbar}>
+            <div className={styles.toolbarHeader}>
+              <h2>Timeline view</h2>
+              <span className={styles.toolbarCount}>{visibleCountLabel}</span>
+            </div>
+            <div className={styles.toolbarRow}>
+              <div className={styles.segmentedControl} role="group" aria-label="Grouping">
+                <Button
+                  variant="ghost"
+                  className={groupingMode === 'day' ? styles.segmentedActive : undefined}
+                  onClick={() => setGroupingMode('day')}
+                >
+                  Day
+                </Button>
+                <Button
+                  variant="ghost"
+                  className={groupingMode === 'week' ? styles.segmentedActive : undefined}
+                  onClick={() => setGroupingMode('week')}
+                >
+                  Week
+                </Button>
+                <Button
+                  variant="ghost"
+                  className={groupingMode === 'month' ? styles.segmentedActive : undefined}
+                  onClick={() => setGroupingMode('month')}
+                >
+                  Month
+                </Button>
+              </div>
+              <div className={styles.toolbarFilters}>
+                <label className={styles.field}>
+                  <span>Source</span>
+                  <select
+                    value={filters.source}
+                    onChange={(event) =>
+                      updateFilters({ source: event.target.value as TimelineFilters['source'] })
+                    }
+                  >
+                    <option value="all">All</option>
+                    <option value="gmail">Gmail</option>
+                    <option value="drive">Drive</option>
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span>Status</span>
+                  <select
+                    value={filters.status}
+                    onChange={(event) =>
+                      updateFilters({ status: event.target.value as TimelineFilters['status'] })
+                    }
+                  >
+                    <option value="all">All</option>
+                    <option value="summarized">Summarized</option>
+                    <option value="pending">Pending</option>
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span>Kind</span>
+                  <select
+                    value={filters.kind}
+                    onChange={(event) =>
+                      updateFilters({ kind: event.target.value as TimelineFilters['kind'] })
+                    }
+                  >
+                    <option value="all">All</option>
+                    <option value="summary">Summaries</option>
+                    <option value="selection">Selection-only</option>
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span>Tag</span>
+                  <select
+                    value={filters.tag}
+                    onChange={(event) => updateFilters({ tag: event.target.value })}
+                  >
+                    <option value="all">All</option>
+                    {tagOptions.map((tag) => (
+                      <option key={tag} value={tag}>
+                        {tag}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className={styles.field}>
+                  <span>Text</span>
+                  <input
+                    type="text"
+                    value={filters.text}
+                    onChange={(event) => updateFilters({ text: event.target.value })}
+                    placeholder="Filter by title or preview"
+                  />
+                </label>
+              </div>
+            </div>
+            <div className={styles.toolbarRow}>
+              <span className={styles.muted}>{visibleCountLabel}</span>
+              <Button variant="ghost" onClick={clearFilters} disabled={!filtersActive}>
+                Clear all filters
+              </Button>
+            </div>
+          </Card>
+        ) : null}
 
-            return (
-              <Card
-                key={`${item.kind}-${item.id}`}
-                className={styles.item}
-                data-timeline-key={key}
-              >
-                <div className={styles.itemContent}>
-                  <div className={styles.itemHeader}>
-                    <h3>{item.title}</h3>
-                    <Badge tone={hasSummary ? 'success' : 'warning'}>
-                      {hasSummary ? 'Summarized' : 'Pending'}
-                    </Badge>
-                  </div>
-                  <p className={styles.subtitle}>{item.subtitle}</p>
-                  <p className={styles.timestamp}>{item.timestamp ?? '—'}</p>
-                  {(fromLabel || subjectLabel || mimeTypeLabel || modifiedLabel) && (
-                    <div className={styles.metadata}>
-                      {fromLabel ? (
-                        <div className={styles.metaRow}>
-                          <span className={styles.metaLabel}>From</span>
-                          <span>{fromLabel}</span>
-                        </div>
-                      ) : null}
-                      {subjectLabel ? (
-                        <div className={styles.metaRow}>
-                          <span className={styles.metaLabel}>Subject</span>
-                          <span>{subjectLabel}</span>
-                        </div>
-                      ) : null}
-                      {mimeTypeLabel ? (
-                        <div className={styles.metaRow}>
-                          <span className={styles.metaLabel}>MIME type</span>
-                          <span>{mimeTypeLabel}</span>
-                        </div>
-                      ) : null}
-                      {modifiedLabel ? (
-                        <div className={styles.metaRow}>
-                          <span className={styles.metaLabel}>Modified</span>
-                          <span>{modifiedLabel}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                  )}
-                  {hasSummary ? (
-                    <div className={styles.summaryBlock}>
-                      <p className={styles.summaryText}>{isExpanded ? summaryText : summaryExcerpt}</p>
-                      {isExpanded && artifact?.highlights?.length ? (
-                        <ul className={styles.highlights}>
-                          {artifact.highlights.map((highlight, index) => (
-                            <li key={`${key}-highlight-${index}`}>{highlight}</li>
-                          ))}
-                        </ul>
-                      ) : null}
-                      {artifact?.sourcePreview ? (
-                        <details className={styles.preview}>
-                          <summary>Content preview</summary>
-                          <div className={styles.previewContent}>
-                            <p>{artifact.sourcePreview}</p>
-                            {artifact.sourceMetadata?.driveWebViewLink ? (
-                              <a
-                                className={styles.driveLink}
-                                href={artifact.sourceMetadata.driveWebViewLink}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Open source file
-                              </a>
-                            ) : null}
+        {appliedSetMessage ? <div className={styles.noticeSuccess}>{appliedSetMessage}</div> : null}
+
+        {timelineEntries.length === 0 ? (
+          <Card className={styles.emptyState}>
+            <h2>No items selected yet</h2>
+            <p>Pick Gmail and Drive items to create your first Timeline selection.</p>
+          </Card>
+        ) : filteredEntries.length === 0 ? (
+          <Card className={styles.emptyState}>
+            <h2>No items match your filters</h2>
+            <p>Try adjusting or clearing your filters to see more.</p>
+            <Button variant="secondary" onClick={clearFilters}>
+              Clear filters
+            </Button>
+          </Card>
+        ) : (
+          <div className={styles.groupList}>
+            {groupedEntries.map((group) => (
+              <div key={group.key} className={styles.group}>
+                <div className={styles.groupHeader}>{group.label}</div>
+                <div className={styles.groupEntries}>
+                  {group.entries.map((entry) => {
+                    const isExpanded = expandedKeys.has(entry.key);
+                    const summaryText = entry.summary ?? '';
+                    const summaryExcerpt =
+                      summaryText.length > 180 ? `${summaryText.slice(0, 180)}…` : summaryText;
+                    const meta = entry.metadata;
+                    const dateLabel = entry.dateISO
+                      ? new Date(entry.dateISO).toLocaleString()
+                      : '—';
+
+                    return (
+                      <Card key={entry.key} className={styles.item} data-entry-key={entry.key}>
+                        <div className={styles.itemContent}>
+                          <div className={styles.itemHeader}>
+                            <div>
+                              <h3>{entry.title}</h3>
+                              <div className={styles.badgeRow}>
+                                <Badge tone="neutral">
+                                  {entry.source === 'gmail' ? 'Gmail' : 'Drive'}
+                                </Badge>
+                                <Badge tone={entry.status === 'summarized' ? 'success' : 'warning'}>
+                                  {entry.status === 'summarized' ? 'Summarized' : 'Pending'}
+                                </Badge>
+                              </div>
+                            </div>
+                            <span className={styles.timestamp}>{dateLabel}</span>
                           </div>
-                        </details>
-                      ) : null}
-                      <div className={styles.summaryActions}>
-                        <Button variant="ghost" onClick={() => toggleExpanded(key)}>
-                          {isExpanded ? 'Collapse' : 'Expand'}
-                        </Button>
-                        {artifact?.driveWebViewLink ? (
-                          <a
-                            className={styles.driveLink}
-                            href={artifact.driveWebViewLink}
-                            target="_blank"
-                            rel="noreferrer"
-                          >
-                            Open in Drive
-                          </a>
-                        ) : null}
-                      </div>
-                    </div>
-                  ) : null}
+                          {(meta?.from || meta?.subject || meta?.mimeType || meta?.modifiedTime) && (
+                            <div className={styles.metadata}>
+                              {meta?.from ? (
+                                <div className={styles.metaRow}>
+                                  <span className={styles.metaLabel}>From</span>
+                                  <span>{meta.from}</span>
+                                </div>
+                              ) : null}
+                              {meta?.subject ? (
+                                <div className={styles.metaRow}>
+                                  <span className={styles.metaLabel}>Subject</span>
+                                  <span>{meta.subject}</span>
+                                </div>
+                              ) : null}
+                              {meta?.mimeType ? (
+                                <div className={styles.metaRow}>
+                                  <span className={styles.metaLabel}>MIME type</span>
+                                  <span>{meta.mimeType}</span>
+                                </div>
+                              ) : null}
+                              {meta?.modifiedTime ? (
+                                <div className={styles.metaRow}>
+                                  <span className={styles.metaLabel}>Modified</span>
+                                  <span>{meta.modifiedTime}</span>
+                                </div>
+                              ) : null}
+                            </div>
+                          )}
+                          {entry.status === 'summarized' ? (
+                            <div className={styles.summaryBlock}>
+                              <p className={styles.summaryText}>
+                                {isExpanded ? summaryText : summaryExcerpt}
+                              </p>
+                              {isExpanded && entry.highlights?.length ? (
+                                <ul className={styles.highlights}>
+                                  {entry.highlights.map((highlight, index) => (
+                                    <li key={`${entry.key}-highlight-${index}`}>{highlight}</li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                              {entry.sourcePreview ? (
+                                <details className={styles.preview}>
+                                  <summary>Content preview</summary>
+                                  <div className={styles.previewContent}>
+                                    <p>{entry.sourcePreview}</p>
+                                    {entry.sourceMetadata?.driveWebViewLink ? (
+                                      <a
+                                        className={styles.driveLink}
+                                        href={entry.sourceMetadata.driveWebViewLink}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                      >
+                                        Open source file
+                                      </a>
+                                    ) : null}
+                                  </div>
+                                </details>
+                              ) : null}
+                              <div className={styles.summaryActions}>
+                                <Button variant="ghost" onClick={() => toggleExpanded(entry.key)}>
+                                  {isExpanded ? 'Collapse' : 'Expand'}
+                                </Button>
+                                {entry.driveWebViewLink ? (
+                                  <a
+                                    className={styles.driveLink}
+                                    href={entry.driveWebViewLink}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    Open in Drive
+                                  </a>
+                                ) : null}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className={styles.pendingActions}>
+                              {entry.driveWebViewLink ? (
+                                <a
+                                  className={styles.driveLink}
+                                  href={entry.driveWebViewLink}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  Open in Drive
+                                </a>
+                              ) : null}
+                            </div>
+                          )}
+                        </div>
+                      </Card>
+                    );
+                  })}
                 </div>
-              </Card>
-            );
-          })}
-        </div>
-      )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </section>
   );
 }
