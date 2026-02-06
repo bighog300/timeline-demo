@@ -75,13 +75,13 @@ fi
 echo "✅ /api/events ok"
 
 calendar=$(curl -fsS "${BASE_URL}/api/calendar") || fail_response "Calendar" ""
-if ! printf '%s' "${calendar}" | node -e 'const fs=require("fs");JSON.parse(fs.readFileSync(0,"utf8"));'; then
+if ! printf '%s' "${calendar}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || !Array.isArray(data.items)) process.exit(1);if (data.items.length && !data.items.every(item => item && item.id && item.title && item.start && item.end)) process.exit(1);'; then
   fail_response "Calendar" "${calendar}"
 fi
 echo "✅ /api/calendar ok"
 
 chat=$(curl -fsS -X POST "${BASE_URL}/api/chat" -H 'content-type: application/json' --data '{"message":"ping"}') || fail_response "Chat" ""
-if ! printf '%s' "${chat}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || typeof data.reply !== "string") process.exit(1);'; then
+if ! printf '%s' "${chat}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || typeof data.reply !== "string" || !Array.isArray(data.suggested_actions)) process.exit(1);'; then
   fail_response "Chat" "${chat}"
 fi
 echo "✅ /api/chat ok"
