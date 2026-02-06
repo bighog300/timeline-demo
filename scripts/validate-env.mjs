@@ -69,7 +69,7 @@ const API_REQUIRED = [
   'DRIVE_ADAPTER',
 ];
 
-const WEB_REQUIRED = ['API_SERVER_ORIGIN', 'NEXT_PUBLIC_API_BASE'];
+const WEB_REQUIRED = [];
 
 const PLACEHOLDER_PATTERNS = [/your-/i, /example\.com/i, /^sk-your/i, /YOUR-API-DOMAIN\.com/i];
 

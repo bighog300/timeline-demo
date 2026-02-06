@@ -1,11 +1,10 @@
 # Timeline App - Complete Deployment Guide
 
 ## Overview
-This guide covers deploying the Timeline App from GitHub to Vercel (web) and a separate hosting service (API).
+This guide covers deploying the Timeline App from GitHub to Vercel as a single Next.js project (UI + API routes).
 
 **Architecture:**
-- **Web (Next.js)** → Vercel
-- **API (Express + PostgreSQL)** → Render/Fly/Railway
+- **Web + API (Next.js)** → Vercel
 - **Monorepo** managed with pnpm workspaces
 
 ---
@@ -18,7 +17,6 @@ This guide covers deploying the Timeline App from GitHub to Vercel (web) and a s
 - Git
 - GitHub account
 - Vercel account
-- API hosting account (Render/Fly/Railway)
 - Google Cloud Console (for OAuth)
 - OpenAI API key
 
@@ -85,16 +83,12 @@ This guide covers deploying the Timeline App from GitHub to Vercel (web) and a s
     "pnpm": "9.17.0"
   },
   "scripts": {
-    "dev:api": "pnpm --filter ./apps/api dev",
     "dev:web": "pnpm --filter ./apps/web dev",
-    "db:generate": "pnpm --filter ./apps/api db:generate",
-    "db:migrate": "pnpm --filter ./apps/api db:migrate",
-    "db:reset": "pnpm --filter ./apps/api db:reset",
     "preflight": "node scripts/preflight.mjs",
     "test": "pnpm -r --if-present test",
     "build": "pnpm -r --if-present build",
     "lint": "pnpm -r --if-present lint",
-    "vercel:install": "corepack enable && corepack prepare pnpm@9.17.0 --activate && pnpm install --frozen-lockfile --filter ./apps/web...",
+    "vercel:install": "corepack enable && corepack prepare pnpm@9.17.0 --activate && pnpm install --frozen-lockfile",
     "vercel:build": "pnpm --filter ./apps/web build"
   }
 }
@@ -121,73 +115,11 @@ git push origin main
 
 ---
 
-## Part 2: API Deployment (Deploy First!)
+## Part 2: API (Now Served by Next.js)
 
-The API must be deployed **before** the web app, as the web app needs the API URL.
+The API is now served by the Next.js app at `apps/web/app/api/*`, so there is no separate API deployment. All routes are available under `/api/*` from the same Vercel deployment.
 
-### 2.1 Choose Your API Hosting Provider
-
-**Recommended Options:**
-- **Render** (easiest, has free tier)
-- **Fly.io** (more control, free allowance)
-- **Railway** (simple, pay-as-you-go)
-
-### 2.2 Deploy to Render (Example)
-
-1. **Create Render account** at https://render.com
-
-2. **Create PostgreSQL database:**
-   - Click "New +" → "PostgreSQL"
-   - Name: `timeline-db`
-   - Region: Choose closest to you
-   - Plan: Free or Starter
-   - Copy the **Internal Database URL** (starts with `postgresql://`)
-
-3. **Create Web Service:**
-   - Click "New +" → "Web Service"
-   - Connect your GitHub repository
-   - Settings:
-     - **Name:** `timeline-api`
-     - **Region:** Same as database
-     - **Branch:** `main`
-     - **Root Directory:** `apps/api`
-     - **Runtime:** Node
-     - **Build Command:** 
-       ```bash
-       corepack enable && corepack prepare pnpm@9.17.0 --activate && pnpm install --frozen-lockfile && pnpm db:generate && pnpm db:migrate && pnpm build
-       ```
-     - **Start Command:** 
-       ```bash
-       pnpm start
-       ```
-
-4. **Configure Environment Variables** (in Render dashboard):
-   ```
-   NODE_ENV=production
-   DATABASE_URL=<your-internal-database-url>
-   SESSION_SECRET=<generate-random-32+-char-string>
-   ENCRYPTION_KEY_BASE64=<generate-base64-key>
-   KEY_VERSION=1
-   GOOGLE_OAUTH_CLIENT_ID=<from-google-console>
-   GOOGLE_OAUTH_CLIENT_SECRET=<from-google-console>
-   GOOGLE_OAUTH_REDIRECT_URI=https://your-web-domain.vercel.app/api/auth/callback
-   OPENAI_API_KEY=<your-openai-key>
-   ADMIN_EMAILS=your-email@example.com
-   PORT=3001
-   ```
-
-5. **Generate Secure Keys:**
-   ```bash
-   # SESSION_SECRET (32+ chars)
-   openssl rand -base64 32
-   
-   # ENCRYPTION_KEY_BASE64 (32 bytes)
-   openssl rand -base64 32
-   ```
-
-6. **Deploy** and note the API URL (e.g., `https://timeline-api.onrender.com`)
-
-### 2.3 Google OAuth Setup
+### 2.1 Google OAuth Setup
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com)
 2. Create new project: "Timeline App"
@@ -238,20 +170,9 @@ Node Version: 20.x
 
 ### 3.3 Environment Variables
 
-Add these in Vercel dashboard:
+No additional environment variables are required just to build. Add optional integration keys as needed (see `.env.example`).
 
-```
-API_SERVER_ORIGIN=https://your-api-domain.onrender.com
-NEXT_PUBLIC_API_BASE=/api
-```
-
-**Note:** The `API_SERVER_ORIGIN` should point to your deployed API (from Part 2). The optional API rewrite is handled in `apps/web/next.config.js` and is only applied when `API_SERVER_ORIGIN` is set.
-
-### 3.4 API Rewrite Configuration (Optional)
-
-If `API_SERVER_ORIGIN` is set, the web app rewrites `/api/:path*` to `${API_SERVER_ORIGIN}/api/:path*` from `apps/web/next.config.js`. If it is not set, no rewrite is added and local/relative API routes remain in use.
-
-### 3.5 Deploy
+### 3.4 Deploy
 
 Click **"Deploy"** in Vercel. It will:
 1. Clone your repo
@@ -266,7 +187,7 @@ Click **"Deploy"** in Vercel. It will:
 ### 4.1 Test API Health
 
 ```bash
-curl https://your-api-domain.onrender.com/health
+curl https://your-app.vercel.app/api/health
 # Should return OK or similar
 ```
 
@@ -308,9 +229,7 @@ cp .env.example .env
 Edit `.env`:
 ```
 NODE_ENV=development
-PORT=3001
-WEB_PORT=3000
-API_SERVER_ORIGIN=http://localhost:3001
+PORT=3000
 
 # Database (local Postgres)
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/timeline
@@ -335,30 +254,9 @@ OPENAI_API_KEY=sk-...
 ADMIN_EMAILS=your-email@example.com
 ```
 
-### 5.3 Database Setup
+### 5.3 Run Development Server
 
 ```bash
-# Install PostgreSQL locally (macOS)
-brew install postgresql@14
-brew services start postgresql@14
-
-# Create database
-createdb timeline
-
-# Generate Prisma client
-pnpm db:generate
-
-# Run migrations
-pnpm db:migrate
-```
-
-### 5.4 Run Development Servers
-
-```bash
-# Terminal 1 - API
-pnpm dev:api
-
-# Terminal 2 - Web
 pnpm dev:web
 ```
 
@@ -397,7 +295,6 @@ dist/
 build/
 .DS_Store
 *.pnpm-debug.log*
-apps/api/.prisma/
 ```
 
 ### 6.3 CI/CD with GitHub Actions
@@ -482,15 +379,9 @@ Before going live:
 - Check function logs for errors
 - Set up alerts for failed deployments
 
-### API (Render)
-- Monitor logs in Render dashboard
-- Set up health check endpoints
-- Configure auto-deploy on push
-
-### Database
-- Regular backups (Render does this automatically)
-- Monitor connection pool usage
-- Scale when needed
+### API Routes (Vercel)
+- Monitor function logs in Vercel dashboard
+- Keep `/api/health` returning 200
 
 ---
 
@@ -498,10 +389,7 @@ Before going live:
 
 ```bash
 # Local development
-pnpm dev:api          # Start API on :3001
 pnpm dev:web          # Start web on :3000
-pnpm db:migrate       # Run migrations
-pnpm db:reset         # Reset DB (dev only)
 
 # Testing
 pnpm test             # Run all tests
@@ -520,7 +408,6 @@ git push origin main  # Triggers Vercel deploy
 ## Support Resources
 
 - **Vercel Docs:** https://vercel.com/docs
-- **Render Docs:** https://render.com/docs
 - **Prisma Docs:** https://www.prisma.io/docs
 - **Next.js Docs:** https://nextjs.org/docs
 - **pnpm Docs:** https://pnpm.io

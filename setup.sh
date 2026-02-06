@@ -72,48 +72,6 @@ else
 fi
 echo ""
 
-# Check PostgreSQL
-echo "🗄️  Checking PostgreSQL..."
-if command -v psql &> /dev/null; then
-    echo "✅ PostgreSQL is installed"
-    
-    # Try to create database
-    read -p "Would you like to create the 'timeline' database? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        if createdb timeline 2>/dev/null; then
-            echo "✅ Database 'timeline' created"
-        else
-            echo "ℹ️  Database may already exist or PostgreSQL is not running"
-        fi
-    fi
-else
-    echo "⚠️  PostgreSQL not found"
-    echo "   Install with:"
-    echo "   - macOS: brew install postgresql@14 && brew services start postgresql@14"
-    echo "   - Ubuntu: sudo apt install postgresql"
-    echo "   - Windows: Download from https://www.postgresql.org/download/"
-fi
-echo ""
-
-# Generate Prisma client
-echo "🔨 Generating Prisma client..."
-if pnpm db:generate; then
-    echo "✅ Prisma client generated"
-else
-    echo "⚠️  Prisma generation failed - check DATABASE_URL in .env"
-fi
-echo ""
-
-# Run migrations
-echo "🚀 Running database migrations..."
-if pnpm db:migrate; then
-    echo "✅ Migrations complete"
-else
-    echo "⚠️  Migrations failed - check DATABASE_URL and ensure PostgreSQL is running"
-fi
-echo ""
-
 # Summary
 echo "================================================"
 echo "Setup Complete! 🎉"
@@ -126,9 +84,8 @@ echo "   - GOOGLE_OAUTH_CLIENT_SECRET"
 echo "   - OPENAI_API_KEY"
 echo "   - ENCRYPTION_KEY_BASE64 (generate with: openssl rand -base64 32)"
 echo ""
-echo "2. Start the development servers:"
-echo "   Terminal 1: pnpm dev:api"
-echo "   Terminal 2: pnpm dev:web"
+echo "2. Start the development server:"
+echo "   pnpm dev:web"
 echo ""
 echo "3. Visit http://localhost:3000"
 echo ""

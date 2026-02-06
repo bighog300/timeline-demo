@@ -15,10 +15,9 @@ A privacy-first timeline builder that creates AI-powered summaries from your Gma
 
 ## 🏗️ Architecture
 
-This is a **monorepo** with three main components:
+This is a **monorepo** with two main components:
 
-- **`apps/web`**: Next.js SSR web application (deployed to Vercel)
-- **`apps/api`**: Express API server (deployed separately to Render/Fly/Railway)
+- **`apps/web`**: Next.js web application (UI + API routes, deployed to Vercel)
 - **`packages/shared`**: Shared types and Zod schemas
 
 ## 🚀 Quick Start
@@ -27,9 +26,8 @@ This is a **monorepo** with three main components:
 
 - Node.js 20.x or higher
 - pnpm 9.15.9
-- PostgreSQL (local or hosted)
-- Google Cloud Project (for OAuth)
-- OpenAI API key
+- (Optional) Google Cloud Project (for OAuth)
+- (Optional) OpenAI API key
 
 ### Local Development Setup
 
@@ -52,16 +50,10 @@ This is a **monorepo** with three main components:
    pnpm install
    cp .env.example .env
    # Edit .env with your values
-   pnpm db:generate
-   pnpm db:migrate
    ```
 
 3. **Start the development servers**
    ```bash
-   # Terminal 1 - API
-   pnpm dev:api
-
-   # Terminal 2 - Web
    pnpm dev:web
    ```
 
@@ -74,12 +66,7 @@ See the comprehensive [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for detailed in
 
 ### Quick Deploy Summary
 
-1. **Deploy API First** (Render/Fly/Railway)
-   - Set up PostgreSQL database
-   - Configure environment variables
-   - Deploy from `apps/api` directory
-
-2. **Deploy Web to Vercel**
+1. **Deploy Web to Vercel**
    - Connect GitHub repository
    - If Vercel import shows `Invalid request: should NOT have additional property rootDirectory`, clear any custom Project Settings JSON/deploy-button parameters and leave Root Directory managed in the Vercel UI (set it to `.` for this repo).
    - Configure build commands:
@@ -88,35 +75,13 @@ See the comprehensive [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for detailed in
    - Set environment variables
    - Deploy
 
-3. **Configure Google OAuth**
+2. **Configure Google OAuth**
    - Set up OAuth credentials in Google Cloud Console
    - Add redirect URIs for both development and production
 
 ## 🔑 Environment Variables
 
-### Required for API
-
-```env
-NODE_ENV=production
-DATABASE_URL=postgresql://...
-SESSION_SECRET=<32+ char random string>
-ENCRYPTION_KEY_BASE64=<base64 encoded key>
-KEY_VERSION=1
-GOOGLE_OAUTH_CLIENT_ID=<your-client-id>
-GOOGLE_OAUTH_CLIENT_SECRET=<your-secret>
-GOOGLE_OAUTH_REDIRECT_URI=https://your-domain.com/api/auth/callback
-OPENAI_API_KEY=<your-key>
-ADMIN_EMAILS=admin@example.com
-```
-
-### Required for Web
-
-```env
-API_SERVER_ORIGIN=https://your-api-domain.com
-NEXT_PUBLIC_API_BASE=/api
-```
-
-See [.env.example](.env.example) for complete list.
+See [.env.example](.env.example) for optional integrations (OAuth/OpenAI).
 
 ## 🧪 Testing
 
@@ -145,12 +110,8 @@ pnpm build
 ```
 timeline-app/
 ├── apps/
-│   ├── api/              # Express API server
-│   │   ├── src/
-│   │   ├── tests/
-│   │   └── prisma/       # Database schema and migrations
-│   └── web/              # Next.js web app
-│       ├── pages/
+│   └── web/              # Next.js web app (UI + API routes)
+│       ├── app/
 │       └── components/
 ├── packages/
 │   ├── shared/           # Shared types and schemas
@@ -179,11 +140,7 @@ timeline-app/
 ### Available Commands
 
 ```bash
-pnpm dev:api          # Start API dev server
 pnpm dev:web          # Start web dev server
-pnpm db:generate      # Generate Prisma client
-pnpm db:migrate       # Run database migrations
-pnpm db:reset         # Reset database (dev only)
 pnpm test             # Run tests
 pnpm lint             # Run linting
 pnpm build            # Build all packages

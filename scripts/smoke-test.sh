@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_URL="${API_URL:-}"
 WEB_URL="${WEB_URL:-}"
-HEALTH_PATH="${HEALTH_PATH:-/health}"
+API_URL="${API_URL:-}"
+HEALTH_PATH="${HEALTH_PATH:-/api/health}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --api-url)
-      API_URL="$2"
-      shift 2
-      ;;
     --web-url)
       WEB_URL="$2"
+      shift 2
+      ;;
+    --api-url)
+      API_URL="$2"
       shift 2
       ;;
     --health-path)
@@ -21,12 +21,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     -h|--help)
       cat <<'USAGE'
-Usage: scripts/smoke-test.sh --api-url <url> --web-url <url> [--health-path /health]
+Usage: scripts/smoke-test.sh --web-url <url> [--api-url <url>] [--health-path /api/health]
 
 Options:
-  --api-url      Base URL for API (e.g. https://timeline-api.onrender.com)
   --web-url      Base URL for Web app (e.g. https://timeline-app.vercel.app)
-  --health-path  Health route path for API (default: /health)
+  --api-url      Base URL for API (defaults to web URL)
+  --health-path  Health route path for API (default: /api/health)
 
 You can also provide API_URL, WEB_URL, HEALTH_PATH as environment variables.
 USAGE
@@ -39,8 +39,8 @@ USAGE
   esac
 done
 
-if [[ -z "$API_URL" || -z "$WEB_URL" ]]; then
-  echo "❌ Missing required URLs. Provide --api-url and --web-url (or API_URL and WEB_URL env vars)."
+if [[ -z "$WEB_URL" ]]; then
+  echo "❌ Missing required URL. Provide --web-url (or WEB_URL env var)."
   exit 1
 fi
 
@@ -51,6 +51,10 @@ trim_trailing_slash() {
 
 API_URL="$(trim_trailing_slash "$API_URL")"
 WEB_URL="$(trim_trailing_slash "$WEB_URL")"
+
+if [[ -z "$API_URL" ]]; then
+  API_URL="$WEB_URL"
+fi
 
 api_health_url="${API_URL}${HEALTH_PATH}"
 web_home_url="${WEB_URL}/"

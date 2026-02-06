@@ -10,7 +10,7 @@ This package contains everything you need to deploy your Timeline App from GitHu
 3. **README_NEW.md** - Updated README for your GitHub repository with badges, quick start, and complete documentation
 
 ### Configuration Files
-4. **vercel.json** - Vercel deployment configuration with build commands and API rewrites
+4. **vercel.json** - Vercel deployment configuration with build commands and headers
 5. **.nvmrc** - Node version specification (20)
 6. **.node-version** - Alternative Node version specification
 7. **package.json** - Updated root package.json with Vercel-specific scripts
@@ -49,18 +49,11 @@ git remote add origin https://github.com/YOUR_USERNAME/timeline-app.git
 git push -u origin main
 ```
 
-### Step 2: Deploy API
-1. Create PostgreSQL database (Render/Railway/Fly)
-2. Deploy API from `apps/api` directory
-3. Configure environment variables (see DEPLOYMENT_GUIDE.md Part 2)
-4. Note the API URL
-
-### Step 3: Deploy to Vercel
+### Step 2: Deploy to Vercel
 1. Import GitHub repository to Vercel
 2. Configure build settings (or use vercel.json)
 3. Add environment variables
-4. Update `vercel.json` with your API URL
-5. Deploy!
+4. Deploy!
 
 ---
 
@@ -71,7 +64,7 @@ git push -u origin main
 
 **Sections:**
 - Part 1: Critical Missing Files (vercel.json, lockfile, etc.)
-- Part 2: API Deployment (PostgreSQL, Render/Fly/Railway)
+- Part 2: API served by Next.js (apps/web/app/api)
 - Part 3: Vercel Web Deployment (configuration, environment variables)
 - Part 4: Post-Deployment Verification
 - Part 5: Local Development Setup
@@ -90,8 +83,7 @@ git push -u origin main
 **Structure:**
 - 23 checkpoints across 10 major sections
 - Pre-deployment setup
-- Database & services configuration
-- API deployment
+- Optional integrations configuration
 - Vercel deployment
 - OAuth configuration
 - Post-deployment verification
@@ -110,10 +102,10 @@ git push -u origin main
 **Key Features:**
 - Sets Node.js version and framework
 - Defines build and install commands
-- Configures API rewrites (proxies `/api/*` to your API server)
+- Configures API headers
 - Sets cache headers
 
-**Action Required:** Replace `YOUR-API-DOMAIN.com` with your actual API URL after deploying the API.
+**Action Required:** Ensure the build/install commands match your Vercel project settings.
 
 ---
 
@@ -258,16 +250,12 @@ git push
 ### 3. Environment Variables
 **Why it's critical:** Your app won't function without proper configuration.
 
-**Required for API:**
-- `DATABASE_URL` - PostgreSQL connection
+**Optional integrations:**
+- `DATABASE_URL` - PostgreSQL connection (if enabled)
 - `SESSION_SECRET` - Strong random string (32+ chars)
 - `ENCRYPTION_KEY_BASE64` - Encryption key
 - `GOOGLE_OAUTH_CLIENT_ID` & `SECRET` - OAuth credentials
 - `OPENAI_API_KEY` - For AI summaries
-
-**Required for Web:**
-- `API_SERVER_ORIGIN` - Your API URL
-- `NEXT_PUBLIC_API_BASE` - Usually `/api`
 
 ---
 
@@ -304,18 +292,10 @@ git push
                  │
                  ▼
 ┌─────────────────────────────────────────────────────────────┐
-│ 3. Deploy API (Render/Fly/Railway)                          │
-│    - Configure build commands                                │
-│    - Set environment variables                               │
-│    - Run migrations                                          │
-│    - Note API URL                                            │
-└────────────────┬────────────────────────────────────────────┘
-                 │
-                 ▼
-┌─────────────────────────────────────────────────────────────┐
-│ 4. Update vercel.json                                        │
-│    - Replace placeholder API URL                             │
-│    - Commit and push                                         │
+│ 3. Deploy to Vercel                                          │
+│    - Build/install commands                                  │
+│    - Add optional env vars                                   │
+│    - Deploy                                                  │
 └────────────────┬────────────────────────────────────────────┘
                  │
                  ▼
@@ -380,8 +360,8 @@ A: Yes. Each file serves a specific purpose:
 - Documentation → Guides you through the process
 - Scripts → Automate setup tasks
 
-**Q: What if I'm using a different API host than Render?**
-A: The principles are the same. DEPLOYMENT_GUIDE.md includes notes for Fly.io and Railway. The key is: deploy from `apps/api` directory with the same build/start commands.
+**Q: Do I need a separate API host?**
+A: No. The API is served by Next.js routes in `apps/web/app/api/*`, so everything ships from the Vercel deployment.
 
 **Q: Can I skip local development and just deploy?**
 A: Not recommended. Local testing helps catch issues before deployment. But if you must, follow Parts 2-4 of DEPLOYMENT_GUIDE.md.
@@ -391,7 +371,7 @@ A: Check Part 7 (Common Issues & Solutions) in DEPLOYMENT_GUIDE.md. Most issues 
 - Missing pnpm-lock.yaml
 - Wrong Node version
 - Missing environment variables
-- Incorrect API URL in vercel.json
+- Incorrect Vercel build settings
 
 ---
 
