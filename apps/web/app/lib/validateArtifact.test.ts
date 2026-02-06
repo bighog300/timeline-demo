@@ -50,4 +50,21 @@ describe('validateArtifact', () => {
     expect(normalized.sourceMetadata?.labels).toEqual(['INBOX']);
     expect(normalized.sourcePreview).toBeUndefined();
   });
+
+  it('accepts artifacts missing optional fields', () => {
+    const legacy = {
+      ...baseArtifact,
+      highlights: undefined,
+      model: undefined,
+      version: undefined,
+      driveFolderId: undefined,
+      driveFileId: undefined,
+    } as unknown as SummaryArtifact;
+
+    expect(isSummaryArtifact(legacy)).toBe(true);
+    const normalized = normalizeArtifact(legacy);
+    expect(normalized.highlights).toEqual([]);
+    expect(normalized.model).toBe('unknown');
+    expect(normalized.version).toBe(1);
+  });
 });

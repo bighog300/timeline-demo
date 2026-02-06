@@ -102,6 +102,7 @@ they are missing.
 - ✅ Drive folder provisioning for app-owned artifacts
 - ✅ Phase 2A: summarize selected Gmail/Drive items and write artifacts to Drive
 - ✅ Phase 2B: sync Summary.json artifacts back into `/timeline` (app-managed folder only)
+- ✅ Phase 3B: Drive-scoped search across Summary.json + Selection.json artifacts
 - ❌ No background scanning (Phase 2A only processes selected items)
 
 ### Phase 2A Summaries to Drive
@@ -141,6 +142,17 @@ they are missing.
 - **No background scanning**: Listing and reading sets is scoped to the app-managed Drive folder
   only and only happens when you open the list or load a set.
 
+### Phase 3B Drive-Scoped Search
+
+- **How it works**: On `/timeline`, use the “Search” panel to query Summary.json and Selection.json
+  artifacts inside the app-managed Drive folder.
+- **Scoped and capped**: Search only scans JSON artifacts within the provisioned folder (no
+  background scanning). Each request inspects a capped subset of JSON files; if more candidates
+  exist, the response is marked `partial` and the UI prompts you to refine the query.
+- **Searchable fields**:
+  - Summary artifacts: title, summary, highlights, source metadata
+  - Selection sets: name, notes, item titles/ids
+
 #### Manual Test Steps
 
 1. Connect your Google account and provision the Drive folder.
@@ -152,6 +164,8 @@ they are missing.
 7. On `/timeline`, open “Selection sets” and save the current selection.
 8. Clear localStorage, reload `/timeline`, and refresh the selection list.
 9. Load the saved set and apply it via Replace or Merge.
+10. Use the Search panel on `/timeline` to find keywords inside Summary.json and Selection.json
+    artifacts, open the Drive files, or load a matching selection set.
 
 ## 🧪 Testing
 

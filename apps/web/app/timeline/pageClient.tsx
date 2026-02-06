@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 
 import Badge from '../components/ui/Badge';
@@ -52,6 +52,26 @@ type SelectionSetSummary = {
   updatedAtISO: string;
   driveWebViewLink?: string;
 };
+
+type SearchType = 'all' | 'summary' | 'selection';
+
+type TimelineSearchResult = {
+  kind: 'summary' | 'selection';
+  driveFileId: string;
+  driveWebViewLink?: string;
+  title: string;
+  updatedAtISO?: string;
+  snippet: string;
+  matchFields: string[];
+};
+
+type SearchError =
+  | 'reconnect_required'
+  | 'drive_not_provisioned'
+  | 'query_too_short'
+  | 'query_too_long'
+  | 'generic'
+  | null;
 
 const GMAIL_KEY = 'timeline.gmailSelections';
 const DRIVE_KEY = 'timeline.driveSelections';
@@ -191,6 +211,13 @@ export default function TimelinePageClient() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveToExisting, setSaveToExisting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchType, setSearchType] = useState<SearchType>('all');
+  const [searchResults, setSearchResults] = useState<TimelineSearchResult[]>([]);
+  const [searchError, setSearchError] = useState<SearchError>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchPartial, setSearchPartial] = useState(false);
+  const searchAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     setGmailSelections(parseStoredSelections<GmailSelection>(GMAIL_KEY));
@@ -472,6 +499,170 @@ export default function TimelinePageClient() {
     [applySelectionItems],
   );
 
+  const clearSearchState = useCallback(() => {
+    setSearchResults([]);
+    setSearchPartial(false);
+    setSearchError(null);
+  }, []);
+
+  const runSearch = useCallback(
+    async (query: string, type: SearchType) => {
+      if (searchAbortRef.current) {
+        searchAbortRef.current.abort();
+      }
+
+      const controller = new AbortController();
+      searchAbortRef.current = controller;
+      setIsSearching(true);
+      setSearchError(null);
+      setSearchPartial(false);
+
+      try {
+        const response = await fetch(
+          `/api/timeline/search?q=${encodeURIComponent(query)}&type=${encodeURIComponent(type)}`,
+          { signal: controller.signal },
+        );
+
+        if (controller.signal.aborted) {
+          return;
+        }
+
+        if (response.status === 401) {
+          setSearchError('reconnect_required');
+          return;
+        }
+
+        if (response.status === 400) {
+          const payload = (await response.json()) as { error?: string };
+          if (payload?.error === 'drive_not_provisioned') {
+            setSearchError('drive_not_provisioned');
+            return;
+          }
+          if (payload?.error === 'query_too_short') {
+            setSearchError('query_too_short');
+            return;
+          }
+          if (payload?.error === 'query_too_long') {
+            setSearchError('query_too_long');
+            return;
+          }
+          setSearchError('generic');
+          return;
+        }
+
+        if (!response.ok) {
+          setSearchError('generic');
+          return;
+        }
+
+        const payload = (await response.json()) as {
+          results?: TimelineSearchResult[];
+          partial?: boolean;
+        };
+        setSearchResults(Array.isArray(payload.results) ? payload.results : []);
+        setSearchPartial(Boolean(payload.partial));
+      } catch (error) {
+        if (controller.signal.aborted) {
+          return;
+        }
+        setSearchError('generic');
+      } finally {
+        if (!controller.signal.aborted) {
+          setIsSearching(false);
+        }
+      }
+    },
+    [],
+  );
+
+  const handleSearchSubmit = useCallback(
+    (event?: React.FormEvent) => {
+      event?.preventDefault();
+      const trimmed = searchQuery.trim();
+      if (!trimmed) {
+        clearSearchState();
+        return;
+      }
+      if (trimmed.length < 2) {
+        setSearchError('query_too_short');
+        setSearchResults([]);
+        setSearchPartial(false);
+        return;
+      }
+      if (trimmed.length > 100) {
+        setSearchError('query_too_long');
+        setSearchResults([]);
+        setSearchPartial(false);
+        return;
+      }
+      void runSearch(trimmed, searchType);
+    },
+    [clearSearchState, runSearch, searchQuery, searchType],
+  );
+
+  const handleViewSummary = useCallback(
+    (fileId: string) => {
+      const entry = Object.entries(artifacts).find(([, artifact]) => {
+        return artifact.driveFileId === fileId;
+      });
+      if (!entry) {
+        return;
+      }
+      const [key] = entry;
+      setExpandedKeys((prev) => new Set(prev).add(key));
+      requestAnimationFrame(() => {
+        const element = document.querySelector(`[data-timeline-key="${key}"]`);
+        if (element instanceof HTMLElement) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    },
+    [artifacts],
+  );
+
+  useEffect(() => {
+    return () => {
+      searchAbortRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    const trimmed = searchQuery.trim();
+    if (!trimmed) {
+      searchAbortRef.current?.abort();
+      clearSearchState();
+      setIsSearching(false);
+      return;
+    }
+
+    if (trimmed.length < 2) {
+      searchAbortRef.current?.abort();
+      setSearchError('query_too_short');
+      setSearchResults([]);
+      setSearchPartial(false);
+      setIsSearching(false);
+      return;
+    }
+
+    if (trimmed.length > 100) {
+      searchAbortRef.current?.abort();
+      setSearchError('query_too_long');
+      setSearchResults([]);
+      setSearchPartial(false);
+      setIsSearching(false);
+      return;
+    }
+
+    setSearchError(null);
+    const handle = window.setTimeout(() => {
+      void runSearch(trimmed, searchType);
+    }, 350);
+
+    return () => {
+      window.clearTimeout(handle);
+    };
+  }, [clearSearchState, runSearch, searchQuery, searchType]);
+
   useEffect(() => {
     if (!hasHydrated) {
       return;
@@ -623,6 +814,18 @@ export default function TimelinePageClient() {
     </div>
   );
 
+  const searchReconnectNotice = (
+    <div className={styles.notice}>
+      Search needs a reconnect. Please <Link href="/connect">connect your Google account</Link>.
+    </div>
+  );
+
+  const searchProvisionNotice = (
+    <div className={styles.notice}>
+      Provision a Drive folder to search artifacts. Visit <Link href="/connect">/connect</Link>.
+    </div>
+  );
+
   return (
     <section className={styles.page}>
       <div className={styles.header}>
@@ -657,6 +860,125 @@ export default function TimelinePageClient() {
           </label>
         </div>
       </div>
+
+      <Card className={styles.searchPanel}>
+        <div className={styles.searchHeader}>
+          <div>
+            <h2>Search summaries &amp; selection sets</h2>
+            <p className={styles.muted}>
+              Searches Summary.json and Selection.json artifacts stored inside your app-managed
+              Drive folder.
+            </p>
+          </div>
+        </div>
+        <form className={styles.searchForm} onSubmit={handleSearchSubmit}>
+          <label className={styles.field}>
+            <span>Search</span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="Search summaries or selection sets"
+            />
+          </label>
+          <div className={styles.searchRow}>
+            <label className={styles.field}>
+              <span>Type</span>
+              <select
+                className={styles.searchSelect}
+                value={searchType}
+                onChange={(event) => setSearchType(event.target.value as SearchType)}
+              >
+                <option value="all">All</option>
+                <option value="summary">Summaries</option>
+                <option value="selection">Selection sets</option>
+              </select>
+            </label>
+            <div className={styles.searchButtons}>
+              <Button variant="secondary" type="submit" disabled={isSearching}>
+                {isSearching ? 'Searching...' : 'Search'}
+              </Button>
+              <Button
+                variant="ghost"
+                type="button"
+                onClick={() => setSearchQuery('')}
+                disabled={!searchQuery}
+              >
+                Clear
+              </Button>
+            </div>
+          </div>
+          {searchError === 'query_too_short' ? (
+            <p className={styles.muted}>Enter at least 2 characters to search.</p>
+          ) : null}
+          {searchError === 'query_too_long' ? (
+            <p className={styles.muted}>Search queries must be 100 characters or fewer.</p>
+          ) : null}
+        </form>
+
+        {searchError === 'reconnect_required' ? searchReconnectNotice : null}
+        {searchError === 'drive_not_provisioned' ? searchProvisionNotice : null}
+        {searchError === 'generic' ? (
+          <div className={styles.notice}>Unable to search right now. Please try again.</div>
+        ) : null}
+        {searchPartial ? (
+          <div className={styles.notice}>
+            Showing matches from a subset of files. Refine your search to see more results.
+          </div>
+        ) : null}
+
+        <div className={styles.searchResults}>
+          {isSearching ? <p className={styles.muted}>Searching Drive artifacts...</p> : null}
+          {!isSearching && searchResults.length === 0 && searchQuery.trim().length >= 2 ? (
+            <p className={styles.muted}>No matches yet. Try another keyword.</p>
+          ) : null}
+          {searchResults.map((result) => (
+            <div key={`${result.kind}-${result.driveFileId}`} className={styles.searchResult}>
+              <div className={styles.searchResultHeader}>
+                <Badge tone={result.kind === 'summary' ? 'accent' : 'neutral'}>
+                  {result.kind === 'summary' ? 'Summary' : 'Selection Set'}
+                </Badge>
+                <div>
+                  <strong>{result.title}</strong>
+                  {result.updatedAtISO ? (
+                    <div className={styles.selectionMeta}>
+                      Updated {new Date(result.updatedAtISO).toLocaleString()}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              <p className={styles.searchSnippet}>
+                {result.snippet || 'No preview available for this match.'}
+              </p>
+              <div className={styles.searchActions}>
+                {result.kind === 'selection' ? (
+                  <Button
+                    variant="secondary"
+                    onClick={() => loadSelectionSet(result.driveFileId, 'replace')}
+                    disabled={isPreviewLoading}
+                  >
+                    {isPreviewLoading ? 'Loading...' : 'Load set'}
+                  </Button>
+                ) : (
+                  <Button variant="ghost" onClick={() => handleViewSummary(result.driveFileId)}>
+                    View in timeline
+                  </Button>
+                )}
+                {result.driveWebViewLink ? (
+                  <a
+                    className={styles.driveLink}
+                    href={result.driveWebViewLink}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open in Drive
+                  </a>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
 
       {error === 'reconnect_required' ? reconnectNotice : null}
       {error === 'drive_not_provisioned' ? provisionNotice : null}
@@ -873,7 +1195,11 @@ export default function TimelinePageClient() {
                 : undefined;
 
             return (
-              <Card key={`${item.kind}-${item.id}`} className={styles.item}>
+              <Card
+                key={`${item.kind}-${item.id}`}
+                className={styles.item}
+                data-timeline-key={key}
+              >
                 <div className={styles.itemContent}>
                   <div className={styles.itemHeader}>
                     <h3>{item.title}</h3>

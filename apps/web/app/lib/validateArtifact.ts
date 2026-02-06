@@ -48,14 +48,14 @@ export const isSummaryArtifact = (value: unknown): value is SummaryArtifact => {
     typeof value.title === 'string' &&
     typeof value.createdAtISO === 'string' &&
     typeof value.summary === 'string' &&
-    isStringArray(value.highlights) &&
+    (value.highlights === undefined || isStringArray(value.highlights)) &&
     (value.sourceMetadata === undefined || isRecord(value.sourceMetadata)) &&
     (value.sourcePreview === undefined || typeof value.sourcePreview === 'string') &&
-    typeof value.driveFolderId === 'string' &&
-    typeof value.driveFileId === 'string' &&
+    (value.driveFolderId === undefined || typeof value.driveFolderId === 'string') &&
+    (value.driveFileId === undefined || typeof value.driveFileId === 'string') &&
     (value.driveWebViewLink === undefined || typeof value.driveWebViewLink === 'string') &&
-    typeof value.model === 'string' &&
-    typeof value.version === 'number'
+    (value.model === undefined || typeof value.model === 'string') &&
+    (value.version === undefined || typeof value.version === 'number')
   );
 };
 
@@ -68,4 +68,6 @@ export const normalizeArtifact = (artifact: SummaryArtifact): SummaryArtifact =>
   sourcePreview: normalizeString(artifact.sourcePreview),
   model: artifact.model || 'unknown',
   version: Number.isFinite(artifact.version) && artifact.version > 0 ? artifact.version : 1,
+  driveFolderId: artifact.driveFolderId || '',
+  driveFileId: artifact.driveFileId || '',
 });

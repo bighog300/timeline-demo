@@ -187,6 +187,93 @@ describe('TimelinePageClient', () => {
     });
   });
 
+  it('renders search results from Drive-scoped search', async () => {
+    mockFetch((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url.startsWith('/api/timeline/search')) {
+        return new Response(
+          JSON.stringify({
+            q: 'roadmap',
+            type: 'all',
+            results: [
+              {
+                kind: 'selection',
+                driveFileId: 'selection-1',
+                driveWebViewLink: 'https://drive.google.com/selection',
+                title: 'Roadmap set',
+                updatedAtISO: '2024-02-02T00:00:00Z',
+                snippet: 'Mentions the roadmap',
+                matchFields: ['name'],
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    fireEvent.change(screen.getByPlaceholderText(/search summaries or selection sets/i), {
+      target: { value: 'roadmap' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /search/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/roadmap set/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/selection set/i).length).toBeGreaterThan(0);
+      expect(screen.getByRole('link', { name: /open in drive/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /load set/i })).toBeInTheDocument();
+    });
+  });
+
+  it('shows an inline hint when the search query is too short', async () => {
+    mockFetch((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    fireEvent.change(screen.getByPlaceholderText(/search summaries or selection sets/i), {
+      target: { value: 'a' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /search/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/enter at least 2 characters/i)).toBeInTheDocument();
+    });
+  });
+
+  it('shows reconnect CTA when search returns 401', async () => {
+    mockFetch((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url.startsWith('/api/timeline/search')) {
+        return new Response(JSON.stringify({ error: 'reconnect_required' }), { status: 401 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    fireEvent.change(screen.getByPlaceholderText(/search summaries or selection sets/i), {
+      target: { value: 'plan' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /search/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/search needs a reconnect/i)).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /connect your google account/i })).toBeInTheDocument();
+    });
+  });
+
   it('shows reconnect CTA when sync returns 401', async () => {
     setSelections();
     mockFetch((url) => {

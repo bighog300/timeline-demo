@@ -100,6 +100,17 @@ if ! printf '%s' "${summarize_body}" | node -e 'const fs=require("fs");const dat
 fi
 echo "✅ /api/timeline/summarize unauth ok"
 
+timeline_search=$(curl -sS "${BASE_URL}/api/timeline/search?q=test" -w "\n%{http_code}") || true
+timeline_search_body=$(printf '%s' "${timeline_search}" | sed '$d')
+timeline_search_status=$(printf '%s' "${timeline_search}" | tail -n 1)
+if [[ "${timeline_search_status}" != "401" ]]; then
+  fail_response "Timeline search (unauth)" "${timeline_search_body}"
+fi
+if ! printf '%s' "${timeline_search_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+  fail_response "Timeline search (unauth)" "${timeline_search_body}"
+fi
+echo "✅ /api/timeline/search unauth ok"
+
 artifacts_list=$(curl -sS "${BASE_URL}/api/timeline/artifacts/list" -w "\n%{http_code}") || true
 artifacts_list_body=$(printf '%s' "${artifacts_list}" | sed '$d')
 artifacts_list_status=$(printf '%s' "${artifacts_list}" | tail -n 1)

@@ -51,4 +51,18 @@ describe('validateSelectionSet', () => {
     expect(normalized.items[0].dateISO).toBeUndefined();
     expect(normalized.version).toBe(1);
   });
+
+  it('accepts sets missing optional fields', () => {
+    const legacy = {
+      ...baseSet,
+      version: undefined,
+      driveFolderId: undefined,
+      driveFileId: undefined,
+      driveWebViewLink: undefined,
+    };
+
+    expect(isSelectionSet(legacy)).toBe(true);
+    const normalized = normalizeSelectionSet(legacy);
+    expect(normalized.version).toBe(1);
+  });
 });
