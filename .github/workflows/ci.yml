@@ -18,14 +18,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Enable corepack
-        run: corepack enable
-      
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: 'pnpm'
+
+      - name: Enable corepack
+        run: corepack enable
       
       - name: Install pnpm
         run: corepack prepare pnpm@9.15.9 --activate
@@ -36,11 +36,9 @@ jobs:
       
       - name: Run linting
         run: pnpm lint
-        continue-on-error: true
       
       - name: Run tests
         run: pnpm test
-        continue-on-error: true
       
       - name: Run preflight
         run: pnpm preflight
@@ -64,14 +62,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Enable corepack
-        run: corepack enable
-      
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20.x
           cache: 'pnpm'
+
+      - name: Enable corepack
+        run: corepack enable
       
       - name: Install pnpm
         run: corepack prepare pnpm@9.15.9 --activate
