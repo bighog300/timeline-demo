@@ -39,7 +39,7 @@ pnpm build
 2. [ ] Verify API health endpoint returns 200 (`/api/health`)
 3. [ ] Run smoke test:
    ```bash
-   bash scripts/smoke-test.sh --web-url https://<web-domain>
+   bash scripts/smoke-test.sh
    ```
 
 ## 5) Post-Deploy Functional Verification
