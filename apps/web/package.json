@@ -2,9 +2,9 @@
   "name": "@timeline/web",
   "private": true,
   "scripts": {
-    "dev": "next dev -p ${PORT:-3000}",
+    "dev": "next dev",
     "build": "next build",
-    "start": "next start -p ${PORT:-3000}",
+    "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
