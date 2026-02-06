@@ -86,6 +86,14 @@ pnpm lint
 pnpm build:web
 ```
 
+## 🚢 Release / Merge
+
+- Review the [Release Checklist](RELEASE_CHECKLIST.md) before merging.
+- Run the local verification suite with:
+  ```bash
+  bash scripts/release-check.sh
+  ```
+
 ## 📚 Documentation
 
 - [Start Here](00-START-HERE.md) - Deployment package overview

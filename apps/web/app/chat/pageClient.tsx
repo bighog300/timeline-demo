@@ -1,10 +1,11 @@
 'use client';
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
+import Skeleton from '../components/ui/Skeleton';
 import { fetchWithTimeout } from '../lib/fetchWithTimeout';
 import styles from './page.module.css';
 
@@ -19,6 +20,15 @@ type ChatResponse = {
   suggested_actions: string[];
   related_events: Array<{ id: string; title: string }>;
 };
+
+type ChatStorage = {
+  messages: ChatMessage[];
+  suggestions: string[];
+  relatedEvents: Array<{ id: string; title: string }>;
+};
+
+const STORAGE_KEY = 'timeline-demo.chat';
+const MAX_HISTORY = 30;
 
 const createMessage = (role: ChatMessage['role'], content: string): ChatMessage => ({
   id: `${role}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -35,6 +45,50 @@ export default function ChatPageClient() {
   const [relatedEvents, setRelatedEvents] = useState<Array<{ id: string; title: string }>>([]);
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (!stored) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(stored) as ChatStorage;
+      if (Array.isArray(parsed.messages)) {
+        setMessages(parsed.messages.slice(-MAX_HISTORY));
+      }
+      if (Array.isArray(parsed.suggestions)) {
+        setSuggestions(parsed.suggestions);
+      }
+      if (Array.isArray(parsed.relatedEvents)) {
+        setRelatedEvents(parsed.relatedEvents);
+      }
+    } catch {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    if (messages.length === 0 && suggestions.length === 0 && relatedEvents.length === 0) {
+      window.localStorage.removeItem(STORAGE_KEY);
+      return;
+    }
+
+    const payload: ChatStorage = {
+      messages,
+      suggestions,
+      relatedEvents,
+    };
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  }, [messages, suggestions, relatedEvents]);
+
   const sendMessage = useCallback(
     async (message: string) => {
       if (!message.trim()) {
@@ -42,7 +96,7 @@ export default function ChatPageClient() {
       }
 
       const newMessage = message.trim();
-      setMessages((prev) => [...prev, createMessage('user', newMessage)]);
+      setMessages((prev) => [...prev, createMessage('user', newMessage)].slice(-MAX_HISTORY));
       setInput('');
       setLoading(true);
       setError(null);
@@ -62,7 +116,7 @@ export default function ChatPageClient() {
         }
 
         const data = (await response.json()) as ChatResponse;
-        setMessages((prev) => [...prev, createMessage('assistant', data.reply)]);
+        setMessages((prev) => [...prev, createMessage('assistant', data.reply)].slice(-MAX_HISTORY));
         setSuggestions(Array.isArray(data.suggested_actions) ? data.suggested_actions : []);
         setRelatedEvents(Array.isArray(data.related_events) ? data.related_events : []);
       } catch (err) {
@@ -92,8 +146,21 @@ export default function ChatPageClient() {
     setInput(suggestion);
   };
 
+  const handleClearChat = () => {
+    setMessages([]);
+    setSuggestions([]);
+    setRelatedEvents([]);
+    setInput('');
+    setError(null);
+    setLastPrompt(null);
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
+  };
+
   const hasHistory = messages.length > 0;
   const suggestionList = useMemo(() => suggestions.slice(0, 5), [suggestions]);
+  const canClearChat = hasHistory || suggestions.length > 0 || relatedEvents.length > 0;
 
   return (
     <section className={styles.page}>
@@ -109,7 +176,17 @@ export default function ChatPageClient() {
         <Card className={styles.chatPanel}>
           <div className={styles.chatHeader}>
             <h2>Conversation</h2>
-            {loading ? <Badge tone="accent">Assistant typing...</Badge> : null}
+            <div className={styles.chatHeaderActions}>
+              {loading ? <Badge tone="accent">Assistant typing...</Badge> : null}
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleClearChat}
+                disabled={!canClearChat}
+              >
+                Clear chat
+              </Button>
+            </div>
           </div>
 
           {!hasHistory ? (
@@ -180,7 +257,13 @@ export default function ChatPageClient() {
         <Card className={styles.sidePanel}>
           <h2>Related events</h2>
           <p>Suggested follow-ups based on the conversation.</p>
-          {relatedEvents.length === 0 ? (
+          {loading && relatedEvents.length === 0 ? (
+            <div className={styles.relatedSkeletons}>
+              {[...Array(3)].map((_, index) => (
+                <Skeleton key={`related-skeleton-${index}`} height="12px" width="90%" />
+              ))}
+            </div>
+          ) : relatedEvents.length === 0 ? (
             <p className={styles.emptyMeta}>No related events yet.</p>
           ) : (
             <ul className={styles.relatedList}>

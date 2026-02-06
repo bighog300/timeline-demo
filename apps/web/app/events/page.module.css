@@ -25,6 +25,55 @@
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
+.resultsSection {
+  display: grid;
+  gap: 16px;
+}
+
+.filters {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(220px, 1.4fr) repeat(2, minmax(160px, 1fr)) auto;
+  align-items: end;
+}
+
+.searchField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.searchInput {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: white;
+}
+
+.filterGroup {
+  display: grid;
+  gap: 6px;
+}
+
+.filterLabel {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: white;
+}
+
+.resultsCount {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
 .eventCard h2 {
   margin-bottom: 4px;
 }
@@ -68,4 +117,10 @@
 .link {
   color: var(--primary);
   font-weight: 600;
+}
+
+@media (max-width: 900px) {
+  .filters {
+    grid-template-columns: 1fr;
+  }
 }
