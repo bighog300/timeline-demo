@@ -121,3 +121,39 @@ if ! printf '%s' "${artifacts_read_body}" | node -e 'const fs=require("fs");cons
   fail_response "Timeline artifacts read (unauth)" "${artifacts_read_body}"
 fi
 echo "✅ /api/timeline/artifacts/read unauth ok"
+
+selection_list=$(curl -sS "${BASE_URL}/api/timeline/selection/list" -w "\n%{http_code}") || true
+selection_list_body=$(printf '%s' "${selection_list}" | sed '$d')
+selection_list_status=$(printf '%s' "${selection_list}" | tail -n 1)
+if [[ "${selection_list_status}" != "401" ]]; then
+  fail_response "Timeline selection list (unauth)" "${selection_list_body}"
+fi
+if ! printf '%s' "${selection_list_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+  fail_response "Timeline selection list (unauth)" "${selection_list_body}"
+fi
+echo "✅ /api/timeline/selection/list unauth ok"
+
+selection_read=$(curl -sS "${BASE_URL}/api/timeline/selection/read?fileId=foo" -w "\n%{http_code}") || true
+selection_read_body=$(printf '%s' "${selection_read}" | sed '$d')
+selection_read_status=$(printf '%s' "${selection_read}" | tail -n 1)
+if [[ "${selection_read_status}" != "401" ]]; then
+  fail_response "Timeline selection read (unauth)" "${selection_read_body}"
+fi
+if ! printf '%s' "${selection_read_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+  fail_response "Timeline selection read (unauth)" "${selection_read_body}"
+fi
+echo "✅ /api/timeline/selection/read unauth ok"
+
+selection_save=$(curl -sS -X POST "${BASE_URL}/api/timeline/selection/save" \
+  -H 'content-type: application/json' \
+  --data '{"name":"Demo","items":[]}' \
+  -w "\n%{http_code}") || true
+selection_save_body=$(printf '%s' "${selection_save}" | sed '$d')
+selection_save_status=$(printf '%s' "${selection_save}" | tail -n 1)
+if [[ "${selection_save_status}" != "401" ]]; then
+  fail_response "Timeline selection save (unauth)" "${selection_save_body}"
+fi
+if ! printf '%s' "${selection_save_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || data.error !== "reconnect_required") process.exit(1);'; then
+  fail_response "Timeline selection save (unauth)" "${selection_save_body}"
+fi
+echo "✅ /api/timeline/selection/save unauth ok"

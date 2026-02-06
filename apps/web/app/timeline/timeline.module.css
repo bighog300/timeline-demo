@@ -23,6 +23,11 @@
   font-size: 0.9rem;
 }
 
+.muted {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
 .headerActions {
   display: flex;
   flex-direction: column;
@@ -35,6 +40,104 @@
   gap: 12px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.selectionPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.selectionHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.selectionActions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.selectionForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.95rem;
+}
+
+.field input,
+.field textarea {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  background: #fff;
+  font: inherit;
+}
+
+.checkboxRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.formActions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.selectionList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.selectionRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  flex-wrap: wrap;
+}
+
+.selectionMeta {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 4px;
+}
+
+.selectionButtons {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.selectionPreview {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border-radius: 12px;
+  background: rgba(59, 130, 246, 0.08);
+  flex-wrap: wrap;
 }
 
 .toggle {

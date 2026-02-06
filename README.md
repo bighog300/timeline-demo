@@ -10,6 +10,7 @@ A privacy-first timeline demo that showcases a Next.js App Router UI with API ro
 - **Vercel Ready**: Single-project deployment targeting the repo root
 - **Phase 2A Summaries to Drive**: Summaries stored as Markdown + JSON artifacts in your provisioned Drive folder
 - **Phase 2B Sync from Drive**: Rehydrate summaries by listing Summary.json artifacts from the app-managed Drive folder
+- **Phase 2C Selection Sets in Drive**: Save/load selection sets as Selection.json files in the app-managed Drive folder
 
 ## 🏗️ Architecture
 
@@ -125,6 +126,17 @@ they are missing.
 - **No background scanning**: Syncing only reads files within the app-managed Drive folder and only
   when you click the button (or enable the optional “Auto-sync on open” toggle).
 
+### Phase 2C Selection Sets
+
+- **How it works**: On `/timeline`, use the “Selection sets” panel to save the current Gmail/Drive
+  selection to Drive or load a saved selection from the app-managed folder.
+- **Drive artifact format**: Each saved set is stored as `"<Name> - Selection.json"` in the
+  provisioned Drive folder.
+- **Portable selections**: Selection sets are Drive-backed and can be loaded on another device after
+  clearing localStorage.
+- **No background scanning**: Listing and reading sets is scoped to the app-managed Drive folder
+  only and only happens when you open the list or load a set.
+
 #### Manual Test Steps
 
 1. Connect your Google account and provision the Drive folder.
@@ -132,6 +144,10 @@ they are missing.
 3. Clear localStorage in the browser.
 4. Reload `/timeline` and click “Sync from Drive”.
 5. Confirm the summarized items reappear with Drive links.
+6. Visit `/select/gmail` and `/select/drive` to create a selection.
+7. On `/timeline`, open “Selection sets” and save the current selection.
+8. Clear localStorage, reload `/timeline`, and refresh the selection list.
+9. Load the saved set and apply it via Replace or Merge.
 
 ## 🧪 Testing
 
