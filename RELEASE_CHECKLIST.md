@@ -1,7 +1,9 @@
 # Release Checklist
 
+Start with [START_HERE.md](START_HERE.md) and [RUNBOOK.md](RUNBOOK.md) if you are new to the repo.
+
 ## Preconditions
-- ✅ CI is green on the release branch.
+- ✅ CI is green on the release branch (tests, builds, smoke checks, docs verify).
 - ✅ Vercel preview deploy is successful.
 
 ## Local Verification Commands
@@ -14,6 +16,7 @@ pnpm install --frozen-lockfile
 pnpm test
 pnpm run vercel:build
 node scripts/verify-build.mjs
+node scripts/verify-docs.mjs
 bash scripts/smoke-test.sh
 ```
 
@@ -27,9 +30,10 @@ bash scripts/smoke-test.sh
 
 ## Post-Merge Steps
 - Confirm the Vercel production deploy uses the **merge commit SHA** from GitHub.
+- Verify production logs show no new `error_code` spikes.
 
 ## Tagging Guidance (Optional)
-- If needed, tag the merge commit as `v0.2-demo-ui`.
+- If needed, tag the merge commit as `v0.x` or `v0.x.y` (team convention).
 - Do **not** create tags as part of this checklist—only include it in release notes.
 
 ## Rollback Guidance

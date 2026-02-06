@@ -20,6 +20,7 @@ run_step "Install dependencies" pnpm install --frozen-lockfile
 run_step "Run tests" pnpm test
 run_step "Vercel build" pnpm run vercel:build
 run_step "Verify build" node scripts/verify-build.mjs
+run_step "Verify docs" node scripts/verify-docs.mjs
 run_step "Smoke test" bash scripts/smoke-test.sh
 
 echo "\nAll release checks passed."
