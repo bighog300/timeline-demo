@@ -29,23 +29,23 @@ jobs:
       - name: Install pnpm
         run: corepack prepare pnpm@9.15.9 --activate
       
-      - name: Install dependencies (Vercel style)
-        run: pnpm run vercel:install
-      
-      - name: Run linting
-        run: pnpm lint
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
       
       - name: Run tests
         run: pnpm test
 
-      - name: Build all packages
-        run: pnpm build
+      - name: Build packages and web app
+        run: pnpm build && pnpm run vercel:build
 
       - name: Verify build outputs
         run: node scripts/verify-build.mjs
 
-      - name: Build web app (Vercel style)
-        run: pnpm run vercel:build
+      - name: Smoke test
+        run: bash scripts/smoke-test.sh
+
+      - name: Run linting
+        run: pnpm lint
 
   vercel-sim:
     name: Vercel Simulation
@@ -67,8 +67,11 @@ jobs:
       - name: Activate pnpm
         run: corepack prepare pnpm@9.15.9 --activate
 
-      - name: Install dependencies (Vercel style)
-        run: pnpm run vercel:install
+      - name: Install dependencies (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Run tests
+        run: pnpm test
 
       - name: Build web app (Vercel style)
         run: pnpm run vercel:build
