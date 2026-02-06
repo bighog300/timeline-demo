@@ -69,6 +69,8 @@ const API_REQUIRED = [
   'DRIVE_ADAPTER',
 ];
 
+// Web currently has no required runtime env vars; keep this empty until the UI
+// needs guaranteed values across all environments.
 const WEB_REQUIRED = [];
 
 const PLACEHOLDER_PATTERNS = [/your-/i, /example\.com/i, /^sk-your/i, /YOUR-API-DOMAIN\.com/i];
