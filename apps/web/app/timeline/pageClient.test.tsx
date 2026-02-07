@@ -10,6 +10,10 @@ vi.mock('next-auth/react', () => ({
   useSession: () => mockUseSession(),
 }));
 
+vi.mock('next/navigation', () => ({
+  useSearchParams: () => new URLSearchParams(),
+}));
+
 const mockFetch = (handler: (url: string, init?: RequestInit) => Response) => {
   vi.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
     const url = typeof input === 'string' ? input : input.url;
