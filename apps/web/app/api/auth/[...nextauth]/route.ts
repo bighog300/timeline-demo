@@ -2,7 +2,8 @@ import NextAuth from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 import { NextResponse } from "next/server";
 import type { NextAuthOptions } from "next-auth";
-import { isAuthConfigured } from "@/app/lib/googleAuth";
+import { isAuthConfigured } from "../../../lib/googleAuth";
+
 
 export const runtime = "nodejs";
 
