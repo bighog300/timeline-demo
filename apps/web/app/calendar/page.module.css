@@ -11,12 +11,43 @@
   flex-wrap: wrap;
 }
 
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .eyebrow {
   text-transform: uppercase;
   font-size: 0.75rem;
   letter-spacing: 0.08em;
   color: var(--muted);
   margin-bottom: 4px;
+}
+
+.toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.toggle input {
+  width: 16px;
+  height: 16px;
+}
+
+.content {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr);
+  gap: 20px;
 }
 
 .list {
@@ -48,9 +79,34 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px;
   border-radius: 12px;
   background: #f5f6fb;
+}
+
+.itemButton {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  text-align: left;
+  padding: 12px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.itemButton:hover {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.itemTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .time {
@@ -61,4 +117,51 @@
 .location {
   font-weight: 600;
   color: var(--text);
+}
+
+.drawer {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+}
+
+.drawerTitle {
+  font-weight: 600;
+  margin-top: 8px;
+}
+
+.drawerMeta {
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+.tagList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.linkList {
+  margin-top: 12px;
+}
+
+.linkList ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.requestId {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+@media (max-width: 960px) {
+  .content {
+    grid-template-columns: 1fr;
+  }
+
+  .drawer {
+    position: static;
+  }
 }

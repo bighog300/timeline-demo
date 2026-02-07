@@ -36,6 +36,30 @@ export type SummaryArtifact = {
   version: number;
 };
 
+export type CalendarEntryLinkKind = 'summary' | 'drive_file' | 'gmail_message';
+
+export type CalendarEntryLink = {
+  kind: CalendarEntryLinkKind;
+  id: string;
+  url?: string;
+};
+
+export type CalendarEntry = {
+  type: 'calendar_entry';
+  id: string;
+  title: string;
+  startISO: string;
+  endISO: string;
+  allDay: boolean;
+  location?: string;
+  notes?: string;
+  tags?: string[];
+  links?: CalendarEntryLink[];
+  source: 'user' | 'derived';
+  createdAtISO: string;
+  updatedAtISO: string;
+};
+
 export type SelectionSetItem = {
   source: 'gmail' | 'drive';
   id: string;

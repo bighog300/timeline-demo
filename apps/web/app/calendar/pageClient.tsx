@@ -2,22 +2,36 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
+import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import Skeleton from '../components/ui/Skeleton';
+import { parseApiError } from '../lib/apiErrors';
 import { fetchWithTimeout } from '../lib/fetchWithTimeout';
+import type { CalendarEntry, SummaryArtifact } from '../lib/types';
+import { isCalendarEntry, normalizeCalendarEntry } from '../lib/validateCalendarEntry';
+import { isSummaryArtifact, normalizeArtifact } from '../lib/validateArtifact';
 import styles from './page.module.css';
 
-type CalendarItem = {
+type CalendarLayer = 'entry' | 'summary';
+
+type CalendarDisplayItem = {
   id: string;
   title: string;
-  start: string;
-  end: string;
-  location: string;
+  startISO: string;
+  endISO: string;
+  allDay: boolean;
+  layer: CalendarLayer;
+  entry?: CalendarEntry;
+  summary?: SummaryArtifact;
 };
 
-type CalendarResponse = {
-  items: CalendarItem[];
+type CalendarEntriesResponse = {
+  entries?: CalendarEntry[];
+};
+
+type TimelineArtifactsResponse = {
+  artifacts?: SummaryArtifact[];
 };
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
@@ -39,7 +53,10 @@ const formatDateLabel = (value: string) => {
   return dateFormatter.format(date);
 };
 
-const formatTimeRange = (start: string, end: string) => {
+const formatTimeRange = (start: string, end: string, allDay: boolean) => {
+  if (allDay) {
+    return 'All day';
+  }
   const startDate = new Date(start);
   const endDate = new Date(end);
   if (Number.isNaN(startDate.valueOf()) || Number.isNaN(endDate.valueOf())) {
@@ -49,18 +66,69 @@ const formatTimeRange = (start: string, end: string) => {
 };
 
 export default function CalendarPageClient() {
-  const [items, setItems] = useState<CalendarItem[]>([]);
+  const [items, setItems] = useState<CalendarDisplayItem[]>([]);
+  const [selectedEntry, setSelectedEntry] = useState<CalendarEntry | null>(null);
+  const [showEntries, setShowEntries] = useState(true);
+  const [showSummaries, setShowSummaries] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [requestId, setRequestId] = useState<string | null>(null);
 
   const loadCalendar = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
+    setRequestId(null);
 
     try {
-      const response = await fetchWithTimeout('/api/calendar', { signal });
-      const data = (await response.json()) as CalendarResponse;
-      setItems(Array.isArray(data.items) ? data.items : []);
+      const [entriesResponse, summaryResponse] = await Promise.all([
+        fetchWithTimeout('/api/calendar/entries', { signal }),
+        fetchWithTimeout('/api/timeline/artifacts/list', { signal }),
+      ]);
+
+      if (!entriesResponse.ok) {
+        const apiError = await parseApiError(entriesResponse);
+        setRequestId(apiError?.requestId ?? null);
+        throw new Error(apiError?.message ?? 'Unable to load calendar entries.');
+      }
+
+      if (!summaryResponse.ok) {
+        const apiError = await parseApiError(summaryResponse);
+        setRequestId(apiError?.requestId ?? null);
+        throw new Error(apiError?.message ?? 'Unable to load timeline summaries.');
+      }
+
+      const entryPayload = (await entriesResponse.json()) as CalendarEntriesResponse;
+      const summaryPayload = (await summaryResponse.json()) as TimelineArtifactsResponse;
+
+      const calendarEntries = Array.isArray(entryPayload.entries)
+        ? entryPayload.entries.filter(isCalendarEntry).map(normalizeCalendarEntry)
+        : [];
+      const summaries = Array.isArray(summaryPayload.artifacts)
+        ? summaryPayload.artifacts.filter(isSummaryArtifact).map(normalizeArtifact)
+        : [];
+
+      const entryItems: CalendarDisplayItem[] = calendarEntries.map((entry) => ({
+        id: entry.id,
+        title: entry.title,
+        startISO: entry.startISO,
+        endISO: entry.endISO,
+        allDay: entry.allDay,
+        layer: 'entry',
+        entry,
+      }));
+
+      const summaryItems: CalendarDisplayItem[] = summaries.map((artifact) => ({
+        id: artifact.driveFileId || artifact.artifactId,
+        title: artifact.title || artifact.sourceMetadata?.subject || 'Timeline summary',
+        startISO: artifact.createdAtISO,
+        endISO: artifact.createdAtISO,
+        allDay: true,
+        layer: 'summary',
+        summary: artifact,
+      }));
+
+      setItems([...entryItems, ...summaryItems]);
+      setSelectedEntry(null);
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
         return;
@@ -78,12 +146,19 @@ export default function CalendarPageClient() {
   }, [loadCalendar]);
 
   const grouped = useMemo(() => {
-    return items.reduce<Record<string, CalendarItem[]>>((acc, item) => {
-      const dateKey = formatDateLabel(item.start);
+    const filtered = items.filter((item) => {
+      if (item.layer === 'entry') {
+        return showEntries;
+      }
+      return showSummaries;
+    });
+
+    return filtered.reduce<Record<string, CalendarDisplayItem[]>>((acc, item) => {
+      const dateKey = formatDateLabel(item.startISO);
       acc[dateKey] = acc[dateKey] ? [...acc[dateKey], item] : [item];
       return acc;
     }, {});
-  }, [items]);
+  }, [items, showEntries, showSummaries]);
 
   const dates = Object.keys(grouped);
 
@@ -95,10 +170,33 @@ export default function CalendarPageClient() {
           <h1>Snapshot view</h1>
           <p>A quick glance at the scheduled sessions grouped by date.</p>
         </div>
-        <Button type="button" variant="secondary" onClick={() => loadCalendar()}>
-          Refresh
-        </Button>
+        <div className={styles.headerActions}>
+          <Button type="button" variant="secondary" onClick={() => loadCalendar()}>
+            Refresh
+          </Button>
+        </div>
       </div>
+
+      <Card>
+        <div className={styles.toggles}>
+          <label className={styles.toggle}>
+            <input
+              type="checkbox"
+              checked={showEntries}
+              onChange={(event) => setShowEntries(event.target.checked)}
+            />
+            <span>My Calendar Entries</span>
+          </label>
+          <label className={styles.toggle}>
+            <input
+              type="checkbox"
+              checked={showSummaries}
+              onChange={(event) => setShowSummaries(event.target.checked)}
+            />
+            <span>Timeline Summaries</span>
+          </label>
+        </div>
+      </Card>
 
       {loading ? (
         <div className={styles.list}>
@@ -114,6 +212,7 @@ export default function CalendarPageClient() {
         <Card>
           <h2>Calendar unavailable</h2>
           <p>{error}</p>
+          {requestId ? <p className={styles.requestId}>Request ID: {requestId}</p> : null}
           <Button type="button" onClick={() => loadCalendar()}>
             Retry
           </Button>
@@ -124,26 +223,111 @@ export default function CalendarPageClient() {
           <p>There are no scheduled sessions in the snapshot.</p>
         </Card>
       ) : (
-        <div className={styles.list}>
-          {dates.map((dateKey) => (
-            <Card key={dateKey}>
-              <div className={styles.dateRow}>
-                <h2>{dateKey}</h2>
-                <span className={styles.count}>{grouped[dateKey].length} sessions</span>
-              </div>
-              <div className={styles.items}>
-                {grouped[dateKey].map((item) => (
-                  <div key={item.id} className={styles.itemRow}>
-                    <div>
-                      <h3>{item.title}</h3>
-                      <p className={styles.time}>{formatTimeRange(item.start, item.end)}</p>
+        <div className={styles.content}>
+          <div className={styles.list}>
+            {dates.map((dateKey) => (
+              <Card key={dateKey}>
+                <div className={styles.dateRow}>
+                  <h2>{dateKey}</h2>
+                  <span className={styles.count}>{grouped[dateKey].length} sessions</span>
+                </div>
+                <div className={styles.items}>
+                  {grouped[dateKey].map((item) => (
+                    <div key={`${item.layer}-${item.id}`} className={styles.itemRow}>
+                      <button
+                        type="button"
+                        className={styles.itemButton}
+                        onClick={() => {
+                          if (item.layer === 'summary' && item.summary?.driveFileId) {
+                            window.location.assign(
+                              `/timeline?artifactId=${encodeURIComponent(item.summary.driveFileId)}`,
+                            );
+                            return;
+                          }
+                          if (item.entry) {
+                            setSelectedEntry(item.entry);
+                          }
+                        }}
+                      >
+                        <div>
+                          <div className={styles.itemTitle}>
+                            <h3>{item.title}</h3>
+                            {item.layer === 'summary' ? (
+                              <Badge tone="accent">Timeline summary</Badge>
+                            ) : (
+                              <Badge tone="neutral">Calendar entry</Badge>
+                            )}
+                          </div>
+                          <p className={styles.time}>
+                            {formatTimeRange(item.startISO, item.endISO, item.allDay)}
+                          </p>
+                        </div>
+                        <span className={styles.location}>
+                          {item.entry?.location ?? (item.layer === 'summary' ? 'Timeline' : '')}
+                        </span>
+                      </button>
                     </div>
-                    <span className={styles.location}>{item.location}</span>
+                  ))}
+                </div>
+              </Card>
+            ))}
+          </div>
+          <aside className={styles.drawer}>
+            {selectedEntry ? (
+              <Card>
+                <h2>Entry details</h2>
+                <p className={styles.drawerTitle}>{selectedEntry.title}</p>
+                <p className={styles.drawerMeta}>
+                  {formatDateLabel(selectedEntry.startISO)} ·{' '}
+                  {formatTimeRange(selectedEntry.startISO, selectedEntry.endISO, selectedEntry.allDay)}
+                </p>
+                {selectedEntry.location ? (
+                  <p>
+                    <strong>Location:</strong> {selectedEntry.location}
+                  </p>
+                ) : null}
+                {selectedEntry.notes ? (
+                  <p>
+                    <strong>Notes:</strong> {selectedEntry.notes}
+                  </p>
+                ) : null}
+                {selectedEntry.tags && selectedEntry.tags.length > 0 ? (
+                  <div className={styles.tagList}>
+                    {selectedEntry.tags.map((tag) => (
+                      <Badge key={tag} tone="neutral">
+                        {tag}
+                      </Badge>
+                    ))}
                   </div>
-                ))}
-              </div>
-            </Card>
-          ))}
+                ) : null}
+                {selectedEntry.links && selectedEntry.links.length > 0 ? (
+                  <div className={styles.linkList}>
+                    <strong>Links</strong>
+                    <ul>
+                      {selectedEntry.links.map((link) => (
+                        <li key={`${link.kind}-${link.id}`}>
+                          {link.url ? (
+                            <a href={link.url} target="_blank" rel="noreferrer">
+                              {link.kind.replace('_', ' ')} · {link.id}
+                            </a>
+                          ) : (
+                            <span>
+                              {link.kind.replace('_', ' ')} · {link.id}
+                            </span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </Card>
+            ) : (
+              <Card>
+                <h2>Entry details</h2>
+                <p>Select a calendar entry to review details.</p>
+              </Card>
+            )}
+          </aside>
         </div>
       )}
     </section>

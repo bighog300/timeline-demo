@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
+import { useSearchParams } from 'next/navigation';
 
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
@@ -258,6 +259,8 @@ const selectionItemsToSelections = (
 
 export default function TimelinePageClient() {
   const { data: session, status } = useSession();
+  const searchParams = useSearchParams();
+  const jumpedArtifactRef = useRef<string | null>(null);
   const [gmailSelections, setGmailSelections] = useState<GmailSelection[]>([]);
   const [driveSelections, setDriveSelections] = useState<DriveSelection[]>([]);
   const [artifacts, setArtifacts] = useState<Record<string, SummaryArtifact>>({});
@@ -962,6 +965,19 @@ export default function TimelinePageClient() {
     [scrollToEntry],
   );
 
+  const jumpToArtifactByDriveId = useCallback(
+    (driveFileId: string) => {
+      const entry = Object.entries(artifacts).find(([, artifact]) => {
+        return artifact.driveFileId === driveFileId;
+      });
+      if (!entry) {
+        return;
+      }
+      handleJumpToEntry(entry[0]);
+    },
+    [artifacts, handleJumpToEntry],
+  );
+
   const handleViewSummary = useCallback(
     (result: TimelineSearchResult) => {
       const entryKey =
@@ -1020,6 +1036,18 @@ export default function TimelinePageClient() {
       setPendingScrollKey(null);
     }
   }, [entryKeys, handleJumpToEntry, pendingScrollKey]);
+
+  useEffect(() => {
+    const artifactId = searchParams?.get('artifactId');
+    if (!artifactId || jumpedArtifactRef.current === artifactId) {
+      return;
+    }
+    if (Object.keys(artifacts).length === 0) {
+      return;
+    }
+    jumpToArtifactByDriveId(artifactId);
+    jumpedArtifactRef.current = artifactId;
+  }, [artifacts, jumpToArtifactByDriveId, searchParams]);
 
   useEffect(() => {
     const trimmed = searchQuery.trim();
