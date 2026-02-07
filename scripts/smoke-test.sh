@@ -85,23 +85,35 @@ else
   fail_response "Auth providers (unauth)" "${auth_providers_body}"
 fi
 
-events=$(curl -fsS "${BASE_URL}/api/events") || fail_response "Events" ""
-if ! printf '%s' "${events}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!Array.isArray(data)) process.exit(1);'; then
-  fail_response "Events" "${events}"
+# Calendar page should exist publicly (even if it shows an unauth state in UI)
+calendar_page_status=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/calendar") || true
+if [[ "${calendar_page_status}" != "200" ]]; then
+  echo "❌ Calendar page check failed (status ${calendar_page_status})."
+  echo "--- Last 50 lines of ${LOG_FILE} ---"
+  tail -n 50 "${LOG_FILE}" || true
+  exit 1
 fi
-echo "✅ /api/events ok"
-
-calendar=$(curl -fsS "${BASE_URL}/api/calendar") || fail_response "Calendar" ""
-if ! printf '%s' "${calendar}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || !Array.isArray(data.items)) process.exit(1);if (data.items.length && !data.items.every(item => item && item.id && item.title && item.start && item.end)) process.exit(1);'; then
-  fail_response "Calendar" "${calendar}"
-fi
-echo "✅ /api/calendar ok"
+echo "✅ /calendar page ok"
 
 chat=$(curl -fsS -X POST "${BASE_URL}/api/chat" -H 'content-type: application/json' --data '{"message":"ping"}') || fail_response "Chat" ""
 if ! printf '%s' "${chat}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || typeof data.reply !== "string" || !Array.isArray(data.suggested_actions)) process.exit(1);'; then
   fail_response "Chat" "${chat}"
 fi
 echo "✅ /api/chat ok"
+
+# Calendar entries endpoint exists and should reject unauth (401) or be not_configured (503)
+calendar_entries=$(curl -sS "${BASE_URL}/api/calendar/entries" -w "\n%{http_code}") || true
+calendar_entries_body=$(printf '%s' "${calendar_entries}" | sed '$d')
+calendar_entries_status=$(printf '%s' "${calendar_entries}" | tail -n 1)
+if [[ "${calendar_entries_status}" != "401" && "${calendar_entries_status}" != "503" ]]; then
+  fail_response "Calendar entries (unauth)" "${calendar_entries_body}"
+fi
+if [[ "${calendar_entries_status}" == "503" ]]; then
+  if ! printf '%s' "${calendar_entries_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (data?.error !== "not_configured") process.exit(1);'; then
+    fail_response "Calendar entries (unauth)" "${calendar_entries_body}"
+  fi
+fi
+echo "✅ /api/calendar/entries unauth ok (${calendar_entries_status})"
 
 disconnect=$(curl -sS -X POST "${BASE_URL}/api/google/disconnect" -w "\n%{http_code}") || true
 disconnect_body=$(printf '%s' "${disconnect}" | sed '$d')
