@@ -4,6 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import TimelinePageClient from './pageClient';
 
+const mockUseSession = vi.fn();
+
+vi.mock('next-auth/react', () => ({
+  useSession: () => mockUseSession(),
+}));
+
 const mockFetch = (handler: (url: string, init?: RequestInit) => Response) => {
   vi.spyOn(global, 'fetch').mockImplementation(async (input, init) => {
     const url = typeof input === 'string' ? input : input.url;
@@ -129,6 +135,10 @@ describe('TimelinePageClient', () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.restoreAllMocks();
+    mockUseSession.mockReturnValue({
+      data: { driveFolderId: 'folder-1' },
+      status: 'authenticated',
+    });
   });
 
   afterEach(() => {

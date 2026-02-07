@@ -86,6 +86,31 @@ if ! printf '%s' "${chat}" | node -e 'const fs=require("fs");const data=JSON.par
 fi
 echo "✅ /api/chat ok"
 
+disconnect=$(curl -sS -X POST "${BASE_URL}/api/google/disconnect" -w "\n%{http_code}") || true
+disconnect_body=$(printf '%s' "${disconnect}" | sed '$d')
+disconnect_status=$(printf '%s' "${disconnect}" | tail -n 1)
+if [[ "${disconnect_status}" != "401" ]]; then
+  fail_response "Google disconnect (unauth)" "${disconnect_body}"
+fi
+if ! printf '%s' "${disconnect_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));const code=data?.error?.code ?? data?.error_code ?? data?.error;if (code !== "reconnect_required") process.exit(1);'; then
+  fail_response "Google disconnect (unauth)" "${disconnect_body}"
+fi
+echo "✅ /api/google/disconnect unauth ok"
+
+drive_cleanup=$(curl -sS -X POST "${BASE_URL}/api/google/drive/cleanup" \
+  -H 'content-type: application/json' \
+  --data '{"dryRun":true}' \
+  -w "\n%{http_code}") || true
+drive_cleanup_body=$(printf '%s' "${drive_cleanup}" | sed '$d')
+drive_cleanup_status=$(printf '%s' "${drive_cleanup}" | tail -n 1)
+if [[ "${drive_cleanup_status}" != "401" ]]; then
+  fail_response "Drive cleanup (unauth)" "${drive_cleanup_body}"
+fi
+if ! printf '%s' "${drive_cleanup_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));const code=data?.error?.code ?? data?.error_code ?? data?.error;if (code !== "reconnect_required") process.exit(1);'; then
+  fail_response "Drive cleanup (unauth)" "${drive_cleanup_body}"
+fi
+echo "✅ /api/google/drive/cleanup unauth ok"
+
 summarize=$(curl -sS -X POST "${BASE_URL}/api/timeline/summarize" \
   -H 'content-type: application/json' \
   --data '{"items":[{"source":"gmail","id":"demo"}]}' \

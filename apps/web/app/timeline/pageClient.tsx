@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSession } from 'next-auth/react';
 
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
@@ -42,6 +43,7 @@ type DriveSelection = {
 type ApiSurfaceError =
   | 'reconnect_required'
   | 'drive_not_provisioned'
+  | 'forbidden_outside_folder'
   | 'rate_limited'
   | 'upstream_timeout'
   | 'upstream_error'
@@ -85,6 +87,7 @@ type TimelineSearchResult = {
 type SearchError =
   | 'reconnect_required'
   | 'drive_not_provisioned'
+  | 'forbidden_outside_folder'
   | 'query_too_short'
   | 'query_too_long'
   | 'rate_limited'
@@ -254,6 +257,7 @@ const selectionItemsToSelections = (
 };
 
 export default function TimelinePageClient() {
+  const { data: session, status } = useSession();
   const [gmailSelections, setGmailSelections] = useState<GmailSelection[]>([]);
   const [driveSelections, setDriveSelections] = useState<DriveSelection[]>([]);
   const [artifacts, setArtifacts] = useState<Record<string, SummaryArtifact>>({});
@@ -305,6 +309,11 @@ export default function TimelinePageClient() {
   const [indexRequestId, setIndexRequestId] = useState<string | null>(null);
   const [indexMessage, setIndexMessage] = useState<string | null>(null);
   const timelineTopRef = useRef<HTMLDivElement | null>(null);
+
+  const driveFolderId = session?.driveFolderId;
+  const driveFolderLink = driveFolderId
+    ? `https://drive.google.com/drive/folders/${driveFolderId}`
+    : null;
 
   useEffect(() => {
     setGmailSelections(parseStoredSelections<GmailSelection>(GMAIL_KEY));
@@ -452,6 +461,10 @@ export default function TimelinePageClient() {
           setError('drive_not_provisioned');
           return;
         }
+        if (apiError?.code === 'forbidden_outside_folder') {
+          setError('forbidden_outside_folder');
+          return;
+        }
         if (apiError?.code === 'too_many_items') {
           setError('too_many_items');
           return;
@@ -508,6 +521,10 @@ export default function TimelinePageClient() {
         }
         if (apiError?.code === 'drive_not_provisioned') {
           setSyncError('drive_not_provisioned');
+          return;
+        }
+        if (apiError?.code === 'forbidden_outside_folder') {
+          setSyncError('forbidden_outside_folder');
           return;
         }
         if (apiError?.code === 'rate_limited') {
@@ -622,6 +639,10 @@ export default function TimelinePageClient() {
           setSelectionError('drive_not_provisioned');
           return;
         }
+        if (apiError?.code === 'forbidden_outside_folder') {
+          setSelectionError('forbidden_outside_folder');
+          return;
+        }
         if (apiError?.code === 'rate_limited') {
           setSelectionError('rate_limited');
           return;
@@ -662,6 +683,10 @@ export default function TimelinePageClient() {
         }
         if (apiError?.code === 'drive_not_provisioned') {
           setIndexError('drive_not_provisioned');
+          return;
+        }
+        if (apiError?.code === 'forbidden_outside_folder') {
+          setIndexError('forbidden_outside_folder');
           return;
         }
         if (apiError?.code === 'rate_limited') {
@@ -710,6 +735,10 @@ export default function TimelinePageClient() {
           setIndexError('drive_not_provisioned');
           return;
         }
+        if (apiError?.code === 'forbidden_outside_folder') {
+          setIndexError('forbidden_outside_folder');
+          return;
+        }
         if (apiError?.code === 'rate_limited') {
           setIndexError('rate_limited');
           return;
@@ -755,6 +784,10 @@ export default function TimelinePageClient() {
           }
           if (apiError?.code === 'drive_not_provisioned') {
             setPreviewError('drive_not_provisioned');
+            return;
+          }
+          if (apiError?.code === 'forbidden_outside_folder') {
+            setPreviewError('forbidden_outside_folder');
             return;
           }
           if (apiError?.code === 'rate_limited') {
@@ -830,6 +863,10 @@ export default function TimelinePageClient() {
           }
           if (apiError?.code === 'drive_not_provisioned') {
             setSearchError('drive_not_provisioned');
+            return;
+          }
+          if (apiError?.code === 'forbidden_outside_folder') {
+            setSearchError('forbidden_outside_folder');
             return;
           }
           if (apiError?.code === 'query_too_short') {
@@ -1090,6 +1127,10 @@ export default function TimelinePageClient() {
           setSelectionError('drive_not_provisioned');
           return;
         }
+        if (apiError?.code === 'forbidden_outside_folder') {
+          setSelectionError('forbidden_outside_folder');
+          return;
+        }
         if (apiError?.code === 'rate_limited') {
           setSelectionError('rate_limited');
           return;
@@ -1246,8 +1287,62 @@ export default function TimelinePageClient() {
     </div>
   );
 
+  const outsideFolderNotice = (requestId?: string | null) => (
+    <div className={styles.notice}>
+      This item lives outside your Timeline app folder. Use the app folder from{' '}
+      <Link href="/connect">/connect</Link> to keep artifacts scoped correctly.
+      <RequestIdNote requestId={requestId} />
+    </div>
+  );
+
   return (
     <section className={styles.page}>
+      {status === 'unauthenticated' ? (
+        <Card className={styles.noticeCard}>
+          <h2>Reconnect to continue</h2>
+          <p className={styles.muted}>
+            Connect Google to sync artifacts and keep your Timeline up to date.
+          </p>
+          <Button variant="primary" onClick={() => (window.location.href = '/connect')}>
+            Connect Google
+          </Button>
+        </Card>
+      ) : null}
+      {status === 'authenticated' && !driveFolderId ? (
+        <Card className={styles.noticeCard}>
+          <h2>Provision your Drive folder</h2>
+          <p className={styles.muted}>
+            Timeline needs a Drive folder to store summaries, selection sets, and the index.
+          </p>
+          <Button variant="secondary" onClick={() => (window.location.href = '/connect')}>
+            Provision in /connect
+          </Button>
+        </Card>
+      ) : null}
+      {status === 'authenticated' && driveFolderId ? (
+        <Card className={styles.noticeCard}>
+          <h2>Drive storage</h2>
+          <p className={styles.muted}>
+            Data stored in Drive folder: <strong>{driveFolderId}</strong>
+          </p>
+          <div className={styles.noticeActions}>
+            <Button
+              variant="secondary"
+              disabled={!driveFolderLink}
+              onClick={() => {
+                if (driveFolderLink) {
+                  window.open(driveFolderLink, '_blank', 'noreferrer');
+                }
+              }}
+            >
+              Open in Drive
+            </Button>
+            <Button variant="ghost" onClick={() => (window.location.href = '/connect')}>
+              Manage in /connect
+            </Button>
+          </div>
+        </Card>
+      ) : null}
       <div className={styles.header}>
         <div>
           <p>Unified view of the items you selected from Gmail and Drive.</p>
@@ -1338,6 +1433,7 @@ export default function TimelinePageClient() {
 
         {searchError === 'reconnect_required' ? searchReconnectNotice(searchRequestId) : null}
         {searchError === 'drive_not_provisioned' ? searchProvisionNotice(searchRequestId) : null}
+        {searchError === 'forbidden_outside_folder' ? outsideFolderNotice(searchRequestId) : null}
         {searchError === 'rate_limited' ? (
           <div className={styles.notice}>
             Too many requests — try again in a moment.
@@ -1481,6 +1577,7 @@ export default function TimelinePageClient() {
         ) : null}
         {indexError === 'reconnect_required' ? indexReconnectNotice(indexRequestId) : null}
         {indexError === 'drive_not_provisioned' ? indexProvisionNotice(indexRequestId) : null}
+        {indexError === 'forbidden_outside_folder' ? outsideFolderNotice(indexRequestId) : null}
         {indexError === 'rate_limited' ? (
           <div className={styles.notice}>
             Too many requests — try again in a moment.
@@ -1504,6 +1601,7 @@ export default function TimelinePageClient() {
 
       {error === 'reconnect_required' ? reconnectNotice(errorRequestId) : null}
       {error === 'drive_not_provisioned' ? provisionNotice(errorRequestId) : null}
+      {error === 'forbidden_outside_folder' ? outsideFolderNotice(errorRequestId) : null}
       {error === 'rate_limited' ? (
         <div className={styles.notice}>
           Too many requests — try again in a moment.
@@ -1545,6 +1643,7 @@ export default function TimelinePageClient() {
       ) : null}
       {syncError === 'reconnect_required' ? syncReconnectNotice(syncRequestId) : null}
       {syncError === 'drive_not_provisioned' ? syncProvisionNotice(syncRequestId) : null}
+      {syncError === 'forbidden_outside_folder' ? outsideFolderNotice(syncRequestId) : null}
       {syncError === 'rate_limited' ? (
         <div className={styles.notice}>
           Too many requests — try again in a moment.
@@ -1591,6 +1690,9 @@ export default function TimelinePageClient() {
           : null}
         {selectionError === 'drive_not_provisioned'
           ? selectionProvisionNotice(selectionRequestId)
+          : null}
+        {selectionError === 'forbidden_outside_folder'
+          ? outsideFolderNotice(selectionRequestId)
           : null}
         {selectionError === 'rate_limited' ? (
           <div className={styles.notice}>
@@ -1719,6 +1821,9 @@ export default function TimelinePageClient() {
           : null}
         {previewError === 'drive_not_provisioned'
           ? selectionProvisionNotice(previewRequestId)
+          : null}
+        {previewError === 'forbidden_outside_folder'
+          ? outsideFolderNotice(previewRequestId)
           : null}
         {previewError === 'rate_limited' ? (
           <div className={styles.notice}>

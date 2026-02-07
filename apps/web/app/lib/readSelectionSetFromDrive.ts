@@ -4,6 +4,7 @@ import { DEFAULT_GOOGLE_TIMEOUT_MS, withRetry, withTimeout } from './googleReque
 import type { LogContext } from './logger';
 import { time } from './logger';
 import type { SelectionSet } from './types';
+import { OutsideFolderError } from './driveSafety';
 import { isSelectionSet, normalizeSelectionSet } from './validateSelectionSet';
 
 const parseDriveJson = (data: unknown): unknown => {
@@ -47,7 +48,7 @@ export const readSelectionSetFromDrive = async (
 
   const parents = metadata.data.parents ?? [];
   if (!parents.includes(folderId)) {
-    return null;
+    throw new OutsideFolderError(fileId);
   }
 
   const contentOperation = () =>

@@ -4,14 +4,28 @@ import GoogleProvider from 'next-auth/providers/google';
 import { encode, getToken } from 'next-auth/jwt';
 import type { NextRequest, NextResponse } from 'next/server';
 
-const DEFAULT_GOOGLE_SCOPES = [
+export const REQUIRED_GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/drive.file',
-].join(' ');
+];
+
+const DEFAULT_GOOGLE_SCOPES = REQUIRED_GOOGLE_SCOPES.join(' ');
 
 export const GOOGLE_SCOPES = process.env.GOOGLE_SCOPES ?? DEFAULT_GOOGLE_SCOPES;
 export const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+
+export const parseScopeList = (value: string) =>
+  value
+    .split(' ')
+    .map((scope) => scope.trim())
+    .filter(Boolean);
+
+export const getGoogleScopeStatus = () => {
+  const configured = parseScopeList(GOOGLE_SCOPES);
+  const missing = REQUIRED_GOOGLE_SCOPES.filter((scope) => !configured.includes(scope));
+  return { configured, missing, isComplete: missing.length === 0 };
+};
 
 export const authOptions: NextAuthOptions = {
   providers: [
