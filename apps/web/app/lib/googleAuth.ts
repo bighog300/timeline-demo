@@ -10,9 +10,18 @@ export const REQUIRED_GOOGLE_SCOPES = [
   'https://www.googleapis.com/auth/drive.file',
 ];
 
-const DEFAULT_GOOGLE_SCOPES = REQUIRED_GOOGLE_SCOPES.join(' ');
+const OIDC_SCOPES = ['openid', 'email', 'profile'];
 
-export const GOOGLE_SCOPES = process.env.GOOGLE_SCOPES ?? DEFAULT_GOOGLE_SCOPES;
+const DEFAULT_GOOGLE_SCOPES = [...OIDC_SCOPES, ...REQUIRED_GOOGLE_SCOPES].join(' ');
+
+const mergeGoogleScopes = (value: string) => {
+  const configured = parseScopeList(value);
+  return Array.from(new Set([...OIDC_SCOPES, ...REQUIRED_GOOGLE_SCOPES, ...configured])).join(' ');
+};
+
+export const GOOGLE_SCOPES = process.env.GOOGLE_SCOPES
+  ? mergeGoogleScopes(process.env.GOOGLE_SCOPES)
+  : DEFAULT_GOOGLE_SCOPES;
 export const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 
 export const parseScopeList = (value: string) =>

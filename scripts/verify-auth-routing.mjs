@@ -48,6 +48,9 @@ const files = execSync("git ls-files", { encoding: "utf8" })
   .filter(Boolean);
 
 for (const file of files) {
+  if (file === "scripts/verify-auth-routing.mjs") {
+    continue;
+  }
   const absolutePath = path.join(root, file);
   let contents = "";
   try {
