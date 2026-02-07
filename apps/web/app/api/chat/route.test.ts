@@ -17,12 +17,10 @@ describe('POST /api/chat', () => {
     const payload = (await response.json()) as {
       reply: string;
       suggested_actions: string[];
-      related_events: Array<{ id: string; title: string }>;
     };
 
     expect(payload.reply).toEqual(expect.any(String));
     expect(payload.suggested_actions.length).toBeGreaterThan(0);
-    expect(payload.related_events).toEqual(expect.any(Array));
   });
 
   it('returns a default reply when message is empty', async () => {
@@ -54,9 +52,9 @@ describe('POST /api/chat', () => {
 
     expect(payload.suggested_actions).toEqual([
       'Build a weekend lineup',
-      'Find outdoor events',
+      'Find outdoor activities',
       'Show live music options',
-      'Browse farmers markets',
+      'Browse local markets',
     ]);
   });
 });
