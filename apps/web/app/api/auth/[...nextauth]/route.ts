@@ -4,15 +4,15 @@ import { NextResponse } from "next/server";
 import type { NextAuthOptions } from "next-auth";
 import { isAuthConfigured } from "../../../lib/googleAuth";
 
-
 export const runtime = "nodejs";
 
-export const authOptions: NextAuthOptions = {
+// IMPORTANT: do NOT export authOptions from an App Router route module.
+// Next.js will fail the build if you export non-route fields.
+const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-      // If you use custom params/scopes in your repo, keep them here.
     }),
   ],
   secret: process.env.NEXTAUTH_SECRET,
@@ -20,19 +20,18 @@ export const authOptions: NextAuthOptions = {
   trustHost: true,
 };
 
-const nextAuthHandler = NextAuth(authOptions);
+const handler = NextAuth(authOptions);
 
 export async function GET(req: Request) {
   if (!isAuthConfigured()) {
     return NextResponse.json({ error: "not_configured" }, { status: 503 });
   }
-  // NextAuth route handler in App Router
-  return nextAuthHandler(req as any);
+  return handler(req as any);
 }
 
 export async function POST(req: Request) {
   if (!isAuthConfigured()) {
     return NextResponse.json({ error: "not_configured" }, { status: 503 });
   }
-  return nextAuthHandler(req as any);
+  return handler(req as any);
 }
