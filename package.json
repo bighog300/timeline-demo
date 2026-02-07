@@ -10,6 +10,7 @@
   "scripts": {
     "dev:web": "pnpm --filter ./apps/web dev",
     "preflight": "node scripts/preflight.mjs",
+    "verify:auth-routing": "node scripts/verify-auth-routing.mjs",
     "validate:env": "node scripts/validate-env.mjs --target all",
     "validate:env:web": "node scripts/validate-env.mjs --target web",
     "smoke": "bash scripts/smoke-test.sh",
