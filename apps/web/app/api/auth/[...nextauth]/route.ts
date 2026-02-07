@@ -1,22 +1,17 @@
-import NextAuth from 'next-auth';
-import { NextResponse } from 'next/server';
+import NextAuth from "next-auth";
+import Google from "next-auth/providers/google";
 
-import { authOptions, isAuthConfigured } from '../../../lib/googleAuth';
+export const authOptions = {
+  providers: [
+    Google({
+      clientId: process.env.GOOGLE_OAUTH_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET!,
+    }),
+  ],
+  secret: process.env.NEXTAUTH_SECRET,
+  trustHost: true,
+};
 
 const handler = NextAuth(authOptions);
 
-export const GET = async (request: Request) => {
-  if (!isAuthConfigured()) {
-    return NextResponse.json({ error: 'not_configured' }, { status: 503 });
-  }
-
-  return handler(request);
-};
-
-export const POST = async (request: Request) => {
-  if (!isAuthConfigured()) {
-    return NextResponse.json({ error: 'not_configured' }, { status: 503 });
-  }
-
-  return handler(request);
-};
+export { handler as GET, handler as POST };
