@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 
 // IMPORTANT: do NOT export authOptions from an App Router route module.
 // Next.js will fail the build if you export non-route fields.
-const authOptions: NextAuthOptions = {
+const authOptions = {
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",
@@ -18,7 +18,7 @@ const authOptions: NextAuthOptions = {
   secret: process.env.NEXTAUTH_SECRET,
   // In Vercel, trustHost avoids host/header issues
   trustHost: true,
-};
+} as NextAuthOptions;
 
 const handler = NextAuth(authOptions);
 
