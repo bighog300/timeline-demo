@@ -354,6 +354,46 @@ describe('TimelinePageClient', () => {
     });
   });
 
+  it('syncs artifacts since the last sync when available', async () => {
+    setSelections();
+    const lastSyncISO = '2024-02-10T00:00:00.000Z';
+    window.localStorage.setItem('timeline.lastSyncISO', lastSyncISO);
+
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url === '/api/timeline/index/get') {
+        return new Response(JSON.stringify({ index: null }), { status: 200 });
+      }
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (
+        url ===
+        `/api/timeline/artifacts/list?since=${encodeURIComponent(lastSyncISO)}`
+      ) {
+        return new Response(JSON.stringify({ artifacts: [syncArtifact], files: [] }), {
+          status: 200,
+        });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /sync from drive/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /sync from drive/i }));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith(
+        `/api/timeline/artifacts/list?since=${encodeURIComponent(lastSyncISO)}`,
+      );
+      expect(screen.getByText(/since last sync/i)).toBeInTheDocument();
+    });
+  });
+
   it('renders search results from Drive-scoped search', async () => {
     mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {
