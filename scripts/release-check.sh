@@ -17,6 +17,7 @@ run_step() {
 run_step "Enable Corepack" corepack enable
 run_step "Activate pnpm 9.15.9" corepack prepare pnpm@9.15.9 --activate
 run_step "Install dependencies" pnpm install --frozen-lockfile
+run_step "Verify auth routing" node scripts/verify-auth-routing.mjs
 run_step "Run tests" pnpm test
 run_step "Vercel build" pnpm run vercel:build
 run_step "Verify build" node scripts/verify-build.mjs

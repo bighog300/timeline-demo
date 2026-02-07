@@ -68,6 +68,23 @@ if ! printf '%s' "${health}" | node -e 'const fs=require("fs");const data=JSON.p
 fi
 echo "✅ /api/health ok"
 
+auth_providers=$(curl -sS "${BASE_URL}/api/auth/providers" -w "\n%{http_code}") || true
+auth_providers_body=$(printf '%s' "${auth_providers}" | sed '$d')
+auth_providers_status=$(printf '%s' "${auth_providers}" | tail -n 1)
+if [[ "${auth_providers_status}" == "500" ]]; then
+  fail_response "Auth providers (unauth)" "${auth_providers_body}"
+fi
+if [[ "${auth_providers_status}" == "503" ]]; then
+  if ! printf '%s' "${auth_providers_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (data?.error !== "not_configured") process.exit(1);'; then
+    fail_response "Auth providers (unauth)" "${auth_providers_body}"
+  fi
+  echo "✅ /api/auth/providers not_configured ok"
+elif [[ "${auth_providers_status}" == "200" ]]; then
+  echo "✅ /api/auth/providers ok"
+else
+  fail_response "Auth providers (unauth)" "${auth_providers_body}"
+fi
+
 events=$(curl -fsS "${BASE_URL}/api/events") || fail_response "Events" ""
 if ! printf '%s' "${events}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!Array.isArray(data)) process.exit(1);'; then
   fail_response "Events" "${events}"

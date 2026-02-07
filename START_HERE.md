@@ -44,6 +44,12 @@ node scripts/verify-build.mjs
 bash scripts/smoke-test.sh
 ```
 
+## Auth Routing Guardrail (Required)
+- **NextAuth v4 is locked to the Pages Router** (`apps/web/pages/api/auth/[...nextauth].ts`).
+- **Do not add App Router auth routes** (e.g. `apps/web/app/api/auth/*`). These cause a
+  `req.query.nextauth` crash and OAuth callback 500s in production.
+- Guardrail: `node scripts/verify-auth-routing.mjs` (also runs in `scripts/release-check.sh`).
+
 ## Quickstart (with Google creds)
 
 **Required env vars** (local `.env` or Vercel environment settings):
