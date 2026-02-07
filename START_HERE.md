@@ -25,6 +25,13 @@ storage, standardized errors, indexing, and operational hardening.
 - **Drive-backed ownership**: Google Drive folder is the source of truth.
 - **DB is optional/cache only**: any local DB is treated as a cache; Drive artifacts are canonical.
 
+## Privacy & Data Handling
+- **What is processed**: Gmail + Drive content is fetched only for items the user selects; no background scanning.
+- **Stored in Drive**: summaries (`.md` + `.json`), selection sets, and the timeline index inside the app-managed folder.
+- **Stored locally**: browser localStorage caches for selections, recent summaries, and last sync timestamp.
+- **Cached only**: UI preferences (filters, grouping, auto-sync) stay in the browser.
+- **Logging**: request IDs and timings only. Tokens, file contents, and full request bodies are never logged.
+
 ## Quickstart (Local)
 
 ```bash

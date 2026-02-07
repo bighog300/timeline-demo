@@ -8,6 +8,7 @@ import { fetchDriveFileText, fetchGmailMessageText } from '../../../lib/fetchSou
 import { checkRateLimit, getRateLimitKey } from '../../../lib/rateLimit';
 import { summarizeDeterministic } from '../../../lib/summarize';
 import type { SummaryArtifact } from '../../../lib/types';
+import { PayloadLimitError } from '../../../lib/driveSafety';
 import { writeArtifactToDrive } from '../../../lib/writeArtifactToDrive';
 import { hashUserHint, logError, logInfo, safeError, time } from '../../../lib/logger';
 import { createCtx, withRequestId } from '../../../lib/requestContext';
@@ -130,12 +131,7 @@ export const POST = async (request: NextRequest) => {
         version: 1,
       };
 
-      const driveResult = await writeArtifactToDrive(
-        drive,
-        driveFolderId,
-        artifact,
-        ctx,
-      );
+      const driveResult = await writeArtifactToDrive(drive, driveFolderId, artifact, ctx);
 
       artifacts.push({
         ...artifact,
@@ -143,6 +139,15 @@ export const POST = async (request: NextRequest) => {
         driveWebViewLink: driveResult.markdownWebViewLink,
       });
     } catch (error) {
+      if (error instanceof PayloadLimitError) {
+        return respond(
+          jsonError(
+            400,
+            'invalid_request',
+            `${error.label} is too large to store in Drive. Trim the selection and try again.`,
+          ),
+        );
+      }
       logError(ctx, 'summarize_item_failed', {
         source: item.source,
         error: safeError(error),

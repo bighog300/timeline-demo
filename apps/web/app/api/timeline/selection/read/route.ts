@@ -4,6 +4,7 @@ import { jsonError } from '../../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../../lib/googleAuth';
 import { createDriveClient } from '../../../../lib/googleDrive';
 import { logGoogleError, mapGoogleError } from '../../../../lib/googleRequest';
+import { OutsideFolderError } from '../../../../lib/driveSafety';
 import { readSelectionSetFromDrive } from '../../../../lib/readSelectionSetFromDrive';
 import { hashUserHint, logError, logInfo, safeError, time } from '../../../../lib/logger';
 import { createCtx, withRequestId } from '../../../../lib/requestContext';
@@ -50,6 +51,11 @@ export const GET = async (request: NextRequest) => {
 
     return respond(NextResponse.json({ set: selectionSet }));
   } catch (error) {
+    if (error instanceof OutsideFolderError) {
+      return respond(
+        jsonError(403, 'forbidden_outside_folder', 'Selection set is outside the app folder.'),
+      );
+    }
     logGoogleError(error, 'drive.files.get', ctx);
     const mapped = mapGoogleError(error, 'drive.files.get');
     logError(ctx, 'request_error', {

@@ -1,6 +1,7 @@
 import ConnectPageClient from './pageClient';
-import { isAuthConfigured } from '../lib/googleAuth';
+import { getGoogleScopeStatus, isAuthConfigured } from '../lib/googleAuth';
 
 export default function ConnectPage() {
-  return <ConnectPageClient isConfigured={isAuthConfigured()} />;
+  const scopeStatus = getGoogleScopeStatus();
+  return <ConnectPageClient isConfigured={isAuthConfigured()} scopeStatus={scopeStatus} />;
 }

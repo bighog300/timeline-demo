@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { jsonError } from '../../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../../lib/googleAuth';
 import { createDriveClient } from '../../../../lib/googleDrive';
+import { OutsideFolderError, PayloadLimitError } from '../../../../lib/driveSafety';
 import { logGoogleError, mapGoogleError } from '../../../../lib/googleRequest';
 import { checkRateLimit, getRateLimitKey } from '../../../../lib/rateLimit';
 import { readSelectionSetFromDrive } from '../../../../lib/readSelectionSetFromDrive';
@@ -149,6 +150,15 @@ export const POST = async (request: NextRequest) => {
         readSelectionSetFromDrive(drive, driveFolderId, existingDriveFileId, ctx),
       );
     } catch (error) {
+      if (error instanceof OutsideFolderError) {
+        return respond(
+          jsonError(
+            403,
+            'forbidden_outside_folder',
+            'Selection set is outside the app folder.',
+          ),
+        );
+      }
       logGoogleError(error, 'drive.files.get', ctx);
       const mapped = mapGoogleError(error, 'drive.files.get');
       logError(ctx, 'request_error', {
@@ -175,6 +185,15 @@ export const POST = async (request: NextRequest) => {
   try {
     writeResult = await writeSelectionSetToDrive(drive, driveFolderId, selectionSet, ctx);
   } catch (error) {
+    if (error instanceof PayloadLimitError) {
+      return respond(
+        jsonError(
+          400,
+          'invalid_request',
+          `${error.label} is too large to store in Drive. Reduce the selection size and try again.`,
+        ),
+      );
+    }
     logGoogleError(error, 'drive.files.create', ctx);
     const mapped = mapGoogleError(error, 'drive.files.create');
     logError(ctx, 'request_error', {

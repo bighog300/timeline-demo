@@ -479,3 +479,15 @@
   text-align: center;
   padding: 32px;
 }
+
+.noticeCard {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.noticeActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}

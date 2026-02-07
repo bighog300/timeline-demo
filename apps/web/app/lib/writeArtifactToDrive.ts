@@ -4,17 +4,13 @@ import { DEFAULT_GOOGLE_TIMEOUT_MS, withRetry, withTimeout } from './googleReque
 import type { LogContext } from './logger';
 import { time } from './logger';
 import type { SummaryArtifact } from './types';
+import { assertPayloadWithinLimit, sanitizeDriveFileName } from './driveSafety';
 
 type DriveWriteResult = {
   markdownFileId: string;
   markdownWebViewLink?: string;
   jsonFileId: string;
   jsonWebViewLink?: string;
-};
-
-const safeFileName = (value: string) => {
-  const sanitized = value.replace(/[\\/:*?"<>|]/g, '').trim();
-  return sanitized || 'Timeline Item';
 };
 
 const buildMetadataLines = (artifact: SummaryArtifact) => {
@@ -66,9 +62,14 @@ export const writeArtifactToDrive = async (
   artifact: SummaryArtifact,
   ctx?: LogContext,
 ): Promise<DriveWriteResult> => {
-  const baseName = safeFileName(artifact.title);
+  const baseName = sanitizeDriveFileName(artifact.title, 'Timeline Item');
   const markdownName = `${baseName} - Summary.md`;
   const jsonName = `${baseName} - Summary.json`;
+  const markdownPayload = buildMarkdown(artifact);
+  const jsonPayload = JSON.stringify(artifact, null, 2);
+
+  assertPayloadWithinLimit(markdownPayload, 'Summary markdown payload');
+  assertPayloadWithinLimit(jsonPayload, 'Summary JSON payload');
 
   const markdownOperation = () =>
     withRetry(
@@ -84,7 +85,7 @@ export const writeArtifactToDrive = async (
                 },
                 media: {
                   mimeType: 'text/markdown',
-                  body: buildMarkdown(artifact),
+                  body: markdownPayload,
                 },
                 fields: 'id, webViewLink, name',
               },
@@ -114,7 +115,7 @@ export const writeArtifactToDrive = async (
                 },
                 media: {
                   mimeType: 'application/json',
-                  body: JSON.stringify(artifact, null, 2),
+                  body: jsonPayload,
                 },
                 fields: 'id, webViewLink, name',
               },

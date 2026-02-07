@@ -102,7 +102,9 @@ export const GET = async (request: NextRequest) => {
 
   const parents = metaResponse.data.parents ?? [];
   if (!parents.includes(driveFolderId)) {
-    return respond(jsonError(400, 'invalid_request', 'Artifact not found.'));
+    return respond(
+      jsonError(403, 'forbidden_outside_folder', 'Artifact is outside the app folder.'),
+    );
   }
 
   let contentResponse;

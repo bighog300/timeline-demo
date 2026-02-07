@@ -4,17 +4,12 @@ import { DEFAULT_GOOGLE_TIMEOUT_MS, withRetry, withTimeout } from './googleReque
 import type { LogContext } from './logger';
 import { time } from './logger';
 import type { SelectionSet } from './types';
+import { assertPayloadWithinLimit, sanitizeDriveFileName } from './driveSafety';
 
 type SelectionSetWriteResult = {
   driveFileId: string;
   driveWebViewLink?: string;
   modifiedTime?: string;
-};
-
-const safeFileName = (value: string) => {
-  const sanitized = value.replace(/[\\/:*?"<>|]/g, '').trim();
-  const truncated = sanitized.slice(0, 80);
-  return truncated || 'Timeline Selection';
 };
 
 export const writeSelectionSetToDrive = async (
@@ -23,9 +18,11 @@ export const writeSelectionSetToDrive = async (
   selectionSet: SelectionSet,
   ctx?: LogContext,
 ): Promise<SelectionSetWriteResult> => {
-  const baseName = safeFileName(selectionSet.name);
+  const baseName = sanitizeDriveFileName(selectionSet.name, 'Timeline Selection');
   const jsonName = `${baseName} - Selection.json`;
   const payload = JSON.stringify(selectionSet, null, 2);
+
+  assertPayloadWithinLimit(payload, 'Selection set payload');
 
   if (selectionSet.driveFileId) {
     const updateOperation = () =>

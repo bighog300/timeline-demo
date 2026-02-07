@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 export type ApiErrorCode =
   | 'reconnect_required'
   | 'drive_not_provisioned'
+  | 'forbidden_outside_folder'
   | 'query_too_short'
   | 'rate_limited'
   | 'upstream_timeout'
