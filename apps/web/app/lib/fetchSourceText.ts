@@ -5,6 +5,7 @@ import { normalizeWhitespace, stripHtml, trimQuotedReplies } from './gmailText';
 import { DEFAULT_GOOGLE_TIMEOUT_MS, withRetry, withTimeout } from './googleRequest';
 import type { LogContext } from './logger';
 import { time } from './logger';
+import { ocrPdfToText } from './googleDrive';
 import type { SourceMetadata } from './types';
 
 type SourceText = {
@@ -54,6 +55,41 @@ const parseDateISO = (value?: string | null) => {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+};
+
+const DEFAULT_PDF_OCR_MAX_BYTES = 10 * 1024 * 1024;
+
+const parseEnvBoolean = (value?: string) => {
+  if (!value) {
+    return false;
+  }
+  return ['true', '1', 'yes', 'on'].includes(value.trim().toLowerCase());
+};
+
+const getPdfOcrMaxBytes = () => {
+  const raw = process.env.PDF_OCR_MAX_BYTES;
+  if (!raw) {
+    return DEFAULT_PDF_OCR_MAX_BYTES;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_PDF_OCR_MAX_BYTES;
+};
+
+const buildPdfPlaceholder = ({
+  name,
+  webViewLink,
+  note,
+}: {
+  name: string;
+  webViewLink?: string;
+  note: string;
+}) => {
+  const base = buildUnsupportedPlaceholder({
+    name,
+    mimeType: 'application/pdf',
+    webViewLink,
+  });
+  return `${base}\n${note}`;
 };
 
 export const fetchGmailMessageText = async (
@@ -125,6 +161,7 @@ export const fetchGmailMessageText = async (
 export const fetchDriveFileText = async (
   drive: drive_v3.Drive,
   fileId: string,
+  folderId: string,
   ctx?: LogContext,
 ): Promise<SourceText> => {
   const metadataOperation = () =>
@@ -135,7 +172,7 @@ export const fetchDriveFileText = async (
             drive.files.get(
               {
                 fileId,
-                fields: 'id, name, mimeType, modifiedTime, webViewLink',
+                fields: 'id, name, mimeType, modifiedTime, webViewLink, size',
               },
               { signal: timeoutSignal },
             ),
@@ -164,6 +201,7 @@ export const fetchDriveFileText = async (
     mimeType === 'text/plain' || mimeType === 'text/markdown' || mimeType === 'text/x-markdown';
   const isJson = mimeType === 'application/json';
   const isCsv = mimeType === 'text/csv';
+  const isPdf = mimeType === 'application/pdf';
 
   if (isGoogleDoc) {
     const exportOperation = () =>
@@ -210,6 +248,49 @@ export const fetchDriveFileText = async (
     const rawText = typeof response.data === 'string' ? response.data : '';
     const text = isJson ? normalizeJsonText(rawText) : rawText;
     return { title, text: truncateText(text), dateISO, metadata: sourceMetadata };
+  }
+
+  if (isPdf) {
+    const sizeBytes = metadata.data.size ? Number(metadata.data.size) : undefined;
+    const maxBytes = getPdfOcrMaxBytes();
+    if (typeof sizeBytes === 'number' && Number.isFinite(sizeBytes) && sizeBytes > maxBytes) {
+      return {
+        title,
+        text: buildPdfPlaceholder({
+          name: title,
+          webViewLink: metadata.data.webViewLink ?? undefined,
+          note: 'PDF is too large for OCR in this flow (too_large). Please choose a smaller PDF.',
+        }),
+        dateISO,
+        metadata: sourceMetadata,
+      };
+    }
+
+    try {
+      const ocrLanguage = process.env.DRIVE_OCR_LANGUAGE?.trim() || 'en';
+      const keepOcrDoc = parseEnvBoolean(process.env.DRIVE_KEEP_OCR_DOC);
+      const { text } = await ocrPdfToText({
+        drive,
+        fileId,
+        folderId,
+        filename: title,
+        ocrLanguage,
+        keepOcrDoc,
+        ctx,
+      });
+      return { title, text: truncateText(text), dateISO, metadata: sourceMetadata };
+    } catch {
+      return {
+        title,
+        text: buildPdfPlaceholder({
+          name: title,
+          webViewLink: metadata.data.webViewLink ?? undefined,
+          note: 'Could not extract text via OCR. Open the PDF in Drive and export it to Google Docs.',
+        }),
+        dateISO,
+        metadata: sourceMetadata,
+      };
+    }
   }
 
   return {
