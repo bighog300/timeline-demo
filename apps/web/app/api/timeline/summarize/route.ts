@@ -100,7 +100,7 @@ export const POST = async (request: NextRequest) => {
       const content =
         item.source === 'gmail'
           ? await fetchGmailMessageText(gmail, item.id, ctx)
-          : await fetchDriveFileText(drive, item.id, ctx);
+          : await fetchDriveFileText(drive, item.id, driveFolderId, ctx);
 
       const { summary, highlights } = await time(ctx, 'summarize', async () =>
         summarizeDeterministic({
