@@ -510,7 +510,10 @@ export default function TimelinePageClient() {
     setSyncMessage(null);
 
     try {
-      const response = await fetch('/api/timeline/artifacts/list');
+      const syncUrl = lastSyncISO
+        ? `/api/timeline/artifacts/list?since=${encodeURIComponent(lastSyncISO)}`
+        : '/api/timeline/artifacts/list';
+      const response = await fetch(syncUrl);
 
       if (!response.ok) {
         const apiError = await parseApiError(response);
@@ -551,14 +554,15 @@ export default function TimelinePageClient() {
       const now = new Date().toISOString();
       window.localStorage.setItem(LAST_SYNC_KEY, now);
       setLastSyncISO(now);
-      setSyncMessage(`Synced ${validArtifacts.length} artifacts from Drive`);
+      const syncSuffix = lastSyncISO ? ' since last sync' : '';
+      setSyncMessage(`Synced ${validArtifacts.length} artifacts from Drive${syncSuffix}`);
     } catch {
       setSyncError('generic');
       setSyncRequestId(null);
     } finally {
       setIsSyncing(false);
     }
-  }, []);
+  }, [lastSyncISO]);
 
   useEffect(() => {
     if (!hasHydrated || !autoSyncOnOpen) {

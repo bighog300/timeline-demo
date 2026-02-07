@@ -46,6 +46,19 @@ const parseDriveJson = (data: unknown): unknown => {
   return data;
 };
 
+const parseSinceParam = (value: string | null) => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
+};
+
 export const GET = async (request: NextRequest) => {
   const ctx = createCtx(request, '/api/timeline/artifacts/list');
   const startedAt = Date.now();
@@ -83,6 +96,8 @@ export const GET = async (request: NextRequest) => {
 
   const pageToken = request.nextUrl.searchParams.get('pageToken') ?? undefined;
   const pageSize = Number(request.nextUrl.searchParams.get('pageSize')) || DEFAULT_PAGE_SIZE;
+  const sinceDate = parseSinceParam(request.nextUrl.searchParams.get('since'));
+  const sinceISO = sinceDate ? sinceDate.toISOString() : null;
 
   const drive = createDriveClient(accessToken);
 
@@ -98,11 +113,20 @@ export const GET = async (request: NextRequest) => {
       if (index) {
         fromIndex = true;
         indexStale = !isIndexFresh(index, new Date(), DEFAULT_INDEX_MAX_AGE_MINUTES);
+        const summaries = sinceDate
+          ? index.summaries.filter((summary) => {
+              if (!summary.updatedAtISO) {
+                return false;
+              }
+              const updatedAtMs = new Date(summary.updatedAtISO).getTime();
+              return Number.isFinite(updatedAtMs) && updatedAtMs > sinceDate.getTime();
+            })
+          : index.summaries;
         const startIndex = pageToken ? Number(pageToken) : 0;
         const safeStartIndex = Number.isFinite(startIndex) && startIndex >= 0 ? startIndex : 0;
-        const page = index.summaries.slice(safeStartIndex, safeStartIndex + pageSize);
+        const page = summaries.slice(safeStartIndex, safeStartIndex + pageSize);
         nextPageToken =
-          safeStartIndex + pageSize < index.summaries.length
+          safeStartIndex + pageSize < summaries.length
             ? String(safeStartIndex + pageSize)
             : undefined;
         files = page.map((summary) => ({
@@ -134,7 +158,9 @@ export const GET = async (request: NextRequest) => {
               (timeoutSignal) =>
                 drive.files.list(
                   {
-                    q: `'${driveFolderId}' in parents and trashed=false`,
+                    q: `'${driveFolderId}' in parents and trashed=false${
+                      sinceISO ? ` and modifiedTime > '${sinceISO}'` : ''
+                    }`,
                     orderBy: 'modifiedTime desc',
                     pageSize,
                     pageToken,
