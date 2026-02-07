@@ -8,8 +8,8 @@ export default function HomePage() {
         <p>Welcome to the Timeline Demo.</p>
         <h1 className={styles.heroTitle}>A polished front-end for timeline-aware experiences.</h1>
         <p>
-          Navigate across events, calendar snapshots, and chat to see how the mock APIs power the
-          UI. Every panel handles loading, errors, and empty states gracefully.
+          Navigate across calendar snapshots, chat, and the timeline to see how the mock APIs power
+          the UI. Every panel handles loading, errors, and empty states gracefully.
         </p>
       </div>
       <HomeClient />

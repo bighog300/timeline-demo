@@ -1,16 +1,7 @@
 type ChatResponse = {
   reply: string;
   suggested_actions: string[];
-  related_events: Array<{ id: string; title: string }>;
 };
-
-const relatedEventCatalog = [
-  { id: 'evt-1', title: 'City Lights Gallery Walk', keywords: ['gallery', 'exhibition'] },
-  { id: 'evt-2', title: 'Saturday Jazz Social', keywords: ['weekend', 'music'] },
-  { id: 'evt-6', title: 'Museum Late Hours', keywords: ['museum', 'exhibition', 'gallery'] },
-  { id: 'evt-7', title: 'Sunday Farmers Market', keywords: ['weekend', 'market'] },
-  { id: 'evt-9', title: 'Outdoor Movie Night', keywords: ['movie', 'night'] },
-];
 
 const uniqueActions = (actions: string[]) => Array.from(new Set(actions));
 
@@ -23,10 +14,9 @@ const buildChatResponse = (message: string): ChatResponse => {
       suggested_actions: [
         'Show me what’s happening today',
         'Plan a weekend itinerary',
-        'Find gallery exhibitions',
+        'Summarize my timeline',
         'Suggest a low-cost activity',
       ],
-      related_events: [],
     };
   }
 
@@ -37,7 +27,7 @@ const buildChatResponse = (message: string): ChatResponse => {
 
   let reply = `Here’s a starting point based on “${message}.”`;
   let suggestedActions = [
-    'See upcoming events',
+    'See upcoming priorities',
     'Check my calendar',
     'Share highlights for this week',
   ];
@@ -46,22 +36,22 @@ const buildChatResponse = (message: string): ChatResponse => {
     reply = 'Weekend planning mode on. Want cultural, food, or outdoor picks?';
     suggestedActions = [
       'Build a weekend lineup',
-      'Find outdoor events',
+      'Find outdoor activities',
       'Show live music options',
-      'Browse farmers markets',
+      'Browse local markets',
     ];
   } else if (hasToday || hasTomorrow) {
     reply = hasToday
-      ? 'For today, I can pull quick events and reminders.'
+      ? 'For today, I can pull quick reminders and priorities.'
       : 'For tomorrow, I can line up morning, afternoon, and evening ideas.';
     suggestedActions = [
-      'Show top events',
+      'Show top priorities',
       'See quick calendar highlights',
-      'Suggest a dinner + event combo',
+      'Suggest a dinner + activity combo',
       hasTomorrow ? 'Plan a morning activity' : 'Plan an evening activity',
     ];
   } else if (hasGallery) {
-    reply = 'Looking for exhibitions? I can surface nearby gallery walks and museum late hours.';
+    reply = 'Looking for exhibitions? I can surface galleries and museum late hours.';
     suggestedActions = [
       'Find gallery walks',
       'List museum late hours',
@@ -70,15 +60,9 @@ const buildChatResponse = (message: string): ChatResponse => {
     ];
   }
 
-  const related_events = relatedEventCatalog
-    .filter((eventItem) => eventItem.keywords.some((keyword) => normalized.includes(keyword)))
-    .slice(0, 3)
-    .map(({ id, title }) => ({ id, title }));
-
   return {
     reply,
     suggested_actions: uniqueActions(suggestedActions),
-    related_events,
   };
 };
 

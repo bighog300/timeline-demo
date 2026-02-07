@@ -17,7 +17,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
                 </Link>
                 <nav className="app-nav" aria-label="Primary">
                   <Link href="/">Home</Link>
-                  <Link href="/events">Events</Link>
                   <Link href="/calendar">Calendar</Link>
                   <Link href="/chat">Chat</Link>
                   <Link href="/connect">Connect</Link>
