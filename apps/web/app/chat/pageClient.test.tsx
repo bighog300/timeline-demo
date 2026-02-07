@@ -22,8 +22,7 @@ describe('ChatPageClient', () => {
       new Response(
         JSON.stringify({
           reply: 'Here is a tailored suggestion.',
-          suggested_actions: ['Show me events', 'Help me plan a week'],
-          related_events: [{ id: 'event-1', title: 'Launch party' }],
+          suggested_actions: ['Show priorities', 'Help me plan a week'],
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
@@ -37,11 +36,11 @@ describe('ChatPageClient', () => {
     fireEvent.change(input, { target: { value: 'Hello there' } });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
 
-    const suggestion = await screen.findByRole('button', { name: /show me events/i });
+    const suggestion = await screen.findByRole('button', { name: /show priorities/i });
     fireEvent.click(suggestion);
 
     await waitFor(() => {
-      expect((input as HTMLInputElement).value).toBe('Show me events');
+      expect((input as HTMLInputElement).value).toBe('Show priorities');
     });
 
   });
@@ -52,7 +51,6 @@ describe('ChatPageClient', () => {
         JSON.stringify({
           reply: 'Saved response.',
           suggested_actions: ['Next steps'],
-          related_events: [{ id: 'event-2', title: 'Roadmap review' }],
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
@@ -87,7 +85,6 @@ describe('ChatPageClient', () => {
         JSON.stringify({
           reply: 'Temporary response.',
           suggested_actions: [],
-          related_events: [],
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       ),
