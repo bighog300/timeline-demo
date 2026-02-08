@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
@@ -38,6 +39,7 @@ const dateFormatter = new Intl.DateTimeFormat('en-US', {
   weekday: 'short',
   month: 'short',
   day: 'numeric',
+  year: 'numeric',
 });
 
 const timeFormatter = new Intl.DateTimeFormat('en-US', {
@@ -53,6 +55,22 @@ const formatDateLabel = (value: string) => {
   return dateFormatter.format(date);
 };
 
+const toLocalDayKey = (value: string) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) {
+    return value;
+  }
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+type CalendarGroup = {
+  label: string;
+  items: CalendarDisplayItem[];
+};
+
 const formatTimeRange = (start: string, end: string, allDay: boolean) => {
   if (allDay) {
     return 'All day';
@@ -66,6 +84,7 @@ const formatTimeRange = (start: string, end: string, allDay: boolean) => {
 };
 
 export default function CalendarPageClient() {
+  const router = useRouter();
   const [items, setItems] = useState<CalendarDisplayItem[]>([]);
   const [selectedEntry, setSelectedEntry] = useState<CalendarEntry | null>(null);
   const [showEntries, setShowEntries] = useState(true);
@@ -118,7 +137,7 @@ export default function CalendarPageClient() {
       }));
 
       const summaryItems: CalendarDisplayItem[] = summaries.map((artifact) => ({
-        id: artifact.driveFileId || artifact.artifactId,
+        id: artifact.driveFileId ? artifact.driveFileId : artifact.artifactId,
         title: artifact.title || artifact.sourceMetadata?.subject || 'Timeline summary',
         startISO: artifact.createdAtISO,
         endISO: artifact.createdAtISO,
@@ -153,14 +172,21 @@ export default function CalendarPageClient() {
       return showSummaries;
     });
 
-    return filtered.reduce<Record<string, CalendarDisplayItem[]>>((acc, item) => {
-      const dateKey = formatDateLabel(item.startISO);
-      acc[dateKey] = acc[dateKey] ? [...acc[dateKey], item] : [item];
+    return filtered.reduce<Record<string, CalendarGroup>>((acc, item) => {
+      const dateKey = toLocalDayKey(item.startISO);
+      if (acc[dateKey]) {
+        acc[dateKey].items = [...acc[dateKey].items, item];
+        return acc;
+      }
+      acc[dateKey] = {
+        label: formatDateLabel(item.startISO),
+        items: [item],
+      };
       return acc;
     }, {});
   }, [items, showEntries, showSummaries]);
 
-  const dates = Object.keys(grouped);
+  const dates = Object.keys(grouped).sort((a, b) => a.localeCompare(b));
 
   return (
     <section className={styles.page}>
@@ -228,20 +254,20 @@ export default function CalendarPageClient() {
             {dates.map((dateKey) => (
               <Card key={dateKey}>
                 <div className={styles.dateRow}>
-                  <h2>{dateKey}</h2>
-                  <span className={styles.count}>{grouped[dateKey].length} sessions</span>
+                  <h2 data-testid="calendar-date" data-date-key={dateKey}>
+                    {grouped[dateKey].label}
+                  </h2>
+                  <span className={styles.count}>{grouped[dateKey].items.length} sessions</span>
                 </div>
                 <div className={styles.items}>
-                  {grouped[dateKey].map((item) => (
+                  {grouped[dateKey].items.map((item) => (
                     <div key={`${item.layer}-${item.id}`} className={styles.itemRow}>
                       <button
                         type="button"
                         className={styles.itemButton}
                         onClick={() => {
-                          if (item.layer === 'summary' && item.summary?.driveFileId) {
-                            window.location.assign(
-                              `/timeline?artifactId=${encodeURIComponent(item.summary.driveFileId)}`,
-                            );
+                          if (item.layer === 'summary') {
+                            router.push(`/timeline?artifactId=${encodeURIComponent(item.id)}`);
                             return;
                           }
                           if (item.entry) {
