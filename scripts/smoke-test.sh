@@ -95,6 +95,24 @@ if [[ "${calendar_page_status}" != "200" ]]; then
 fi
 echo "✅ /calendar page ok"
 
+events_page_status=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/events") || true
+if [[ "${events_page_status}" != "404" ]]; then
+  echo "❌ /events 404 check failed (status ${events_page_status})."
+  echo "--- Last 50 lines of ${LOG_FILE} ---"
+  tail -n 50 "${LOG_FILE}" || true
+  exit 1
+fi
+echo "✅ /events 404 ok"
+
+map_page_status=$(curl -s -o /dev/null -w "%{http_code}" "${BASE_URL}/map") || true
+if [[ "${map_page_status}" != "404" ]]; then
+  echo "❌ /map 404 check failed (status ${map_page_status})."
+  echo "--- Last 50 lines of ${LOG_FILE} ---"
+  tail -n 50 "${LOG_FILE}" || true
+  exit 1
+fi
+echo "✅ /map 404 ok"
+
 chat=$(curl -fsS -X POST "${BASE_URL}/api/chat" -H 'content-type: application/json' --data '{"message":"ping"}') || fail_response "Chat" ""
 if ! printf '%s' "${chat}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || typeof data.reply !== "string" || !Array.isArray(data.suggested_actions)) process.exit(1);'; then
   fail_response "Chat" "${chat}"
