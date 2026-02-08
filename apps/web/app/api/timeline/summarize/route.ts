@@ -135,8 +135,8 @@ export const POST = async (request: NextRequest) => {
 
       artifacts.push({
         ...artifact,
-        driveFileId: driveResult.markdownFileId,
-        driveWebViewLink: driveResult.markdownWebViewLink,
+        driveFileId: driveResult.jsonFileId,
+        driveWebViewLink: driveResult.jsonWebViewLink,
       });
     } catch (error) {
       if (error instanceof PayloadLimitError) {
