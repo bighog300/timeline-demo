@@ -13,11 +13,22 @@ type ChatMessage = {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  citations?: ChatCitation[];
+};
+
+type ChatCitation = {
+  artifactId: string;
+  title: string;
+  dateISO?: string;
+  kind: 'summary' | 'index' | 'selection_set';
 };
 
 type ChatResponse = {
   reply: string;
+  citations?: ChatCitation[];
   suggested_actions: string[];
+  provider?: { name: string; model: string };
+  requestId?: string;
 };
 
 type ChatStorage = {
@@ -104,7 +115,15 @@ export default function ChatPageClient() {
         });
 
         const data = (await response.json()) as ChatResponse;
-        setMessages((prev) => [...prev, createMessage('assistant', data.reply)].slice(-MAX_HISTORY));
+        setMessages((prev) =>
+          [
+            ...prev,
+            {
+              ...createMessage('assistant', data.reply),
+              citations: Array.isArray(data.citations) ? data.citations : [],
+            },
+          ].slice(-MAX_HISTORY),
+        );
         setSuggestions(Array.isArray(data.suggested_actions) ? data.suggested_actions : []);
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
@@ -189,6 +208,28 @@ export default function ChatPageClient() {
                   }
                 >
                   <p>{message.content}</p>
+                  {message.role === 'assistant' &&
+                  Array.isArray(message.citations) &&
+                  message.citations.length > 0 ? (
+                    <div className={styles.citations}>
+                      <p className={styles.citationsLabel}>Sources</p>
+                      <ul className={styles.citationsList}>
+                        {message.citations.map((citation, index) => (
+                          <li key={`${citation.artifactId}-${index}`}>
+                            <a
+                              href={`/timeline?artifactId=${encodeURIComponent(
+                                citation.artifactId,
+                              )}`}
+                              className={styles.citationLink}
+                            >
+                              {citation.title}
+                              {citation.dateISO ? ` (${citation.dateISO})` : ''}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                 </div>
               ))}
             </div>
