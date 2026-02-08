@@ -56,6 +56,33 @@ const buildMarkdown = (artifact: SummaryArtifact) => {
   return `# ${artifact.title}\n\n${artifact.summary}\n\n## Highlights\n${highlights || '- (none)'}${metadataSection}\n`;
 };
 
+const buildJsonPayload = (
+  artifact: SummaryArtifact,
+  overrides: { driveFileId?: string; driveWebViewLink?: string } = {},
+) => {
+  const driveFileId = overrides.driveFileId ?? artifact.driveFileId;
+  const driveWebViewLink = overrides.driveWebViewLink ?? artifact.driveWebViewLink;
+  return {
+    ...artifact,
+    driveFileId,
+    driveWebViewLink,
+    type: 'summary',
+    status: 'complete',
+    id: artifact.artifactId,
+    updatedAtISO: artifact.createdAtISO,
+    meta: {
+      mimeType: artifact.sourceMetadata?.mimeType,
+      driveFileId,
+      driveWebViewLink,
+      driveFolderId: artifact.driveFolderId,
+      source: artifact.source,
+      sourceId: artifact.sourceId,
+      model: artifact.model,
+      version: artifact.version,
+    },
+  };
+};
+
 export const writeArtifactToDrive = async (
   drive: drive_v3.Drive,
   folderId: string,
@@ -65,41 +92,14 @@ export const writeArtifactToDrive = async (
   const baseName = sanitizeDriveFileName(artifact.title, 'Timeline Item');
   const markdownName = `${baseName} - Summary.md`;
   const jsonName = `${baseName} - Summary.json`;
-  const markdownPayload = buildMarkdown(artifact);
-  const jsonPayload = JSON.stringify(artifact, null, 2);
+  const shouldWriteMarkdown = process.env.DRIVE_WRITE_SUMMARY_MD !== 'false';
+  const markdownPayload = shouldWriteMarkdown ? buildMarkdown(artifact) : '';
+  const initialJsonPayload = JSON.stringify(buildJsonPayload(artifact), null, 2);
 
-  assertPayloadWithinLimit(markdownPayload, 'Summary markdown payload');
-  assertPayloadWithinLimit(jsonPayload, 'Summary JSON payload');
-
-  const markdownOperation = () =>
-    withRetry(
-      (signal) =>
-        withTimeout(
-          (timeoutSignal) =>
-            drive.files.create(
-              {
-                requestBody: {
-                  name: markdownName,
-                  parents: [folderId],
-                  mimeType: 'text/markdown',
-                },
-                media: {
-                  mimeType: 'text/markdown',
-                  body: markdownPayload,
-                },
-                fields: 'id, webViewLink, name',
-              },
-              { signal: timeoutSignal },
-            ),
-          DEFAULT_GOOGLE_TIMEOUT_MS,
-          'upstream_timeout',
-          signal,
-        ),
-      { ctx },
-    );
-  const markdownResponse = ctx
-    ? await time(ctx, 'drive.files.create.summary_markdown', markdownOperation)
-    : await markdownOperation();
+  if (shouldWriteMarkdown) {
+    assertPayloadWithinLimit(markdownPayload, 'Summary markdown payload');
+  }
+  assertPayloadWithinLimit(initialJsonPayload, 'Summary JSON payload');
 
   const jsonOperation = () =>
     withRetry(
@@ -115,7 +115,7 @@ export const writeArtifactToDrive = async (
                 },
                 media: {
                   mimeType: 'application/json',
-                  body: jsonPayload,
+                  body: initialJsonPayload,
                 },
                 fields: 'id, webViewLink, name',
               },
@@ -131,10 +131,89 @@ export const writeArtifactToDrive = async (
     ? await time(ctx, 'drive.files.create.summary_json', jsonOperation)
     : await jsonOperation();
 
+  const jsonFileId = jsonResponse.data.id ?? '';
+  const jsonWebViewLink = jsonResponse.data.webViewLink ?? undefined;
+  const finalJsonPayload = JSON.stringify(
+    buildJsonPayload(artifact, {
+      driveFileId: jsonFileId,
+      driveWebViewLink: jsonWebViewLink,
+    }),
+    null,
+    2,
+  );
+
+  if (jsonFileId) {
+    const updateOperation = () =>
+      withRetry(
+        (signal) =>
+          withTimeout(
+            (timeoutSignal) =>
+              drive.files.update(
+                {
+                  fileId: jsonFileId,
+                  media: {
+                    mimeType: 'application/json',
+                    body: finalJsonPayload,
+                  },
+                  fields: 'id, webViewLink',
+                },
+                { signal: timeoutSignal },
+              ),
+            DEFAULT_GOOGLE_TIMEOUT_MS,
+            'upstream_timeout',
+            signal,
+          ),
+        { ctx },
+      );
+    const updateResponse = ctx
+      ? await time(ctx, 'drive.files.update.summary_json', updateOperation)
+      : await updateOperation();
+    if (updateResponse.data.webViewLink) {
+      jsonResponse.data.webViewLink = updateResponse.data.webViewLink;
+    }
+  }
+
+  let markdownFileId = '';
+  let markdownWebViewLink: string | undefined;
+
+  if (shouldWriteMarkdown) {
+    const markdownOperation = () =>
+      withRetry(
+        (signal) =>
+          withTimeout(
+            (timeoutSignal) =>
+              drive.files.create(
+                {
+                  requestBody: {
+                    name: markdownName,
+                    parents: [folderId],
+                    mimeType: 'text/markdown',
+                  },
+                  media: {
+                    mimeType: 'text/markdown',
+                    body: markdownPayload,
+                  },
+                  fields: 'id, webViewLink, name',
+                },
+                { signal: timeoutSignal },
+              ),
+            DEFAULT_GOOGLE_TIMEOUT_MS,
+            'upstream_timeout',
+            signal,
+          ),
+        { ctx },
+      );
+    const markdownResponse = ctx
+      ? await time(ctx, 'drive.files.create.summary_markdown', markdownOperation)
+      : await markdownOperation();
+    markdownFileId = markdownResponse.data.id ?? '';
+    markdownWebViewLink = markdownResponse.data.webViewLink ?? undefined;
+  }
+
   return {
-    markdownFileId: markdownResponse.data.id ?? '',
-    markdownWebViewLink: markdownResponse.data.webViewLink ?? undefined,
-    jsonFileId: jsonResponse.data.id ?? '',
+    markdownFileId,
+    markdownWebViewLink,
+    jsonFileId,
     jsonWebViewLink: jsonResponse.data.webViewLink ?? undefined,
   };
 };

@@ -157,6 +157,86 @@ describe('GET /api/timeline/artifacts/list', () => {
     );
   });
 
+  it('ignores markdown summary exports when listing artifacts', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'test@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockFindIndexFile.mockResolvedValue(null);
+
+    const listSpy = vi.fn().mockResolvedValue({
+      data: {
+        files: [
+          {
+            id: 'md-1',
+            name: 'Summary - Summary.md',
+            mimeType: 'text/markdown',
+            modifiedTime: '2024-02-01T00:00:00Z',
+          },
+        ],
+        nextPageToken: undefined,
+      },
+    });
+    const getSpy = vi.fn();
+    mockCreateDriveClient.mockReturnValue({
+      files: { list: listSpy, get: getSpy },
+    } as never);
+
+    const response = await GET(buildRequest('http://localhost/api/timeline/artifacts/list'));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.files).toHaveLength(0);
+    expect(payload.artifacts).toHaveLength(0);
+    expect(getSpy).not.toHaveBeenCalled();
+  });
+
+  it('prefers Summary.json when markdown exports are present', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'test@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockFindIndexFile.mockResolvedValue(null);
+
+    const listSpy = vi.fn().mockResolvedValue({
+      data: {
+        files: [
+          {
+            id: 'md-1',
+            name: 'Summary - Summary.md',
+            mimeType: 'text/markdown',
+            modifiedTime: '2024-02-01T00:00:00Z',
+          },
+          {
+            id: 'json-1',
+            name: 'Summary - Summary.json',
+            mimeType: 'application/json',
+            modifiedTime: '2024-02-02T00:00:00Z',
+          },
+        ],
+        nextPageToken: undefined,
+      },
+    });
+    const getSpy = vi.fn().mockResolvedValue({ data: buildArtifact({ driveFileId: 'json-1' }) });
+    mockCreateDriveClient.mockReturnValue({
+      files: { list: listSpy, get: getSpy },
+    } as never);
+
+    const response = await GET(buildRequest('http://localhost/api/timeline/artifacts/list'));
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.files).toHaveLength(1);
+    expect(payload.files[0].id).toBe('json-1');
+    expect(payload.artifacts).toHaveLength(1);
+    expect(getSpy).toHaveBeenCalledWith(
+      { fileId: 'json-1', alt: 'media' },
+      expect.objectContaining({ responseType: 'json' }),
+    );
+  });
+
   it('filters index summaries based on since', async () => {
     mockGetGoogleSession.mockResolvedValue({
       driveFolderId: 'folder-1',
