@@ -1,0 +1,80 @@
+.container {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.caption {
+  color: #5a6472;
+  margin: 0;
+}
+
+.notice {
+  color: #7a8699;
+}
+
+.error {
+  background: #fff4f4;
+  border: 1px solid #f3b4b4;
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #912626;
+}
+
+.requestId {
+  font-size: 12px;
+  color: #8a4f4f;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 600;
+  color: #2f3a4c;
+}
+
+.field input,
+.field textarea,
+.field select {
+  font-weight: 400;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #d6dbe5;
+  background: #fff;
+}
+
+.inline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+}
+
+.actions button {
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: none;
+  background: #2f5bff;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.actions button[disabled] {
+  background: #9db1ff;
+  cursor: default;
+}
