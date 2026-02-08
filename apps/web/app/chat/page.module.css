@@ -64,6 +64,41 @@
   justify-self: start;
 }
 
+.citations {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 6px;
+}
+
+.citationsLabel {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0;
+}
+
+.citationsList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.citationLink {
+  color: var(--primary);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.citationLink:hover,
+.citationLink:focus-visible {
+  text-decoration: underline;
+}
+
 .emptyState {
   padding: 20px;
   border-radius: 12px;
