@@ -13,7 +13,7 @@ type RetryOptions = {
 };
 
 const TRANSIENT_STATUSES = new Set([429, 500, 502, 503, 504]);
-export const DEFAULT_GOOGLE_TIMEOUT_MS = 8000;
+export const DEFAULT_GOOGLE_TIMEOUT_MS = 20000;
 
 class TimeoutError extends Error {
   code: ApiErrorCode;
@@ -100,6 +100,59 @@ const retryAfterFromError = (error: unknown) => {
   return null;
 };
 
+const upstreamErrorFromError = (error: unknown) => {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+
+  if ('response' in error) {
+    const response = (error as { response?: { data?: unknown } }).response;
+    const data = response?.data;
+    if (data && typeof data === 'object' && 'error' in data) {
+      const errorPayload = (data as { error?: Record<string, unknown> }).error;
+      if (errorPayload && typeof errorPayload === 'object') {
+        return {
+          code:
+            typeof errorPayload.code === 'string' || typeof errorPayload.code === 'number'
+              ? errorPayload.code
+              : undefined,
+          status: typeof errorPayload.status === 'string' ? errorPayload.status : undefined,
+          message: typeof errorPayload.message === 'string' ? errorPayload.message : undefined,
+          errors: Array.isArray(errorPayload.errors) ? errorPayload.errors : undefined,
+        };
+      }
+    }
+  }
+
+  return undefined;
+};
+
+const upstreamRequestIdFromError = (error: unknown) => {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+
+  if ('response' in error) {
+    const response = (error as { response?: { headers?: Record<string, string | number> } }).response;
+    const headers = response?.headers;
+    if (headers) {
+      const requestId =
+        headers['x-request-id'] ??
+        headers['x-goog-request-id'] ??
+        headers['x-google-request-id'] ??
+        headers['x-goog-uuid'];
+      if (typeof requestId === 'string') {
+        return requestId.slice(0, 120);
+      }
+      if (typeof requestId === 'number') {
+        return String(requestId);
+      }
+    }
+  }
+
+  return undefined;
+};
+
 export const withTimeout = async <T>(
   fn: (signal: AbortSignal) => Promise<T>,
   ms: number,
@@ -107,7 +160,11 @@ export const withTimeout = async <T>(
   signal?: AbortSignal,
 ): Promise<T> => {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), ms);
+  let didTimeout = false;
+  const timeoutId = setTimeout(() => {
+    didTimeout = true;
+    controller.abort();
+  }, ms);
 
   if (signal) {
     if (signal.aborted) {
@@ -120,7 +177,7 @@ export const withTimeout = async <T>(
   try {
     return await fn(controller.signal);
   } catch (error) {
-    if (controller.signal.aborted) {
+    if (didTimeout) {
       throw new TimeoutError('Request timed out', code);
     }
     throw error;
@@ -243,14 +300,24 @@ export const mapGoogleError = (
 
 export const logGoogleError = (error: unknown, requestName: string, ctx?: LogContext) => {
   const status = statusFromError(error);
+  const upstreamError = upstreamErrorFromError(error);
+  const upstreamRequestId = upstreamRequestIdFromError(error);
   if (ctx) {
     logError(ctx, 'google_request_failed', {
       request: requestName,
       status,
       error: safeError(error),
+      upstreamError,
+      upstreamRequestId,
     });
   } else {
     const shortMessage = error instanceof Error ? error.message.slice(0, 120) : 'unknown_error';
-    console.warn('Google API request failed', { request: requestName, status, message: shortMessage });
+    console.warn('Google API request failed', {
+      request: requestName,
+      status,
+      message: shortMessage,
+      upstreamError,
+      upstreamRequestId,
+    });
   }
 };
