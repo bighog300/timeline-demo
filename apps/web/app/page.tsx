@@ -8,8 +8,8 @@ export default function HomePage() {
         <p>Welcome to the Timeline Demo.</p>
         <h1 className={styles.heroTitle}>A polished front-end for timeline-aware experiences.</h1>
         <p>
-          Navigate across calendar snapshots, chat, and the timeline to see how the mock APIs power
-          the UI. Every panel handles loading, errors, and empty states gracefully.
+          Connect your accounts, pick the Gmail and Drive sources you want to summarize, then explore
+          Timeline and Calendar views that stay in sync with Drive-backed artifacts.
         </p>
       </div>
       <HomeClient />
