@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import TimelinePageClient from './pageClient';
 
 const mockUseSession = vi.fn();
+const pushMock = vi.fn();
 
 vi.mock('next-auth/react', () => ({
   useSession: () => mockUseSession(),
@@ -12,6 +13,9 @@ vi.mock('next-auth/react', () => ({
 
 vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({
+    push: pushMock,
+  }),
 }));
 
 const mockFetch = (handler: (url: string, init?: RequestInit) => Response) => {
@@ -139,6 +143,7 @@ describe('TimelinePageClient', () => {
   beforeEach(() => {
     window.localStorage.clear();
     vi.restoreAllMocks();
+    pushMock.mockClear();
     mockUseSession.mockReturnValue({
       data: { driveFolderId: 'folder-1' },
       status: 'authenticated',
@@ -327,6 +332,41 @@ describe('TimelinePageClient', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/too many requests/i)).toBeInTheDocument();
+    });
+  });
+
+  it('navigates to the new summary after summarize succeeds', async () => {
+    setSelections();
+    mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url === '/api/timeline/summarize') {
+        return new Response(JSON.stringify({ artifacts: [syncArtifact], failed: [] }), {
+          status: 200,
+        });
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    const scrollSpy = vi.fn();
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
+      cb(0);
+      return 0;
+    });
+    Element.prototype.scrollIntoView = scrollSpy;
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /generate summaries/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /generate summaries/i }));
+
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith(`/timeline?artifactId=${syncArtifact.driveFileId}`);
+      expect(scrollSpy).toHaveBeenCalled();
     });
   });
 

@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSession } from 'next-auth/react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
@@ -259,8 +259,11 @@ const selectionItemsToSelections = (
 
 export default function TimelinePageClient() {
   const { data: session, status } = useSession();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const jumpedArtifactRef = useRef<string | null>(null);
+  const syncAttemptedArtifactRef = useRef<string | null>(null);
+  const syncToastArtifactRef = useRef<string | null>(null);
   const [gmailSelections, setGmailSelections] = useState<GmailSelection[]>([]);
   const [driveSelections, setDriveSelections] = useState<DriveSelection[]>([]);
   const [artifacts, setArtifacts] = useState<Record<string, SummaryArtifact>>({});
@@ -304,6 +307,7 @@ export default function TimelinePageClient() {
   const [isSearching, setIsSearching] = useState(false);
   const [searchPartial, setSearchPartial] = useState(false);
   const searchAbortRef = useRef<AbortController | null>(null);
+  const [pendingArtifactId, setPendingArtifactId] = useState<string | null>(null);
   const [indexData, setIndexData] = useState<TimelineIndex | null>(null);
   const [indexStale, setIndexStale] = useState(false);
   const [isIndexLoading, setIsIndexLoading] = useState(false);
@@ -493,6 +497,10 @@ export default function TimelinePageClient() {
       if (payload.artifacts?.length) {
         const next = persistArtifacts(payload.artifacts, artifacts);
         setArtifacts(next);
+        const driveFileId = payload.artifacts.find((artifact) => artifact.driveFileId)?.driveFileId;
+        if (driveFileId) {
+          setPendingArtifactId(driveFileId);
+        }
       }
 
       if (payload.failed?.length) {
@@ -971,9 +979,10 @@ export default function TimelinePageClient() {
         return artifact.driveFileId === driveFileId;
       });
       if (!entry) {
-        return;
+        return false;
       }
       handleJumpToEntry(entry[0]);
+      return true;
     },
     [artifacts, handleJumpToEntry],
   );
@@ -1048,6 +1057,42 @@ export default function TimelinePageClient() {
     jumpToArtifactByDriveId(artifactId);
     jumpedArtifactRef.current = artifactId;
   }, [artifacts, jumpToArtifactByDriveId, searchParams]);
+
+  useEffect(() => {
+    if (!pendingArtifactId) {
+      return;
+    }
+
+    if (searchParams?.get('artifactId') !== pendingArtifactId) {
+      router.push(`/timeline?artifactId=${encodeURIComponent(pendingArtifactId)}`);
+    }
+
+    if (jumpToArtifactByDriveId(pendingArtifactId)) {
+      jumpedArtifactRef.current = pendingArtifactId;
+      setPendingArtifactId(null);
+      syncAttemptedArtifactRef.current = null;
+      syncToastArtifactRef.current = null;
+      return;
+    }
+
+    if (syncAttemptedArtifactRef.current !== pendingArtifactId) {
+      syncAttemptedArtifactRef.current = pendingArtifactId;
+      void handleSyncFromDrive();
+      return;
+    }
+
+    if (!isSyncing && syncToastArtifactRef.current !== pendingArtifactId) {
+      setSyncMessage('Summary created. Syncing from Drive…');
+      syncToastArtifactRef.current = pendingArtifactId;
+    }
+  }, [
+    handleSyncFromDrive,
+    isSyncing,
+    jumpToArtifactByDriveId,
+    pendingArtifactId,
+    router,
+    searchParams,
+  ]);
 
   useEffect(() => {
     const trimmed = searchQuery.trim();
