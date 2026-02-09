@@ -5,17 +5,11 @@ import { readAdminSettingsFromDrive } from '../../lib/adminSettingsDrive';
 import { buildContextPack, buildContextString } from '../../lib/chatContext';
 import { getGoogleAccessToken, getGoogleSession } from '../../lib/googleAuth';
 import { createDriveClient } from '../../lib/googleDrive';
-import {
-  DEFAULT_GOOGLE_TIMEOUT_MS,
-  logGoogleError,
-  mapGoogleError,
-  withRetry,
-  withTimeout,
-} from '../../lib/googleRequest';
+import { logGoogleError, mapGoogleError } from '../../lib/googleRequest';
 import { NotConfiguredError } from '../../lib/llm/errors';
 import { callLLM } from '../../lib/llm/index';
 import type { LLMProviderName } from '../../lib/llm/types';
-import { hashUserHint, logError, logInfo, logWarn, safeError, time } from '../../lib/logger';
+import { hashUserHint, logError, logInfo, logWarn, safeError } from '../../lib/logger';
 import { createCtx, withRequestId } from '../../lib/requestContext';
 
 type ChatCitation = {
@@ -86,41 +80,11 @@ const buildSuggestedActions = (message: string) => {
 const jsonChatError = (status: number, payload: ChatErrorResponse) =>
   NextResponse.json(payload, { status });
 
-const APP_DRIVE_FOLDER_NAME = 'Timeline Demo (App Data)';
-
-const resolveDriveFolderId = async (
-  drive: ReturnType<typeof createDriveClient>,
-  ctx: ReturnType<typeof createCtx>,
-  sessionFolderId?: string,
-) => {
-  if (sessionFolderId) {
-    return sessionFolderId;
-  }
-
-  const listResponse = await time(ctx, 'drive.files.list.app_folder', () =>
-    withRetry(
-      (signal) =>
-        withTimeout(
-          (timeoutSignal) =>
-            drive.files.list(
-              {
-                q: `mimeType = 'application/vnd.google-apps.folder' and name = '${APP_DRIVE_FOLDER_NAME}' and trashed = false`,
-                fields: 'files(id, name)',
-                spaces: 'drive',
-                pageSize: 1,
-              },
-              { signal: timeoutSignal },
-            ),
-          DEFAULT_GOOGLE_TIMEOUT_MS,
-          'upstream_timeout',
-          signal,
-        ),
-      { ctx },
-    ),
-  );
-
-  return listResponse.data.files?.[0]?.id ?? null;
-};
+const ensureAppDriveFolder = async (
+  _drive: ReturnType<typeof createDriveClient>,
+  _ctx: ReturnType<typeof createCtx>,
+  session: Awaited<ReturnType<typeof getGoogleSession>>,
+) => session?.driveFolderId ?? null;
 
 export async function POST(request: Request) {
   const ctx = createCtx(request, '/api/chat');
@@ -154,7 +118,7 @@ export async function POST(request: Request) {
   const drive = createDriveClient(accessToken);
   let driveFolderId: string | null = null;
   try {
-    driveFolderId = await resolveDriveFolderId(drive, ctx, session.driveFolderId);
+    driveFolderId = await ensureAppDriveFolder(drive, ctx, session);
   } catch (error) {
     logGoogleError(error, 'drive.files.list', ctx);
     const mapped = mapGoogleError(error, 'drive.files.list');
