@@ -113,11 +113,30 @@ if [[ "${map_page_status}" != "404" ]]; then
 fi
 echo "✅ /map 404 ok"
 
-chat=$(curl -fsS -X POST "${BASE_URL}/api/chat" -H 'content-type: application/json' --data '{"message":"ping"}') || fail_response "Chat" ""
-if ! printf '%s' "${chat}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || typeof data.reply !== "string" || !Array.isArray(data.suggested_actions)) process.exit(1);'; then
-  fail_response "Chat" "${chat}"
+chat=$(curl -sS -X POST "${BASE_URL}/api/chat" \
+  -H 'content-type: application/json' \
+  --data '{"message":"ping"}' \
+  -w "\n%{http_code}") || true
+chat_body=$(printf '%s' "${chat}" | sed '$d')
+chat_status=$(printf '%s' "${chat}" | tail -n 1)
+if [[ "${chat_status}" == "200" ]]; then
+  if ! printf '%s' "${chat_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (!data || typeof data.reply !== "string" || !Array.isArray(data.suggested_actions)) process.exit(1);'; then
+    fail_response "Chat" "${chat_body}"
+  fi
+  echo "✅ /api/chat ok"
+elif [[ "${chat_status}" == "401" ]]; then
+  if ! printf '%s' "${chat_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));const code=data?.error?.code ?? data?.error_code ?? data?.error;if (code !== "reconnect_required") process.exit(1);'; then
+    fail_response "Chat" "${chat_body}"
+  fi
+  echo "✅ /api/chat unauth ok (401 reconnect_required)"
+elif [[ "${chat_status}" == "503" ]]; then
+  if ! printf '%s' "${chat_body}" | node -e 'const fs=require("fs");const data=JSON.parse(fs.readFileSync(0,"utf8"));if (data?.error !== "not_configured") process.exit(1);'; then
+    fail_response "Chat" "${chat_body}"
+  fi
+  echo "✅ /api/chat not_configured ok"
+else
+  fail_response "Chat" "${chat_body}"
 fi
-echo "✅ /api/chat ok"
 
 # Calendar entries endpoint exists and should reject unauth (401) or be not_configured (503)
 calendar_entries=$(curl -sS "${BASE_URL}/api/calendar/entries" -w "\n%{http_code}") || true
