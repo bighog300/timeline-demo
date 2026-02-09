@@ -1,9 +1,14 @@
 import type { LLMRequest, LLMResponse } from '../types';
 
 export const callStub = async (req: LLMRequest): Promise<LLMResponse> => {
-  const messageCount = req.messages.length;
-  const systemHint = req.systemPrompt ? req.systemPrompt.slice(0, 40) : 'no-system-prompt';
+  const lastUserMessage =
+    [...req.messages]
+      .reverse()
+      .find((message) => message.role === 'user')
+      ?.content.trim() || 'Hello';
+  const contextItemCount =
+    (req as LLMRequest & { context?: { items?: unknown[] } }).context?.items?.length || 0;
   return {
-    text: `[stub:${req.model}] ${systemHint} (${messageCount} messages)`,
+    text: `[stub:${req.model}] Received '${lastUserMessage}'. Found ${contextItemCount} context items.`,
   };
 };
