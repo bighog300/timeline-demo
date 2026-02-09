@@ -2,6 +2,10 @@ import { NextResponse } from 'next/server';
 
 import { isAdminSession } from '../../lib/adminAuth';
 import { readAdminSettingsFromDrive } from '../../lib/adminSettingsDrive';
+import {
+  AppDriveFolderResolveError,
+  resolveOrProvisionAppDriveFolder,
+} from '../../lib/appDriveFolder';
 import { buildContextPack, buildContextString } from '../../lib/chatContext';
 import { getGoogleAccessToken, getGoogleSession } from '../../lib/googleAuth';
 import { createDriveClient } from '../../lib/googleDrive';
@@ -80,12 +84,6 @@ const buildSuggestedActions = (message: string) => {
 const jsonChatError = (status: number, payload: ChatErrorResponse) =>
   NextResponse.json(payload, { status });
 
-const ensureAppDriveFolder = async (
-  _drive: ReturnType<typeof createDriveClient>,
-  _ctx: ReturnType<typeof createCtx>,
-  session: Awaited<ReturnType<typeof getGoogleSession>>,
-) => session?.driveFolderId ?? null;
-
 export async function POST(request: Request) {
   const ctx = createCtx(request, '/api/chat');
   const startedAt = Date.now();
@@ -118,19 +116,34 @@ export async function POST(request: Request) {
   const drive = createDriveClient(accessToken);
   let driveFolderId: string | null = null;
   try {
-    driveFolderId = await ensureAppDriveFolder(drive, ctx, session);
+    const folder = await resolveOrProvisionAppDriveFolder(drive, ctx);
+    driveFolderId = folder?.id ?? null;
   } catch (error) {
-    logGoogleError(error, 'drive.files.list', ctx);
-    const mapped = mapGoogleError(error, 'drive.files.list');
+    if (error instanceof AppDriveFolderResolveError) {
+      logGoogleError(error.cause, error.operation, ctx);
+      const mapped = mapGoogleError(error.cause, error.operation);
+      logError(ctx, 'drive_folder_resolve_error', {
+        status: mapped.status,
+        code: mapped.code,
+        error: safeError(error.cause),
+      });
+      return respond(
+        jsonChatError(mapped.status, {
+          error: { code: mapped.code, message: mapped.message, details: mapped.details },
+          error_code: mapped.code,
+          requestId: ctx.requestId,
+        }),
+      );
+    }
     logError(ctx, 'drive_folder_resolve_error', {
-      status: mapped.status,
-      code: mapped.code,
+      status: 500,
+      code: 'upstream_error',
       error: safeError(error),
     });
     return respond(
-      jsonChatError(mapped.status, {
-        error: { code: mapped.code, message: mapped.message, details: mapped.details },
-        error_code: mapped.code,
+      jsonChatError(500, {
+        error: { code: 'upstream_error', message: 'Unable to resolve Drive folder.' },
+        error_code: 'upstream_error',
         requestId: ctx.requestId,
       }),
     );

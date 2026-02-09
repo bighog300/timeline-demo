@@ -9,6 +9,11 @@ vi.mock('../../lib/googleDrive', () => ({
   createDriveClient: vi.fn(() => ({})),
 }));
 
+vi.mock('../../lib/appDriveFolder', () => ({
+  resolveOrProvisionAppDriveFolder: vi.fn(),
+  AppDriveFolderResolveError: class AppDriveFolderResolveError extends Error {},
+}));
+
 vi.mock('../../lib/adminSettingsDrive', () => ({
   readAdminSettingsFromDrive: vi.fn(),
 }));
@@ -24,6 +29,7 @@ vi.mock('../../lib/chatContext', async () => {
 });
 
 import { readAdminSettingsFromDrive } from '../../lib/adminSettingsDrive';
+import { resolveOrProvisionAppDriveFolder } from '../../lib/appDriveFolder';
 import { buildContextPack } from '../../lib/chatContext';
 import { getGoogleAccessToken, getGoogleSession } from '../../lib/googleAuth';
 import { POST } from './route';
@@ -32,6 +38,7 @@ const mockGetGoogleSession = vi.mocked(getGoogleSession);
 const mockGetGoogleAccessToken = vi.mocked(getGoogleAccessToken);
 const mockReadAdminSettingsFromDrive = vi.mocked(readAdminSettingsFromDrive);
 const mockBuildContextPack = vi.mocked(buildContextPack);
+const mockResolveOrProvisionAppDriveFolder = vi.mocked(resolveOrProvisionAppDriveFolder);
 
 describe('POST /api/chat', () => {
   it('returns reconnect_required when unauthenticated', async () => {
@@ -57,6 +64,7 @@ describe('POST /api/chat', () => {
   it('returns reconnect_required when drive folder is missing', async () => {
     mockGetGoogleSession.mockResolvedValue({ driveFolderId: null } as never);
     mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue(null);
 
     const request = new Request('http://localhost/api/chat', {
       method: 'POST',
@@ -80,6 +88,10 @@ describe('POST /api/chat', () => {
       user: { email: 'person@example.com' },
     } as never);
     mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({
+      id: 'folder-1',
+      name: 'Timeline Demo (App Data)',
+    });
     mockReadAdminSettingsFromDrive.mockResolvedValue({
       settings: {
         type: 'admin_settings',
@@ -142,6 +154,10 @@ describe('POST /api/chat', () => {
       user: { email: 'person@example.com' },
     } as never);
     mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({
+      id: 'folder-1',
+      name: 'Timeline Demo (App Data)',
+    });
     mockReadAdminSettingsFromDrive.mockResolvedValue({
       settings: {
         type: 'admin_settings',
