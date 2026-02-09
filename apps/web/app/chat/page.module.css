@@ -112,6 +112,24 @@
   color: var(--danger);
 }
 
+.errorActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.reconnectLink {
+  align-self: center;
+  color: var(--primary);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.reconnectLink:hover,
+.reconnectLink:focus-visible {
+  text-decoration: underline;
+}
+
 .form {
   display: flex;
   gap: 12px;

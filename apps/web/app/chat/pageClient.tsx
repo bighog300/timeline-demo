@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
@@ -50,6 +51,7 @@ export default function ChatPageClient() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
 
@@ -104,6 +106,7 @@ export default function ChatPageClient() {
       setInput('');
       setLoading(true);
       setError(null);
+      setErrorStatus(null);
       setSuggestions([]);
       setLastPrompt(newMessage);
 
@@ -129,7 +132,18 @@ export default function ChatPageClient() {
         if (err instanceof DOMException && err.name === 'AbortError') {
           return;
         }
-        setError('We could not deliver that response. Please try again.');
+        const typedError = err as Error & { status?: number; requestId?: string };
+        if (
+          typeof typedError.status === 'number' &&
+          typeof typedError.requestId === 'string'
+        ) {
+          setError(
+            `Chat failed (status ${typedError.status}). Request ID: ${typedError.requestId}`,
+          );
+          setErrorStatus(typedError.status);
+        } else {
+          setError('We could not deliver that response. Please try again.');
+        }
       } finally {
         setLoading(false);
       }
@@ -157,6 +171,7 @@ export default function ChatPageClient() {
     setSuggestions([]);
     setInput('');
     setError(null);
+    setErrorStatus(null);
     setLastPrompt(null);
     if (typeof window !== 'undefined') {
       window.localStorage.removeItem(STORAGE_KEY);
@@ -238,9 +253,16 @@ export default function ChatPageClient() {
           {error ? (
             <div className={styles.errorBox}>
               <p>{error}</p>
-              <Button type="button" variant="secondary" onClick={handleRetry}>
-                Retry
-              </Button>
+              <div className={styles.errorActions}>
+                <Button type="button" variant="secondary" onClick={handleRetry}>
+                  Retry
+                </Button>
+                {errorStatus === 401 ? (
+                  <Link className={styles.reconnectLink} href="/connect">
+                    Reconnect Google
+                  </Link>
+                ) : null}
+              </div>
             </div>
           ) : null}
 
