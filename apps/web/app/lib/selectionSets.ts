@@ -339,18 +339,18 @@ const readSelectionSetByDriveFileId = async (drive: drive_v3.Drive, fileId: stri
   return parseJson(response.data);
 };
 
-export const readSelectionSetFromDrive = async (
+const findSelectionSetDriveFile = async (
   drive: drive_v3.Drive,
   folderId: string,
   id: string,
-): Promise<SelectionSet | null> => {
+): Promise<{ id: string; modifiedTime?: string | null } | null> => {
   const listing = await withRetry((signal) =>
     withTimeout(
       (timeoutSignal) =>
         drive.files.list(
           {
             q: `'${folderId}' in parents and trashed=false and name='${toFileName(id)}'`,
-            fields: 'files(id)',
+            fields: 'files(id, modifiedTime)',
             pageSize: 1,
           },
           { signal: timeoutSignal },
@@ -361,12 +361,25 @@ export const readSelectionSetFromDrive = async (
     ),
   );
 
-  const fileId = listing.data.files?.[0]?.id;
-  if (!fileId) {
+  const file = listing.data.files?.[0];
+  if (!file?.id) {
     return null;
   }
 
-  const parsed = await readSelectionSetByDriveFileId(drive, fileId);
+  return { id: file.id, modifiedTime: file.modifiedTime };
+};
+
+export const readSelectionSetFromDrive = async (
+  drive: drive_v3.Drive,
+  folderId: string,
+  id: string,
+): Promise<SelectionSet | null> => {
+  const file = await findSelectionSetDriveFile(drive, folderId, id);
+  if (!file) {
+    return null;
+  }
+
+  const parsed = await readSelectionSetByDriveFileId(drive, file.id);
   if (!isSelectionSet(parsed)) {
     return null;
   }
@@ -436,4 +449,78 @@ export const listGmailSelectionSetsFromDrive = async (
   return sets
     .filter((set) => set.kind === 'gmail_selection_set')
     .map((set) => ({ id: set.id, title: set.title, updatedAt: set.updatedAt }));
+};
+
+export const updateSelectionSetTitle = async (
+  drive: drive_v3.Drive,
+  folderId: string,
+  id: string,
+  title: string,
+): Promise<SelectionSet | null> => {
+  const file = await findSelectionSetDriveFile(drive, folderId, id);
+  if (!file) {
+    return null;
+  }
+
+  const parsed = await readSelectionSetByDriveFileId(drive, file.id);
+  if (!isSelectionSet(parsed)) {
+    return null;
+  }
+
+  const nowISO = new Date().toISOString();
+  const updated: SelectionSet = {
+    ...parsed,
+    title: title.trim(),
+    updatedAt: nowISO,
+  };
+
+  await withRetry((signal) =>
+    withTimeout(
+      (timeoutSignal) =>
+        drive.files.update(
+          {
+            fileId: file.id,
+            media: {
+              mimeType: 'application/json',
+              body: JSON.stringify(updated, null, 2),
+            },
+            fields: 'id, modifiedTime',
+          },
+          { signal: timeoutSignal },
+        ),
+      DEFAULT_GOOGLE_TIMEOUT_MS,
+      'upstream_timeout',
+      signal,
+    ),
+  );
+
+  return updated;
+};
+
+export const deleteSelectionSet = async (
+  drive: drive_v3.Drive,
+  folderId: string,
+  id: string,
+): Promise<boolean> => {
+  const file = await findSelectionSetDriveFile(drive, folderId, id);
+  if (!file) {
+    return false;
+  }
+
+  await withRetry((signal) =>
+    withTimeout(
+      (timeoutSignal) =>
+        drive.files.delete(
+          {
+            fileId: file.id,
+          },
+          { signal: timeoutSignal },
+        ),
+      DEFAULT_GOOGLE_TIMEOUT_MS,
+      'upstream_timeout',
+      signal,
+    ),
+  );
+
+  return true;
 };
