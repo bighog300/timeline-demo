@@ -56,6 +56,8 @@ const HARD_SENDER_LIMIT = 20;
 const MAX_SELECTION_ITEMS = 500;
 const MAX_SUMMARIZE_SELECTION = 20;
 const TIMELINE_SUMMARIZE_BATCH_SIZE = 10;
+const MAX_SAVED_SEARCH_PAGES = 5;
+const MAX_SAVED_SEARCH_EMAILS = 50;
 
 const parseStoredSelections = () => {
   if (typeof window === 'undefined') {
@@ -106,6 +108,17 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
   const [summarizeRequestId, setSummarizeRequestId] = useState<string | null>(null);
   const [summarizedCount, setSummarizedCount] = useState<number | null>(null);
   const [summarizePartialStatus, setSummarizePartialStatus] = useState<string | null>(null);
+  const [savedSearchToConfirm, setSavedSearchToConfirm] = useState<{ id: string; title: string } | null>(null);
+  const [savedSearchStatus, setSavedSearchStatus] = useState<string | null>(null);
+  const [savedSearchError, setSavedSearchError] = useState<'reconnect_required' | 'rate_limited' | 'server_error' | 'generic' | null>(null);
+  const [savedSearchRequestId, setSavedSearchRequestId] = useState<string | null>(null);
+  const [savedSearchSummarizedCount, setSavedSearchSummarizedCount] = useState<number | null>(null);
+  const [savedSearchPartialStatus, setSavedSearchPartialStatus] = useState<string | null>(null);
+  const [savedSearchCapNotice, setSavedSearchCapNotice] = useState<string | null>(null);
+  const [savedSearchRetryTarget, setSavedSearchRetryTarget] = useState<{ id: string; title: string } | null>(null);
+  const [isSummarizingSavedSearch, setIsSummarizingSavedSearch] = useState(false);
+
+  const isAnySummarizing = isSummarizingSelected || isSummarizingSavedSearch;
 
   useEffect(() => {
     setSelectedIds(parseStoredSelections().map((item) => item.id));
@@ -508,6 +521,177 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     }
   };
 
+  const summarizeSavedSearch = async (id: string, title: string) => {
+    setIsSummarizingSavedSearch(true);
+    setSavedSearchStatus(`Collecting emails (page 1/${MAX_SAVED_SEARCH_PAGES})…`);
+    setSavedSearchError(null);
+    setSavedSearchRequestId(null);
+    setSavedSearchSummarizedCount(null);
+    setSavedSearchPartialStatus(null);
+    setSavedSearchCapNotice(null);
+    setSavedSearchRetryTarget(null);
+
+    try {
+      const selectionResponse = await fetch(`/api/selection-sets/${id}`);
+      if (!selectionResponse.ok) {
+        const apiError = await parseApiError(selectionResponse);
+        setSavedSearchRequestId(apiError?.requestId ?? null);
+        if (selectionResponse.status === 401 || apiError?.code === 'reconnect_required') {
+          setSavedSearchError('reconnect_required');
+        } else if (selectionResponse.status >= 500) {
+          setSavedSearchError('server_error');
+        } else {
+          setSavedSearchError('generic');
+        }
+        setSavedSearchRetryTarget({ id, title });
+        setSavedSearchStatus(null);
+        return;
+      }
+
+      const payload = (await selectionResponse.json()) as { set?: GmailSelectionSet };
+      const canonicalQuery = payload.set?.query?.q?.trim();
+      if (!canonicalQuery) {
+        setSavedSearchError('generic');
+        setSavedSearchStatus(null);
+        return;
+      }
+
+      const collectedIds: string[] = [];
+      let pageToken: string | null = null;
+      let pageCount = 0;
+      let reachedCap = false;
+
+      while (pageCount < MAX_SAVED_SEARCH_PAGES && collectedIds.length < MAX_SAVED_SEARCH_EMAILS) {
+        pageCount += 1;
+        setSavedSearchStatus(`Collecting emails (page ${pageCount}/${MAX_SAVED_SEARCH_PAGES})…`);
+        const response = await fetch('/api/google/gmail/search', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ q: canonicalQuery, maxResults: 50, pageToken }),
+        });
+
+        if (!response.ok) {
+          const apiError = await parseApiError(response);
+          setSavedSearchRequestId(apiError?.requestId ?? null);
+          if (response.status === 401 || apiError?.code === 'reconnect_required') {
+            setSavedSearchError('reconnect_required');
+          } else if (response.status === 429 || apiError?.code === 'rate_limited') {
+            setSavedSearchError('rate_limited');
+          } else if (response.status >= 500) {
+            setSavedSearchError('server_error');
+          } else {
+            setSavedSearchError('generic');
+          }
+          setSavedSearchRetryTarget({ id, title });
+          setSavedSearchStatus(null);
+          return;
+        }
+
+        const searchPayload = (await response.json()) as {
+          messages?: GmailSearchMessage[];
+          nextPageToken?: string | null;
+        };
+
+        for (const message of searchPayload.messages ?? []) {
+          if (collectedIds.length >= MAX_SAVED_SEARCH_EMAILS) {
+            reachedCap = true;
+            break;
+          }
+          collectedIds.push(message.id);
+        }
+
+        pageToken = searchPayload.nextPageToken ?? null;
+        if (!pageToken) {
+          break;
+        }
+
+        if (collectedIds.length >= MAX_SAVED_SEARCH_EMAILS) {
+          reachedCap = true;
+          break;
+        }
+      }
+
+      if (collectedIds.length === 0) {
+        setSavedSearchSummarizedCount(0);
+        setSavedSearchStatus(null);
+        return;
+      }
+
+      let totalArtifacts = 0;
+      let totalFailed = 0;
+      let partialFailureRequestId: string | null = null;
+
+      setSavedSearchStatus(`Summarizing ${totalArtifacts} / ${collectedIds.length}…`);
+      for (let index = 0; index < collectedIds.length; index += TIMELINE_SUMMARIZE_BATCH_SIZE) {
+        const batch = collectedIds.slice(index, index + TIMELINE_SUMMARIZE_BATCH_SIZE);
+        const response = await fetch('/api/timeline/summarize', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            items: batch.map((messageId) => ({ source: 'gmail', id: messageId })),
+          }),
+        });
+
+        if (!response.ok) {
+          const apiError = await parseApiError(response);
+          partialFailureRequestId = partialFailureRequestId ?? apiError?.requestId ?? null;
+
+          if (totalArtifacts > 0) {
+            totalFailed += batch.length;
+            setSavedSearchStatus(`Summarizing ${totalArtifacts} / ${collectedIds.length}…`);
+            continue;
+          }
+
+          setSavedSearchRequestId(apiError?.requestId ?? null);
+          if (response.status === 401 || apiError?.code === 'reconnect_required') {
+            setSavedSearchError('reconnect_required');
+          } else if (response.status === 429 || apiError?.code === 'rate_limited') {
+            setSavedSearchError('rate_limited');
+          } else if (response.status >= 500 || apiError?.code === 'upstream_timeout' || apiError?.code === 'upstream_error') {
+            setSavedSearchError('server_error');
+          } else {
+            setSavedSearchError('generic');
+          }
+          setSavedSearchRetryTarget({ id, title });
+          setSavedSearchStatus(null);
+          return;
+        }
+
+        const summarizePayload = (await response.json()) as {
+          artifacts?: Array<{ sourceId?: string }>;
+          failed?: Array<{ id?: string }>;
+        };
+        const batchSuccess = summarizePayload.artifacts?.length ?? 0;
+        const batchFailed = summarizePayload.failed?.length ?? Math.max(batch.length - batchSuccess, 0);
+
+        totalArtifacts += batchSuccess;
+        totalFailed += batchFailed;
+        setSavedSearchStatus(`Summarizing ${totalArtifacts} / ${collectedIds.length}…`);
+      }
+
+      setSavedSearchSummarizedCount(totalArtifacts);
+      if (totalFailed > 0) {
+        const requestIdText = partialFailureRequestId ? ` (requestId: ${partialFailureRequestId})` : '';
+        setSavedSearchPartialStatus(
+          `Summarized ${totalArtifacts} of ${collectedIds.length} emails. ${totalFailed} failed.${requestIdText}`,
+        );
+      }
+      if (reachedCap) {
+        setSavedSearchCapNotice('Reached cap of 50 emails. Refine your saved search or run again.');
+      }
+      setSavedSearchStatus(null);
+      setSavedSearchError(null);
+      setSavedSearchToConfirm(null);
+    } catch {
+      setSavedSearchStatus(null);
+      setSavedSearchError('generic');
+      setSavedSearchRequestId(null);
+      setSavedSearchRetryTarget({ id, title });
+    } finally {
+      setIsSummarizingSavedSearch(false);
+    }
+  };
+
   const handleSearch = () => {
     if (selectedSenders.length === 0) {
       setNotice('Choose at least one sender before searching.');
@@ -722,16 +906,83 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
               <span className={styles.savedSetTitle}>{set.title}</span>
               <span className={styles.itemMeta}>{new Date(set.updatedAt).toLocaleString()}</span>
               <div className={styles.savedSetActions}>
-                <Button variant="secondary" onClick={() => void applySavedSelectionSet(set.id)} disabled={isSummarizingSelected}>
+                <Button variant="secondary" onClick={() => void applySavedSelectionSet(set.id)} disabled={isAnySummarizing}>
                   Apply
                 </Button>
-                <Button variant="secondary" onClick={() => void runSavedSelectionSet(set.id)} disabled={isSummarizingSelected}>
+                <Button variant="secondary" onClick={() => void runSavedSelectionSet(set.id)} disabled={isAnySummarizing}>
                   Run
                 </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => setSavedSearchToConfirm({ id: set.id, title: set.title })}
+                  disabled={isAnySummarizing}
+                >
+                  Summarize
+                </Button>
               </div>
+              {savedSearchToConfirm?.id === set.id ? (
+                <div className={styles.confirmPanel}>
+                  <p><strong>Summarize saved search:</strong> {set.title}</p>
+                  <p className={styles.noticeSubtle}>Up to 5 pages / 50 emails.</p>
+                  <p className={styles.noticeSubtle}>
+                    This will create summaries stored in your Google Drive. Search results only show headers/snippets, but summarization fetches full email bodies in the existing pipeline.
+                  </p>
+                  <div className={styles.savedSetActions}>
+                    <Button
+                      className={styles.summarizeNowButton}
+                      onClick={() => void summarizeSavedSearch(set.id, set.title)}
+                      disabled={isAnySummarizing}
+                    >
+                      Summarize up to 50 emails
+                    </Button>
+                    <Button variant="secondary" onClick={() => setSavedSearchToConfirm(null)} disabled={isAnySummarizing}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ))}
         </div>
+        {savedSearchStatus ? <p className={styles.noticeSubtle}>{savedSearchStatus}</p> : null}
+        {savedSearchSummarizedCount !== null ? (
+          <div className={styles.noticeSuccess}>
+            Summarized {savedSearchSummarizedCount} emails. <Link href="/timeline">Open Timeline</Link>
+          </div>
+        ) : null}
+        {savedSearchPartialStatus ? <p className={styles.noticeNeutral}>{savedSearchPartialStatus}</p> : null}
+        {savedSearchCapNotice ? <p className={styles.noticeNeutral}>{savedSearchCapNotice}</p> : null}
+        {savedSearchError === 'reconnect_required' ? (
+          <div className={styles.notice}>
+            Google connection expired. <Link href="/connect">Reconnect</Link> and retry.
+          </div>
+        ) : null}
+        {savedSearchError === 'rate_limited' ? (
+          <div className={styles.noticeNeutral}>
+            Rate limited while summarizing saved search.
+            {savedSearchRetryTarget ? (
+              <Button
+                variant="secondary"
+                onClick={() => void summarizeSavedSearch(savedSearchRetryTarget.id, savedSearchRetryTarget.title)}
+                disabled={isAnySummarizing}
+              >
+                Retry
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+        {savedSearchError === 'server_error' ? (
+          <p className={styles.noticeWarning}>
+            Something went wrong.
+            {savedSearchRequestId ? ` Request ID: ${savedSearchRequestId}` : ''}
+          </p>
+        ) : null}
+        {savedSearchError === 'generic' ? (
+          <p className={styles.noticeWarning}>
+            Unable to summarize saved search.
+            {savedSearchRequestId ? ` Request ID: ${savedSearchRequestId}` : ''}
+          </p>
+        ) : null}
       </section>
 
       <section className={styles.panel}>
@@ -862,7 +1113,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
               ? `${senderMatchCount} matches in recent emails`
               : 'No matches in recent emails; use Search (Phase 2).' }
           </span>
-          <Button onClick={handleSearch} variant="secondary" disabled={isSummarizingSelected}>
+          <Button onClick={handleSearch} variant="secondary" disabled={isAnySummarizing}>
             Search
           </Button>
         </div>
@@ -894,7 +1145,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
                     `Added ${searchResults.length} emails from this page to Timeline selection.`,
                   );
                 }}
-                disabled={searchResults.length === 0 || isSummarizingSelected}
+                disabled={searchResults.length === 0 || isAnySummarizing}
               >
                 Add all (this page) to Timeline
               </Button>
@@ -922,7 +1173,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
                 disabled={
                   searchSelectedIds.length === 0 ||
                   searchSelectedIds.length > MAX_SUMMARIZE_SELECTION ||
-                  isSummarizingSelected
+                  isAnySummarizing
                 }
               >
                 Summarize selected now
@@ -930,11 +1181,11 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
               <Button
                 variant="secondary"
                 onClick={() => setSearchSelectedIds(searchResults.map((message) => message.id))}
-                disabled={searchResults.length === 0 || isSummarizingSelected}
+                disabled={searchResults.length === 0 || isAnySummarizing}
               >
                 Select all (this page)
               </Button>
-              <Button variant="secondary" onClick={() => setSearchSelectedIds([])} disabled={searchSelectedIds.length === 0 || isSummarizingSelected}>
+              <Button variant="secondary" onClick={() => setSearchSelectedIds([])} disabled={searchSelectedIds.length === 0 || isAnySummarizing}>
                 Clear selection
               </Button>
               <Badge tone="neutral">{searchSelectedIds.length} selected on page</Badge>
