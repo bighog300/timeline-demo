@@ -4,7 +4,7 @@ import { jsonError } from '../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../lib/googleAuth';
 import { createDriveClient } from '../../../lib/googleDrive';
 import { logGoogleError, mapGoogleError } from '../../../lib/googleRequest';
-import { readGmailSelectionSetFromDrive } from '../../../lib/selectionSets';
+import { readSelectionSetFromDrive } from '../../../lib/selectionSets';
 
 export async function GET(
   _request: Request,
@@ -30,7 +30,7 @@ export async function GET(
   const drive = createDriveClient(accessToken);
 
   try {
-    const set = await readGmailSelectionSetFromDrive(drive, session.driveFolderId, id);
+    const set = await readSelectionSetFromDrive(drive, session.driveFolderId, id);
     if (!set) {
       return jsonError(404, 'invalid_request', 'Selection set not found.');
     }
