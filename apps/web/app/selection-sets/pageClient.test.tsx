@@ -11,15 +11,30 @@ describe('SelectionSetsPageClient', () => {
   });
 
   it('loads and renders both gmail and drive sets', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        sets: [
-          { id: 'g-1', title: 'Gmail invoices', updatedAt: '2025-01-01T00:00:00.000Z', kind: 'gmail_selection_set', source: 'gmail' },
-          { id: 'd-1', title: 'Drive PDFs', updatedAt: '2025-01-02T00:00:00.000Z', kind: 'drive_selection_set', source: 'drive' },
-        ],
-      }),
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/selection-sets') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            sets: [
+              { id: 'g-1', title: 'Gmail invoices', updatedAt: '2025-01-01T00:00:00.000Z', kind: 'gmail_selection_set', source: 'gmail' },
+              { id: 'd-1', title: 'Drive PDFs', updatedAt: '2025-01-02T00:00:00.000Z', kind: 'drive_selection_set', source: 'drive' },
+            ],
+          }),
+        } as Response;
+      }
+
+      if (url === '/api/runs?limit=10') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ runs: [] }),
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
     });
 
     vi.stubGlobal('fetch', fetchMock);
@@ -30,22 +45,37 @@ describe('SelectionSetsPageClient', () => {
     await screen.findByText('Drive PDFs');
     expect(screen.getByText('Gmail saved searches')).toBeInTheDocument();
     expect(screen.getByText('Drive saved searches')).toBeInTheDocument();
+    expect(screen.getByText('Recent runs')).toBeInTheDocument();
   });
 
   it('rename flow calls PATCH and updates UI', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          sets: [{ id: 'g-1', title: 'Old title', updatedAt: '2025-01-01T00:00:00.000Z', kind: 'gmail_selection_set', source: 'gmail' }],
-        }),
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ title: 'New title', updatedAt: '2025-01-03T00:00:00.000Z' }),
+      .mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/selection-sets') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              sets: [{ id: 'g-1', title: 'Old title', updatedAt: '2025-01-01T00:00:00.000Z', kind: 'gmail_selection_set', source: 'gmail' }],
+            }),
+          } as Response;
+        }
+
+        if (url === '/api/runs?limit=10') {
+          return { ok: true, status: 200, json: async () => ({ runs: [] }) } as Response;
+        }
+
+        if (url === '/api/selection-sets/g-1') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ title: 'New title', updatedAt: '2025-01-03T00:00:00.000Z' }),
+          } as Response;
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
       });
 
     vi.stubGlobal('fetch', fetchMock);
@@ -70,14 +100,28 @@ describe('SelectionSetsPageClient', () => {
   it('delete flow requires DELETE and calls endpoint', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          sets: [{ id: 'd-1', title: 'Drive PDFs', updatedAt: '2025-01-01T00:00:00.000Z', kind: 'drive_selection_set', source: 'drive' }],
-        }),
-      })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ ok: true }) });
+      .mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url === '/api/selection-sets') {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              sets: [{ id: 'd-1', title: 'Drive PDFs', updatedAt: '2025-01-01T00:00:00.000Z', kind: 'drive_selection_set', source: 'drive' }],
+            }),
+          } as Response;
+        }
+
+        if (url === '/api/runs?limit=10') {
+          return { ok: true, status: 200, json: async () => ({ runs: [] }) } as Response;
+        }
+
+        if (url === '/api/selection-sets/d-1') {
+          return { ok: true, status: 200, json: async () => ({ ok: true }) } as Response;
+        }
+
+        throw new Error(`Unexpected fetch: ${url}`);
+      });
 
     vi.stubGlobal('fetch', fetchMock);
 
@@ -98,5 +142,52 @@ describe('SelectionSetsPageClient', () => {
     await waitFor(() => {
       expect(screen.queryByText('Drive PDFs')).not.toBeInTheDocument();
     });
+  });
+
+  it('renders recent runs list from /api/runs', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/selection-sets') {
+        return { ok: true, status: 200, json: async () => ({ sets: [] }) } as Response;
+      }
+
+      if (url === '/api/runs?limit=10') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            runs: [
+              {
+                id: 'run-1',
+                action: 'summarize',
+                status: 'partial_success',
+                selectionSet: {
+                  id: 'set-1',
+                  title: 'Invoices',
+                  source: 'gmail',
+                  kind: 'gmail_selection_set',
+                  query: { q: 'from:a@example.com' },
+                },
+                startedAt: '2025-01-01T00:00:00.000Z',
+                finishedAt: '2025-01-01T00:01:00.000Z',
+                counts: { foundCount: 50, processedCount: 40, failedCount: 10 },
+                requestIds: ['req-1'],
+                artifact: { id: 'run-1' },
+              },
+            ],
+          }),
+        } as Response;
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<SelectionSetsPageClient isConfigured />);
+
+    await screen.findByText('Invoices');
+    expect(screen.getByText('partial_success')).toBeInTheDocument();
+    expect(screen.getByText('Found: 50 • Processed: 40 • Failed: 10')).toBeInTheDocument();
   });
 });
