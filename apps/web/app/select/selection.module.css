@@ -225,10 +225,22 @@
 .savedSetItem {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   gap: 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
   background: #fff;
   padding: 8px 10px;
   text-align: left;
+  flex-wrap: wrap;
+}
+
+.savedSetTitle {
+  font-weight: 600;
+}
+
+.savedSetActions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 }

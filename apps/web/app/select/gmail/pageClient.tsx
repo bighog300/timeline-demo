@@ -93,6 +93,8 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
   const [searchSelectedIds, setSearchSelectedIds] = useState<string[]>([]);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [resultCount, setResultCount] = useState(0);
+  const [searchQuery, setSearchQuery] = useState<string | null>(null);
+  const [searchSourceLabel, setSearchSourceLabel] = useState<string | null>(null);
   const [savedSets, setSavedSets] = useState<SavedSelectionSetMetadata[]>([]);
   const [savedSetsLoading, setSavedSetsLoading] = useState(false);
 
@@ -266,6 +268,8 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     setSearchRequestId(null);
     setNextPageToken(null);
     setResultCount(0);
+    setSearchQuery(null);
+    setSearchSourceLabel(null);
     setShowSuggestions(false);
     setNotice(null);
   };
@@ -334,8 +338,9 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     setNotice(successNotice);
   };
 
-  const runSearch = async (pageToken: string | null) => {
-    if (!queryPreview) {
+  const executeSearch = async ({ q, sourceLabel, pageToken }: { q: string; sourceLabel: string; pageToken: string | null }) => {
+    const trimmedQuery = q.trim();
+    if (!trimmedQuery) {
       setNotice('Query is empty. Adjust filters to continue.');
       return;
     }
@@ -347,7 +352,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     const response = await fetch('/api/google/gmail/search', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ q: queryPreview, maxResults: 50, pageToken }),
+      body: JSON.stringify({ q: trimmedQuery, maxResults: 50, pageToken }),
     });
 
     const payload = (await response.json()) as {
@@ -382,13 +387,15 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
       return;
     }
 
-    setPendingSearch(queryPreview);
+    setPendingSearch(trimmedQuery);
     setSearchLoading(false);
     setSearchResults(payload.messages ?? []);
     setSearchSelectedIds([]);
     setResultCount(payload.resultCount ?? 0);
     setNextPageToken(payload.nextPageToken ?? null);
     setSearchRequestId(payload.requestId ?? null);
+    setSearchQuery(trimmedQuery);
+    setSearchSourceLabel(sourceLabel);
     setNotice(null);
   };
 
@@ -421,7 +428,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
       return;
     }
 
-    void runSearch(null);
+    void executeSearch({ q: queryPreview, sourceLabel: 'Manual search', pageToken: null });
   };
 
   const toPersistedDatePreset = (value: DateRangePreset): '7d' | '30d' | '90d' | 'custom' => {
@@ -524,7 +531,40 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     setSearchRequestId(null);
     setNextPageToken(null);
     setResultCount(0);
+    setSearchQuery(null);
+    setSearchSourceLabel(null);
     setNotice(`Loaded saved search "${payload.set.title}". Click Search to run it.`);
+  };
+
+  const runSavedSelectionSet = async (id: string) => {
+    const response = await fetch(`/api/selection-sets/${id}`);
+    if (response.status === 401) {
+      setError('reconnect_required');
+      return;
+    }
+
+    if (!response.ok) {
+      setNotice('Unable to load selection set.');
+      return;
+    }
+
+    const payload = (await response.json()) as { set?: GmailSelectionSet };
+    if (!payload.set) {
+      setNotice('Saved search payload was empty.');
+      return;
+    }
+
+    const canonicalQuery = payload.set.query?.q?.trim();
+    if (!canonicalQuery) {
+      setNotice('Saved search query is empty. Update the saved search and try again.');
+      return;
+    }
+
+    await executeSearch({
+      q: canonicalQuery,
+      sourceLabel: `Saved search: ${payload.set.title}`,
+      pageToken: null,
+    });
   };
 
   const reconnectNotice = (
@@ -577,15 +617,18 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
         ) : null}
         <div className={styles.savedSetList}>
           {savedSets.map((set) => (
-            <button
-              key={set.id}
-              type="button"
-              className={styles.savedSetItem}
-              onClick={() => void applySavedSelectionSet(set.id)}
-            >
-              <span>{set.title}</span>
+            <div key={set.id} className={styles.savedSetItem}>
+              <span className={styles.savedSetTitle}>{set.title}</span>
               <span className={styles.itemMeta}>{new Date(set.updatedAt).toLocaleString()}</span>
-            </button>
+              <div className={styles.savedSetActions}>
+                <Button variant="secondary" onClick={() => void applySavedSelectionSet(set.id)}>
+                  Apply
+                </Button>
+                <Button variant="secondary" onClick={() => void runSavedSelectionSet(set.id)}>
+                  Run
+                </Button>
+              </div>
+            </div>
           ))}
         </div>
       </section>
@@ -729,7 +772,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
           <section className={styles.resultsPanel}>
             <div className={styles.panelHeader}>
               <h2>Results ({resultCount})</h2>
-              <span className={styles.itemMeta}>Query: {pendingSearch}</span>
+              <span className={styles.itemMeta}>{searchSourceLabel ?? 'Search'} · Query: {pendingSearch}</span>
             </div>
 
             {resultCount >= 50 && nextPageToken ? (
@@ -737,6 +780,23 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
             ) : null}
 
             <div className={styles.actions}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (searchResults.length === 0) {
+                    setNotice('No results on this page to add.');
+                    return;
+                  }
+
+                  mergeIntoLocalStorage(
+                    searchResults.map(toStoredMessage),
+                    `Added ${searchResults.length} emails from this page to Timeline selection.`,
+                  );
+                }}
+                disabled={searchResults.length === 0}
+              >
+                Add all (this page) to Timeline
+              </Button>
               <Button
                 variant="secondary"
                 onClick={() => {
@@ -795,7 +855,18 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
             </div>
 
             <div className={styles.actions}>
-              <Button variant="secondary" onClick={() => void runSearch(nextPageToken)} disabled={!nextPageToken || searchLoading}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  if (!searchQuery) {
+                    setNotice('No active query. Run a search first.');
+                    return;
+                  }
+
+                  void executeSearch({ q: searchQuery, sourceLabel: searchSourceLabel ?? 'Search', pageToken: nextPageToken });
+                }}
+                disabled={!nextPageToken || searchLoading}
+              >
                 Next page
               </Button>
               {searchRequestId ? <span className={styles.itemMeta}>Request ID: {searchRequestId}</span> : null}
