@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { NextResponse } from 'next/server';
 
 import { jsonError } from '../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../lib/googleAuth';
@@ -6,13 +6,10 @@ import { createDriveClient } from '../../../lib/googleDrive';
 import { logGoogleError, mapGoogleError } from '../../../lib/googleRequest';
 import { readGmailSelectionSetFromDrive } from '../../../lib/selectionSets';
 
-type RouteParams = {
-  params: {
-    id: string;
-  };
-};
-
-export const GET = async (_request: NextRequest, { params }: RouteParams) => {
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
   const session = await getGoogleSession();
   const accessToken = await getGoogleAccessToken();
 
@@ -24,7 +21,8 @@ export const GET = async (_request: NextRequest, { params }: RouteParams) => {
     return jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.');
   }
 
-  const id = params.id?.trim();
+  const { id: rawId } = await params;
+  const id = rawId?.trim();
   if (!id) {
     return jsonError(400, 'invalid_request', 'Selection set id is required.');
   }
@@ -43,4 +41,4 @@ export const GET = async (_request: NextRequest, { params }: RouteParams) => {
     const mapped = mapGoogleError(error, 'drive.files.get');
     return jsonError(mapped.status, mapped.code, mapped.message, mapped.details);
   }
-};
+}
