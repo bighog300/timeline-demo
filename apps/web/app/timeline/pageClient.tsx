@@ -198,6 +198,53 @@ const persistArtifacts = (
   return merged;
 };
 
+const toEpochMs = (value?: string) => {
+  if (!value) {
+    return Number.NaN;
+  }
+  return new Date(value).getTime();
+};
+
+const computeNextCursorISO = (
+  artifacts: SummaryArtifact[],
+  files: Array<{ id?: string; modifiedTime?: string }>,
+): string => {
+  const now = new Date().toISOString();
+  const modifiedByFileId = new Map<string, string | undefined>();
+  files.forEach((file) => {
+    if (!file.id) {
+      return;
+    }
+    modifiedByFileId.set(file.id, file.modifiedTime);
+  });
+
+  let maxMs = Number.NaN;
+  let maxISO: string | null = null;
+
+  artifacts.forEach((artifact) => {
+    const maybeUpdatedAtISO =
+      'updatedAtISO' in artifact ? (artifact as SummaryArtifact & { updatedAtISO?: string }).updatedAtISO : undefined;
+    const candidates = [
+      maybeUpdatedAtISO,
+      artifact.createdAtISO,
+      modifiedByFileId.get(artifact.driveFileId),
+    ];
+
+    candidates.forEach((candidate) => {
+      const candidateMs = toEpochMs(candidate);
+      if (!Number.isFinite(candidateMs)) {
+        return;
+      }
+      if (!Number.isFinite(maxMs) || candidateMs > maxMs) {
+        maxMs = candidateMs;
+        maxISO = new Date(candidateMs).toISOString();
+      }
+    });
+  });
+
+  return maxISO ?? now;
+};
+
 const buildSelectionItems = (
   gmailSelections: GmailSelection[],
   driveSelections: DriveSelection[],
@@ -514,15 +561,17 @@ export default function TimelinePageClient() {
     }
   };
 
-  const handleSyncFromDrive = useCallback(async () => {
+  const handleSyncFromDrive = useCallback(async (options?: { fullSync?: boolean }) => {
+    const isFullSync = Boolean(options?.fullSync);
+    const sinceCursor = isFullSync ? null : lastSyncISO;
     setIsSyncing(true);
     setSyncError(null);
     setSyncRequestId(null);
     setSyncMessage(null);
 
     try {
-      const syncUrl = lastSyncISO
-        ? `/api/timeline/artifacts/list?since=${encodeURIComponent(lastSyncISO)}`
+      const syncUrl = sinceCursor
+        ? `/api/timeline/artifacts/list?since=${encodeURIComponent(sinceCursor)}`
         : '/api/timeline/artifacts/list';
       const response = await fetch(syncUrl);
 
@@ -553,19 +602,32 @@ export default function TimelinePageClient() {
         return;
       }
 
-      const payload = (await response.json()) as { artifacts?: SummaryArtifact[] };
+      const payload = (await response.json()) as {
+        artifacts?: SummaryArtifact[];
+        files?: Array<{ id?: string; modifiedTime?: string }>;
+      };
       const validArtifacts = Array.isArray(payload.artifacts)
         ? payload.artifacts.filter(isSummaryArtifact).map(normalizeArtifact)
         : [];
+      const files = Array.isArray(payload.files) ? payload.files : [];
 
-      if (validArtifacts.length > 0) {
-        setArtifacts((prev) => persistArtifacts(validArtifacts, prev));
+      if (validArtifacts.length === 0) {
+        if (Object.keys(artifacts).length === 0) {
+          setSyncMessage(
+            'No summaries found in Drive. Create a summary from Gmail/Drive selection, then sync.',
+          );
+        } else {
+          setSyncMessage('No new artifacts found.');
+        }
+        return;
       }
 
-      const now = new Date().toISOString();
-      window.localStorage.setItem(LAST_SYNC_KEY, now);
-      setLastSyncISO(now);
-      const syncSuffix = lastSyncISO ? ' since last sync' : '';
+      setArtifacts((prev) => persistArtifacts(validArtifacts, prev));
+
+      const cursorISO = computeNextCursorISO(validArtifacts, files);
+      window.localStorage.setItem(LAST_SYNC_KEY, cursorISO);
+      setLastSyncISO(cursorISO);
+      const syncSuffix = sinceCursor ? ' since last sync' : '';
       setSyncMessage(`Synced ${validArtifacts.length} artifacts from Drive${syncSuffix}`);
     } catch {
       setSyncError('generic');
@@ -573,7 +635,13 @@ export default function TimelinePageClient() {
     } finally {
       setIsSyncing(false);
     }
-  }, [lastSyncISO]);
+  }, [artifacts, lastSyncISO]);
+
+  const handleFullSync = useCallback(() => {
+    window.localStorage.removeItem(LAST_SYNC_KEY);
+    setLastSyncISO(null);
+    void handleSyncFromDrive({ fullSync: true });
+  }, [handleSyncFromDrive]);
 
   useEffect(() => {
     if (!hasHydrated || !autoSyncOnOpen) {
@@ -1438,8 +1506,11 @@ export default function TimelinePageClient() {
             >
               {isSummarizing ? 'Generating...' : 'Generate summaries'}
             </Button>
-            <Button variant="ghost" disabled={isSyncing} onClick={handleSyncFromDrive}>
+            <Button variant="ghost" disabled={isSyncing} onClick={() => void handleSyncFromDrive()}>
               {isSyncing ? 'Syncing...' : 'Sync from Drive'}
+            </Button>
+            <Button variant="ghost" disabled={isSyncing} onClick={handleFullSync}>
+              {isSyncing ? 'Syncing...' : 'Full sync'}
             </Button>
           </div>
           <label className={styles.toggle}>
@@ -1730,7 +1801,7 @@ export default function TimelinePageClient() {
       {syncError === 'upstream_timeout' || syncError === 'upstream_error' ? (
         <div className={styles.notice}>
           Google returned an error — retry.
-          <Button variant="ghost" onClick={handleSyncFromDrive} disabled={isSyncing}>
+          <Button variant="ghost" onClick={() => void handleSyncFromDrive()} disabled={isSyncing}>
             Retry sync
           </Button>
           <RequestIdNote requestId={syncRequestId} />

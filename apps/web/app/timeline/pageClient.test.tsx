@@ -85,6 +85,19 @@ const artifactWithMetadata = {
   sourcePreview: 'Preview text from the message body.',
 };
 
+const syncArtifactWithUpdatedAtA = {
+  ...syncArtifact,
+  driveFileId: 'file-a',
+  updatedAtISO: '2024-02-05T12:00:00.000Z',
+};
+
+const syncArtifactWithUpdatedAtB = {
+  ...syncArtifact,
+  sourceId: 'msg-2',
+  driveFileId: 'file-b',
+  updatedAtISO: '2024-02-06T15:30:00.000Z',
+};
+
 const selectionList = [
   {
     driveFileId: 'selection-1',
@@ -435,6 +448,149 @@ describe('TimelinePageClient', () => {
         `/api/timeline/artifacts/list?since=${encodeURIComponent(lastSyncISO)}`,
       );
       expect(screen.getByText(/since last sync/i)).toBeInTheDocument();
+    });
+  });
+
+  it('does not advance last sync cursor when sync returns zero artifacts', async () => {
+    setSelections();
+    const lastSyncISO = '2024-02-10T00:00:00.000Z';
+    window.localStorage.setItem('timeline.lastSyncISO', lastSyncISO);
+    window.localStorage.setItem('timeline.summaryArtifacts', JSON.stringify({ [syncArtifact.artifactId]: syncArtifact }));
+
+    mockFetch((url) => {
+      if (url === '/api/timeline/index/get') {
+        return new Response(JSON.stringify({ index: null }), { status: 200 });
+      }
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url === `/api/timeline/artifacts/list?since=${encodeURIComponent(lastSyncISO)}`) {
+        return new Response(JSON.stringify({ artifacts: [], files: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /sync from drive/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /sync from drive/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/no new artifacts found/i)).toBeInTheDocument();
+    });
+    expect(window.localStorage.getItem('timeline.lastSyncISO')).toBe(lastSyncISO);
+  });
+
+  it('advances last sync cursor to max updatedAtISO across synced artifacts', async () => {
+    setSelections();
+
+    mockFetch((url) => {
+      if (url === '/api/timeline/index/get') {
+        return new Response(JSON.stringify({ index: null }), { status: 200 });
+      }
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url === '/api/timeline/artifacts/list') {
+        return new Response(
+          JSON.stringify({
+            artifacts: [syncArtifactWithUpdatedAtA, syncArtifactWithUpdatedAtB],
+            files: [],
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /sync from drive/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /sync from drive/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/synced 2 artifacts from drive/i)).toBeInTheDocument();
+    });
+
+    expect(window.localStorage.getItem('timeline.lastSyncISO')).toBe(
+      '2024-02-06T15:30:00.000Z',
+    );
+  });
+
+  it('runs a full sync without a since cursor after resetting sync state', async () => {
+    setSelections();
+    const lastSyncISO = '2024-02-10T00:00:00.000Z';
+    window.localStorage.setItem('timeline.lastSyncISO', lastSyncISO);
+
+    const fetchSpy = vi.spyOn(global, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url === '/api/timeline/index/get') {
+        return new Response(JSON.stringify({ index: null }), { status: 200 });
+      }
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url === '/api/timeline/artifacts/list') {
+        return new Response(JSON.stringify({ artifacts: [syncArtifact], files: [] }), {
+          status: 200,
+        });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /full sync/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /full sync/i }));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith('/api/timeline/artifacts/list');
+      expect(screen.getByText(/synced 1 artifacts from drive/i)).toBeInTheDocument();
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalledWith(
+      `/api/timeline/artifacts/list?since=${encodeURIComponent(lastSyncISO)}`,
+    );
+    expect(window.localStorage.getItem('timeline.lastSyncISO')).toBe('2024-01-02T00:00:00.000Z');
+  });
+
+  it('shows no summaries guidance when local and remote artifacts are both empty', async () => {
+    mockFetch((url) => {
+      if (url === '/api/timeline/index/get') {
+        return new Response(JSON.stringify({ index: null }), { status: 200 });
+      }
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url === '/api/timeline/artifacts/list') {
+        return new Response(JSON.stringify({ artifacts: [], files: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /sync from drive/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /sync from drive/i }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          /no summaries found in drive\. create a summary from gmail\/drive selection, then sync\./i,
+        ),
+      ).toBeInTheDocument();
     });
   });
 
