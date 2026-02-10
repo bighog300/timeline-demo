@@ -10,18 +10,18 @@ vi.mock('../../../lib/googleDrive', () => ({
 }));
 
 vi.mock('../../../lib/selectionSets', () => ({
-  readGmailSelectionSetFromDrive: vi.fn(),
+  readSelectionSetFromDrive: vi.fn(),
 }));
 
 import { getGoogleAccessToken, getGoogleSession } from '../../../lib/googleAuth';
 import { createDriveClient } from '../../../lib/googleDrive';
-import { readGmailSelectionSetFromDrive } from '../../../lib/selectionSets';
+import { readSelectionSetFromDrive } from '../../../lib/selectionSets';
 import { GET } from './route';
 
 const mockGetGoogleSession = vi.mocked(getGoogleSession);
 const mockGetGoogleAccessToken = vi.mocked(getGoogleAccessToken);
 const mockCreateDriveClient = vi.mocked(createDriveClient);
-const mockReadGmailSelectionSetFromDrive = vi.mocked(readGmailSelectionSetFromDrive);
+const mockReadGmailSelectionSetFromDrive = vi.mocked(readSelectionSetFromDrive);
 
 describe('GET /api/selection-sets/:id', () => {
   it('returns reconnect_required for missing session', async () => {

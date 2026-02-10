@@ -5,13 +5,17 @@ import { getGoogleAccessToken, getGoogleSession } from '../../lib/googleAuth';
 import { createDriveClient } from '../../lib/googleDrive';
 import { logGoogleError, mapGoogleError } from '../../lib/googleRequest';
 import {
+  buildDriveSelectionSet,
   buildGmailSelectionSet,
-  listGmailSelectionSetsFromDrive,
-  writeGmailSelectionSetToDrive,
+  listSelectionSetsFromDrive,
+  writeSelectionSetToDrive,
+  type DriveSelectionSetMimeGroup,
+  type DriveSelectionSetModifiedPreset,
   type GmailSelectionSetDatePreset,
 } from '../../lib/selectionSets';
 
 type CreateSelectionSetRequest = {
+  source?: 'gmail' | 'drive';
   title?: string;
   query?: {
     q?: string;
@@ -20,6 +24,12 @@ type CreateSelectionSetRequest = {
     customAfter?: string | null;
     hasAttachment?: boolean;
     freeText?: string;
+    nameContains?: string;
+    mimeGroup?: DriveSelectionSetMimeGroup;
+    modifiedPreset?: DriveSelectionSetModifiedPreset;
+    modifiedAfter?: string | null;
+    inFolderId?: string | null;
+    ownerEmail?: string | null;
   };
 };
 
@@ -33,6 +43,8 @@ const validateRequest = (value: unknown): { ok: true; payload: CreateSelectionSe
 
   const title = value.title;
   const query = value.query;
+  const source = value.source === 'drive' ? 'drive' : 'gmail';
+
   if (typeof title !== 'string' || !title.trim()) {
     return { ok: false, message: 'Title is required.' };
   }
@@ -45,19 +57,21 @@ const validateRequest = (value: unknown): { ok: true; payload: CreateSelectionSe
     return { ok: false, message: 'Query string is required.' };
   }
 
-  if (!Array.isArray(query.senders) || query.senders.some((sender) => typeof sender !== 'string')) {
-    return { ok: false, message: 'Senders must be a string array.' };
+  if (source === 'gmail') {
+    if (!Array.isArray(query.senders) || query.senders.some((sender) => typeof sender !== 'string')) {
+      return { ok: false, message: 'Senders must be a string array.' };
+    }
+
+    if (typeof query.hasAttachment !== 'boolean') {
+      return { ok: false, message: 'hasAttachment is required.' };
+    }
+
+    if (typeof query.freeText !== 'string') {
+      return { ok: false, message: 'freeText is required.' };
+    }
   }
 
-  if (typeof query.hasAttachment !== 'boolean') {
-    return { ok: false, message: 'hasAttachment is required.' };
-  }
-
-  if (typeof query.freeText !== 'string') {
-    return { ok: false, message: 'freeText is required.' };
-  }
-
-  return { ok: true, payload: value as CreateSelectionSetRequest };
+  return { ok: true, payload: { ...(value as CreateSelectionSetRequest), source } };
 };
 
 export const POST = async (request: NextRequest) => {
@@ -87,26 +101,44 @@ export const POST = async (request: NextRequest) => {
   const drive = createDriveClient(accessToken);
   const nowISO = new Date().toISOString();
   const query = validated.payload.query ?? {};
-  const set = buildGmailSelectionSet({
-    title: validated.payload.title ?? 'Untitled Gmail search',
-    nowISO,
-    query: {
-      q: query.q ?? '',
-      senders: query.senders ?? [],
-      datePreset: query.datePreset ?? '30d',
-      customAfter: query.customAfter ?? null,
-      hasAttachment: Boolean(query.hasAttachment),
-      freeText: query.freeText ?? '',
-    },
-  });
+  const source = validated.payload.source ?? 'gmail';
+  const set =
+    source === 'drive'
+      ? buildDriveSelectionSet({
+          title: validated.payload.title ?? 'Untitled Drive search',
+          nowISO,
+          query: {
+            q: query.q ?? '',
+            nameContains: query.nameContains ?? '',
+            mimeGroup: query.mimeGroup ?? 'any',
+            modifiedPreset: query.modifiedPreset ?? '30d',
+            modifiedAfter: query.modifiedAfter ?? null,
+            inFolderId: query.inFolderId ?? null,
+            ownerEmail: query.ownerEmail ?? null,
+          },
+        })
+      : buildGmailSelectionSet({
+          title: validated.payload.title ?? 'Untitled Gmail search',
+          nowISO,
+          query: {
+            q: query.q ?? '',
+            senders: query.senders ?? [],
+            datePreset: query.datePreset ?? '30d',
+            customAfter: query.customAfter ?? null,
+            hasAttachment: Boolean(query.hasAttachment),
+            freeText: query.freeText ?? '',
+          },
+        });
 
   try {
-    const write = await writeGmailSelectionSetToDrive(drive, session.driveFolderId, set);
+    const write = await writeSelectionSetToDrive(drive, session.driveFolderId, set);
     return NextResponse.json({
       id: set.id,
       title: set.title,
       updatedAt: write.modifiedTime,
       driveFileId: write.driveFileId,
+      kind: set.kind,
+      source: set.source,
     });
   } catch (error) {
     logGoogleError(error, 'drive.files.create');
@@ -130,7 +162,7 @@ export const GET = async () => {
   const drive = createDriveClient(accessToken);
 
   try {
-    const sets = await listGmailSelectionSetsFromDrive(drive, session.driveFolderId);
+    const sets = await listSelectionSetsFromDrive(drive, session.driveFolderId);
     return NextResponse.json({ sets });
   } catch (error) {
     logGoogleError(error, 'drive.files.list');
