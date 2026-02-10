@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSession } from 'next-auth/react';
 
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -9,6 +10,13 @@ import { parseApiError } from '../../lib/apiErrors';
 import { buildDriveQuery, type DriveMimeGroup, type DriveModifiedPreset } from '../../lib/driveQuery';
 import type { DriveSelectionSet } from '../../lib/selectionSets';
 import { hydrateDriveQueryControls } from './selectionSetHydration';
+import {
+  fileTypeBadge,
+  formatBytes,
+  formatRelativeTime,
+  safeCopyToClipboard,
+  type FileBadgeKind,
+} from './formatters';
 import styles from '../selection.module.css';
 
 type DriveFile = {
@@ -45,6 +53,17 @@ const TIMELINE_SUMMARIZE_BATCH_SIZE = 10;
 const MAX_SAVED_SEARCH_PAGES = 5;
 const MAX_SAVED_SEARCH_FILES = 50;
 
+
+const badgeClassByKind: Record<FileBadgeKind, string> = {
+  pdf: styles.fileBadgePdf,
+  doc: styles.fileBadgeDoc,
+  sheet: styles.fileBadgeSheet,
+  slide: styles.fileBadgeSlide,
+  image: styles.fileBadgeImage,
+  folder: styles.fileBadgeFolder,
+  other: styles.fileBadgeOther,
+};
+
 const parseStoredSelections = () => {
   if (typeof window === 'undefined') {
     return [] as DriveFile[];
@@ -70,6 +89,7 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
   const [modifiedAfter, setModifiedAfter] = useState('');
   const [inFolderId, setInFolderId] = useState('');
   const [ownerEmail, setOwnerEmail] = useState('');
+  const [limitToAppFolder, setLimitToAppFolder] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -97,6 +117,9 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
   const [savedSearchCapNotice, setSavedSearchCapNotice] = useState<string | null>(null);
   const [savedSearchRetryTarget, setSavedSearchRetryTarget] = useState<{ id: string; title: string } | null>(null);
   const [isSummarizingSavedSearch, setIsSummarizingSavedSearch] = useState(false);
+  const { data: session } = useSession();
+  const driveFolderId = session?.driveFolderId?.trim() || '';
+  const effectiveFolderId = limitToAppFolder ? driveFolderId : inFolderId;
 
   const queryPreview = useMemo(
     () =>
@@ -105,10 +128,10 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
         mimeGroup,
         modifiedPreset,
         modifiedAfter: modifiedAfter || null,
-        inFolderId: inFolderId || null,
+        inFolderId: effectiveFolderId || null,
         ownerEmail: ownerEmail || null,
       }),
-    [inFolderId, mimeGroup, modifiedAfter, modifiedPreset, nameContains, ownerEmail],
+    [effectiveFolderId, mimeGroup, modifiedAfter, modifiedPreset, nameContains, ownerEmail],
   );
 
   const searchSelectedSet = useMemo(() => new Set(searchSelectedIds), [searchSelectedIds]);
@@ -456,6 +479,34 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
     void executeSearch({ q: queryPreview, sourceLabel: 'Manual search', pageToken: null });
   };
 
+  const clearFilters = () => {
+    setNameContains('');
+    setMimeGroup('any');
+    setModifiedPreset('30d');
+    setModifiedAfter('');
+    setInFolderId('');
+    setOwnerEmail('');
+    setLimitToAppFolder(false);
+    setSearchResults([]);
+    setSearchSelectedIds([]);
+    setSearchError(null);
+    setSearchRequestId(null);
+    setResultCount(0);
+    setNextPageToken(null);
+    setSearchQuery(null);
+    setSearchSourceLabel(null);
+    setNotice('Filters cleared.');
+  };
+
+  const copyFileId = async (id: string) => {
+    try {
+      const copied = await safeCopyToClipboard(id);
+      setNotice(copied ? 'Copied file ID.' : 'Unable to copy file ID.');
+    } catch {
+      setNotice('Unable to copy file ID.');
+    }
+  };
+
   const saveSelectionSet = async () => {
     const defaultTitle = nameContains ? `Drive: ${nameContains}` : 'Drive search';
     const rawTitle = window.prompt('Save search as selection set', defaultTitle);
@@ -480,7 +531,7 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
           mimeGroup,
           modifiedPreset,
           modifiedAfter: modifiedAfter || null,
-          inFolderId: inFolderId || null,
+          inFolderId: effectiveFolderId || null,
           ownerEmail: ownerEmail || null,
         },
       }),
@@ -515,6 +566,7 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
     setModifiedAfter(hydrated.modifiedAfter);
     setInFolderId(hydrated.inFolderId);
     setOwnerEmail(hydrated.ownerEmail);
+    setLimitToAppFolder(false);
 
     setSearchResults([]);
     setSearchSelectedIds([]);
@@ -577,6 +629,9 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
         <div className={styles.panelHeader}>
           <h2>Filters</h2>
           <div className={styles.actions}>
+            <Button onClick={clearFilters} variant="ghost" disabled={isAnySummarizing || searchLoading}>
+              Clear filters
+            </Button>
             <Button onClick={handleSearch} variant="secondary" disabled={isAnySummarizing || searchLoading}>
               Search
             </Button>
@@ -624,14 +679,31 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
 
           <label className={styles.field}>
             Folder ID (optional)
-            <input className={styles.input} value={inFolderId} onChange={(event) => setInFolderId(event.target.value)} />
+            <input
+              className={styles.input}
+              value={inFolderId}
+              onChange={(event) => setInFolderId(event.target.value)}
+              disabled={limitToAppFolder}
+            />
           </label>
 
           <label className={styles.field}>
             Owner email (optional)
             <input className={styles.input} value={ownerEmail} onChange={(event) => setOwnerEmail(event.target.value)} />
           </label>
+
+          <label className={styles.checkboxField}>
+            <input
+              type="checkbox"
+              checked={limitToAppFolder}
+              onChange={(event) => setLimitToAppFolder(event.target.checked)}
+              disabled={!driveFolderId}
+            />
+            Limit to app folder
+          </label>
         </div>
+
+        {!driveFolderId ? <p className={styles.helperText}>Provision Drive folder on /connect.</p> : null}
 
         <div className={styles.previewBox}>
           <strong>Drive query</strong>
@@ -720,8 +792,11 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
           {searchRequestId ? <p className={styles.noticeSubtle}>Request ID: {searchRequestId}</p> : null}
 
           <div className={styles.list}>
+            {searchResults.length === 0 ? (
+              <div className={styles.emptyState}>No files found. Try removing filters or widening date range.</div>
+            ) : null}
             {searchResults.map((file) => (
-              <label key={file.id} className={styles.item}>
+              <label key={file.id} className={`${styles.item} ${searchSelectedSet.has(file.id) ? styles.rowSelected : ''}`}>
                 <input
                   type="checkbox"
                   checked={searchSelectedSet.has(file.id)}
@@ -733,12 +808,42 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
                 />
                 <div>
                   <div className={styles.itemHeader}>
-                    <strong>{file.name}</strong>
-                    <span className={styles.itemMeta}>{file.modifiedTime ? new Date(file.modifiedTime).toLocaleString() : '—'}</span>
+                    <div className={styles.actions}>
+                      <strong>{file.name}</strong>
+                      {(() => {
+                        const badge = fileTypeBadge(file.mimeType);
+                        return <span className={`${styles.fileBadge} ${badgeClassByKind[badge.kind]}`}>{badge.label}</span>;
+                      })()}
+                    </div>
+                    <div className={styles.rowActions}>
+                      {file.webViewLink ? (
+                        <a
+                          href={file.webViewLink}
+                          target="_blank"
+                          rel="noopener"
+                          className={styles.openLink}
+                          aria-label={`Open ${file.name} in Drive`}
+                        >
+                          Open in Drive
+                        </a>
+                      ) : null}
+                      <button
+                        type="button"
+                        className={styles.copyButton}
+                        onClick={() => void copyFileId(file.id)}
+                        aria-label={`Copy file ID for ${file.name}`}
+                      >
+                        Copy file ID
+                      </button>
+                    </div>
                   </div>
-                  <p className={styles.itemMeta}>{file.mimeType}</p>
-                  <p className={styles.itemMeta}>Owner: {file.owner.name || file.owner.email || 'Unknown'}{file.size ? ` · ${file.size} bytes` : ''}</p>
-                  {file.webViewLink ? <a href={file.webViewLink} target="_blank" rel="noreferrer" className={styles.itemMeta}>Open in Drive</a> : null}
+                  <p className={styles.metaLine}>
+                    <span>Owner: {file.owner.name || file.owner.email || 'Unknown'}{file.owner.name && file.owner.email ? ` (${file.owner.email})` : ''}</span>
+                    <span title={file.modifiedTime ? new Date(file.modifiedTime).toLocaleString() : undefined}>
+                      Modified: {formatRelativeTime(file.modifiedTime)}
+                    </span>
+                    <span>Size: {formatBytes(file.size ? Number(file.size) : undefined)}</span>
+                  </p>
                 </div>
               </label>
             ))}

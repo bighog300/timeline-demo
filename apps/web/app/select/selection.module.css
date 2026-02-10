@@ -273,3 +273,68 @@
   border-radius: 10px;
   padding: 8px 10px;
 }
+
+.fileBadge {
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  border: 1px solid var(--border);
+}
+
+.fileBadgePdf,
+.fileBadgeDoc,
+.fileBadgeSheet,
+.fileBadgeSlide,
+.fileBadgeImage,
+.fileBadgeFolder,
+.fileBadgeOther {
+  background: #f8fafc;
+}
+
+.rowSelected {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.rowActions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.metaLine {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.copyButton {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.openLink {
+  color: var(--accent, #2563eb);
+  text-decoration: underline;
+}
+
+.helperText {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.copyButton:focus-visible,
+.openLink:focus-visible,
+.item input:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}

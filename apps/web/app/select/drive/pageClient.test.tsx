@@ -4,6 +4,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import DriveSelectClient from './pageClient';
 
+const mockUseSession = vi.fn(() => ({ status: 'authenticated', data: { driveFolderId: 'folder-123' } }));
+
+vi.mock('next-auth/react', () => ({
+  useSession: () => mockUseSession(),
+}));
+
+
 describe('DriveSelectClient', () => {
   afterEach(() => {
     cleanup();
@@ -111,4 +118,53 @@ describe('DriveSelectClient', () => {
     const summarizeCalls = fetchMock.mock.calls.filter((call) => call[0] === '/api/timeline/summarize');
     expect(summarizeCalls.length).toBe(5);
   });
+
+  it('copies file id and shows notice', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ sets: [] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          ok: true,
+          resultCount: 1,
+          nextPageToken: null,
+          files: [
+            { id: 'file-1', name: 'Doc', mimeType: 'application/pdf', modifiedTime: null, createdTime: null, size: '1024', webViewLink: 'https://drive.google.com/file/d/1', owner: { name: 'A', email: 'a@example.com' }, parents: [] },
+          ],
+        }),
+      });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<DriveSelectClient isConfigured />);
+    await screen.findByText(/No saved searches yet/i);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await screen.findByText(/Results \(1\)/i);
+
+    fireEvent.click(screen.getByRole('button', { name: /Copy file ID for Doc/i }));
+
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith('file-1');
+    });
+    await screen.findByText('Copied file ID.');
+  });
+
+  it('disables app folder toggle when drive folder is missing', async () => {
+    mockUseSession.mockReturnValue({ status: 'authenticated', data: { driveFolderId: undefined } });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ sets: [] }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<DriveSelectClient isConfigured />);
+
+    const toggle = await screen.findByRole('checkbox', { name: /Limit to app folder/i });
+    expect(toggle).toBeDisabled();
+    expect(screen.getByText('Provision Drive folder on /connect.')).toBeInTheDocument();
+  });
+
 });
