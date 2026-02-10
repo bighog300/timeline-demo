@@ -28,6 +28,10 @@ type SenderSuggestion = {
 };
 
 const STORAGE_KEY = 'timeline.gmailSelections';
+const DEFAULT_DAYS_BACK: DateRangePreset = '30';
+const SOFT_SENDER_WARNING_THRESHOLD = 10;
+const HARD_SENDER_LIMIT = 20;
+const MAX_SELECTION_ITEMS = 500;
 
 const parseStoredSelections = () => {
   if (typeof window === 'undefined') {
@@ -55,7 +59,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
   const [selectedSenders, setSelectedSenders] = useState<string[]>([]);
   const [senderInput, setSenderInput] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [daysBack, setDaysBack] = useState<DateRangePreset>('30');
+  const [daysBack, setDaysBack] = useState<DateRangePreset>(DEFAULT_DAYS_BACK);
   const [customAfter, setCustomAfter] = useState('');
   const [hasAttachment, setHasAttachment] = useState(false);
   const [freeText, setFreeText] = useState('');
@@ -103,7 +107,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
 
     for (const message of messages) {
       const parsed = parseSender(message.from);
-      if (!parsed) {
+      if (!parsed.email) {
         continue;
       }
 
@@ -127,10 +131,16 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
         }
 
         return (
-          sender.email.toLowerCase().includes(query) || sender.name.toLowerCase().includes(query)
+          sender.email.includes(query) || sender.name.toLowerCase().includes(query)
         );
       })
-      .sort((a, b) => b.count - a.count)
+      .sort((a, b) => {
+        if (b.count !== a.count) {
+          return b.count - a.count;
+        }
+
+        return a.email.localeCompare(b.email);
+      })
       .slice(0, 10);
   }, [messages, selectedSenders, senderInput]);
 
@@ -144,9 +154,11 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     const selected = new Set(normalizedSenders);
     return messages.filter((message) => {
       const parsed = parseSender(message.from);
-      return parsed ? selected.has(parsed.email) : false;
+      return parsed.email ? selected.has(parsed.email) : false;
     });
   }, [messages, normalizedSenders]);
+
+  const senderMatchCount = senderMatchedMessages.length;
 
   const queryPreview = useMemo(
     () =>
@@ -172,9 +184,27 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
       return;
     }
 
+    if (selectedSenders.length >= HARD_SENDER_LIMIT) {
+      setNotice('Limit 20 senders; refine selection.');
+      return;
+    }
+
     setSelectedSenders((prev) => [...prev, value]);
     setSenderInput('');
     setShowSuggestions(false);
+    setNotice(null);
+  };
+
+  const resetFilters = () => {
+    setSelectedSenders([]);
+    setSenderInput('');
+    setDaysBack(DEFAULT_DAYS_BACK);
+    setCustomAfter('');
+    setHasAttachment(false);
+    setFreeText('');
+    setPendingSearch(null);
+    setShowSuggestions(false);
+    setNotice(null);
   };
 
   const addSelectedRecentFromSenders = () => {
@@ -189,8 +219,17 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
       byId.set(message.id, message);
     }
 
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(byId.values())));
-    setSelectedIds(Array.from(new Set([...selectedIds, ...senderMatchedMessages.map((m) => m.id)])));
+    const merged = Array.from(byId.values());
+    if (merged.length > MAX_SELECTION_ITEMS) {
+      const capped = merged.slice(0, MAX_SELECTION_ITEMS);
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(capped));
+      setSelectedIds(Array.from(new Set(capped.map((message) => message.id))));
+      setNotice('Selection capped at 500 items; refine filters.');
+      return;
+    }
+
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    setSelectedIds(Array.from(new Set([...selectedIds, ...senderMatchedMessages.map((message) => message.id)])));
     setNotice(
       `Added ${senderMatchedMessages.length} emails from selected senders (from recent list). Refine and search for older emails in Phase 2.`,
     );
@@ -260,7 +299,12 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
       {notice ? <div className={styles.noticeNeutral}>{notice}</div> : null}
 
       <section className={styles.panel}>
-        <h2>Sender filter</h2>
+        <div className={styles.panelHeader}>
+          <h2>Sender filter</h2>
+          <button type="button" className={styles.clearButton} onClick={resetFilters}>
+            Clear filters
+          </button>
+        </div>
         <div className={styles.senderRow}>
           <input
             className={styles.input}
@@ -276,10 +320,21 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
               }
             }}
           />
-          <Button onClick={() => addSender(senderInput)} variant="secondary" disabled={!senderInput.trim()}>
+          <Button
+            onClick={() => addSender(senderInput)}
+            variant="secondary"
+            disabled={!senderInput.trim() || selectedSenders.length >= HARD_SENDER_LIMIT}
+          >
             Add sender
           </Button>
         </div>
+
+        {selectedSenders.length >= HARD_SENDER_LIMIT ? (
+          <p className={styles.noticeWarning}>Limit 20 senders; refine selection.</p>
+        ) : null}
+        {selectedSenders.length >= SOFT_SENDER_WARNING_THRESHOLD && selectedSenders.length < HARD_SENDER_LIMIT ? (
+          <p className={styles.noticeSubtle}>Using many senders can broaden results; refine if possible.</p>
+        ) : null}
 
         {showSuggestions && senderSuggestions.length > 0 ? (
           <div className={styles.suggestions}>
@@ -292,6 +347,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
                   addSender(sender.email);
                 }}
                 type="button"
+                disabled={selectedSenders.length >= HARD_SENDER_LIMIT}
               >
                 <span>{sender.name}</span>
                 <span className={styles.itemMeta}>{sender.email}</span>
@@ -365,14 +421,15 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
           >
             Add from senders (recent only)
           </Button>
+          <span className={styles.matchCountLabel}>
+            {senderMatchCount > 0
+              ? `${senderMatchCount} matches in recent emails`
+              : 'No matches in recent emails; use Search (Phase 2).' }
+          </span>
           <Button onClick={handleSearch} variant="secondary">
             Search
           </Button>
         </div>
-
-        {selectedSenders.length > 0 && senderMatchedMessages.length === 0 ? (
-          <p className={styles.muted}>No matches in recent emails; use Search (Phase 2).</p>
-        ) : null}
 
         {pendingSearch ? (
           <div className={styles.emptyState}>

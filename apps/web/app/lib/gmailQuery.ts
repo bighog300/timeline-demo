@@ -79,18 +79,25 @@ export type ParsedSender = {
   email: string;
 };
 
-export const parseSender = (fromHeader: string): ParsedSender | null => {
+const EMPTY_SENDER: ParsedSender = {
+  name: '',
+  email: '',
+};
+
+const isValidEmail = (value: string) => /^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$/i.test(value);
+
+export const parseSender = (fromHeader: string): ParsedSender => {
   const value = collapseWhitespace(fromHeader);
   if (!value) {
-    return null;
+    return EMPTY_SENDER;
   }
 
   const bracketMatch = value.match(/^(.*)<([^>]+)>$/);
   if (bracketMatch) {
     const name = bracketMatch[1].trim().replace(/^"|"$/g, '');
     const email = bracketMatch[2].trim().toLowerCase();
-    if (!email.includes('@')) {
-      return null;
+    if (!isValidEmail(email)) {
+      return EMPTY_SENDER;
     }
 
     return { name: name || email, email };
@@ -98,7 +105,7 @@ export const parseSender = (fromHeader: string): ParsedSender | null => {
 
   const emailMatch = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   if (!emailMatch) {
-    return null;
+    return EMPTY_SENDER;
   }
 
   const email = emailMatch[0].toLowerCase();
