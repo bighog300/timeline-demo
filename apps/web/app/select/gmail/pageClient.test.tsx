@@ -254,4 +254,151 @@ describe('GmailSelectClient', () => {
 
     expect(await screen.findByText(/Summarized 10 of 15 emails\. 5 failed\. \(requestId: req-partial-500\)/i)).toBeInTheDocument();
   });
+
+  it('summarizes saved search with paging and shows progress states', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ messages: [] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ sets: [{ id: 'set-1', title: 'Invoices', updatedAt: '2025-01-01T00:00:00.000Z' }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ set: { id: 'set-1', title: 'Invoices', query: { q: 'from:billing@example.com newer_than:30d' } } }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          messages: [
+            { ...baseSearchResult, id: 'msg-1' },
+            { ...baseSearchResult, id: 'msg-2' },
+          ],
+          nextPageToken: 'token-2',
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          messages: [{ ...baseSearchResult, id: 'msg-3' }],
+          nextPageToken: null,
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ artifacts: [{ sourceId: 'msg-1' }, { sourceId: 'msg-2' }, { sourceId: 'msg-3' }], failed: [] }),
+      });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<GmailSelectClient isConfigured />);
+
+    await screen.findByText('Invoices');
+    fireEvent.click(screen.getByRole('button', { name: 'Summarize' }));
+    expect(await screen.findByText(/Up to 5 pages \/ 50 emails\./i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Summarize up to 50 emails/i }));
+
+    await waitFor(() => {
+      const gmailSearchCalls = fetchMock.mock.calls.filter(([url]) => url === '/api/google/gmail/search');
+      expect(gmailSearchCalls).toHaveLength(2);
+    });
+    expect(await screen.findByText(/Summarized 3 emails/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open Timeline/i })).toHaveAttribute('href', '/timeline');
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/timeline/summarize', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        items: [
+          { source: 'gmail', id: 'msg-1' },
+          { source: 'gmail', id: 'msg-2' },
+          { source: 'gmail', id: 'msg-3' },
+        ],
+      }),
+    });
+  });
+
+  it('enforces 50 email cap when summarizing saved search', async () => {
+    const messagesPage = Array.from({ length: 30 }, (_, index) => ({
+      ...baseSearchResult,
+      id: `msg-${index + 1}`,
+      threadId: `thread-${index + 1}`,
+    }));
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ messages: [] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ sets: [{ id: 'set-1', title: 'Invoices', updatedAt: '2025-01-01T00:00:00.000Z' }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ set: { id: 'set-1', title: 'Invoices', query: { q: 'from:billing@example.com newer_than:30d' } } }),
+      })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ messages: messagesPage, nextPageToken: 'token-2' }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ messages: messagesPage, nextPageToken: 'token-3' }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ artifacts: messagesPage.slice(0, 10).map((m) => ({ sourceId: m.id })), failed: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ artifacts: messagesPage.slice(10, 20).map((m) => ({ sourceId: m.id })), failed: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ artifacts: messagesPage.slice(20, 30).map((m) => ({ sourceId: m.id })), failed: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ artifacts: messagesPage.slice(0, 10).map((m) => ({ sourceId: m.id })), failed: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ artifacts: messagesPage.slice(10, 20).map((m) => ({ sourceId: m.id })), failed: [] }) });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<GmailSelectClient isConfigured />);
+
+    await screen.findByText('Invoices');
+    fireEvent.click(screen.getByRole('button', { name: 'Summarize' }));
+    fireEvent.click(screen.getByRole('button', { name: /Summarize up to 50 emails/i }));
+
+    expect(await screen.findByText(/Reached cap of 50 emails\. Refine your saved search or run again\./i)).toBeInTheDocument();
+    expect(await screen.findByText(/Summarized 50 emails/i)).toBeInTheDocument();
+
+    const summarizeCalls = fetchMock.mock.calls.filter(([url]) => url === '/api/timeline/summarize');
+    expect(summarizeCalls).toHaveLength(5);
+  });
+
+  it('shows reconnect CTA when saved search summarize requires reconnect', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ messages: [] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ sets: [{ id: 'set-1', title: 'Invoices', updatedAt: '2025-01-01T00:00:00.000Z' }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ set: { id: 'set-1', title: 'Invoices', query: { q: 'from:billing@example.com newer_than:30d' } } }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        headers: new Headers({ 'x-request-id': 'req-401' }),
+        json: async () => ({ error: { code: 'reconnect_required', message: 'Reconnect required.' } }),
+        clone() {
+          return this;
+        },
+      });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<GmailSelectClient isConfigured />);
+
+    await screen.findByText('Invoices');
+    fireEvent.click(screen.getByRole('button', { name: 'Summarize' }));
+    fireEvent.click(screen.getByRole('button', { name: /Summarize up to 50 emails/i }));
+
+    expect(await screen.findByText(/Google connection expired/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Reconnect/i })).toHaveAttribute('href', '/connect');
+  });
 });
