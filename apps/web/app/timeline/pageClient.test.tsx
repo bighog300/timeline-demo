@@ -969,6 +969,75 @@ describe('TimelinePageClient', () => {
     });
   });
 
+
+  it('renders timeline entries from stored artifacts when local selections are empty', async () => {
+    window.localStorage.setItem(
+      'timeline.summaryArtifacts',
+      JSON.stringify({ 'gmail:msg-1': syncArtifact }),
+    );
+    mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Hello' })).toBeInTheDocument();
+      expect(screen.getByText('1 selected, 1 summarized, 0 pending')).toBeInTheDocument();
+    });
+  });
+
+  it('does not duplicate entries when both selections and artifacts exist for the same item', async () => {
+    setSelections();
+    window.localStorage.setItem(
+      'timeline.summaryArtifacts',
+      JSON.stringify({ 'gmail:msg-1': syncArtifact }),
+    );
+    mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('heading', { name: 'Hello' })).toHaveLength(1);
+      expect(screen.getByText('1 selected, 1 summarized, 0 pending')).toBeInTheDocument();
+    });
+  });
+
+  it('keeps summarized Drive-derived entries visible with status all filter', async () => {
+    window.localStorage.setItem(
+      'timeline.summaryArtifacts',
+      JSON.stringify({ 'gmail:msg-1': syncArtifact }),
+    );
+    mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Hello' })).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText('Status'), {
+      target: { value: 'all' },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Hello' })).toBeInTheDocument();
+    });
+  });
+
   it('jumps to a timeline entry from search results', async () => {
     setSelections();
     mockFetch(withIndexGet((url) => {
