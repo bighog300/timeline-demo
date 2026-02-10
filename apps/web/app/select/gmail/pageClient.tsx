@@ -17,6 +17,19 @@ type GmailMessage = {
   snippet: string;
 };
 
+type GmailSearchMessage = {
+  id: string;
+  threadId: string;
+  internalDate: number;
+  snippet: string;
+  from: {
+    name: string;
+    email: string;
+  };
+  subject: string;
+  date: string;
+};
+
 type GmailSelectClientProps = {
   isConfigured: boolean;
 };
@@ -65,6 +78,13 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
   const [freeText, setFreeText] = useState('');
   const [pendingSearch, setPendingSearch] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchRequestId, setSearchRequestId] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<GmailSearchMessage[]>([]);
+  const [searchSelectedIds, setSearchSelectedIds] = useState<string[]>([]);
+  const [nextPageToken, setNextPageToken] = useState<string | null>(null);
+  const [resultCount, setResultCount] = useState(0);
 
   useEffect(() => {
     setSelectedIds(parseStoredSelections().map((item) => item.id));
@@ -203,6 +223,12 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     setHasAttachment(false);
     setFreeText('');
     setPendingSearch(null);
+    setSearchResults([]);
+    setSearchSelectedIds([]);
+    setSearchError(null);
+    setSearchRequestId(null);
+    setNextPageToken(null);
+    setResultCount(0);
     setShowSuggestions(false);
     setNotice(null);
   };
@@ -241,6 +267,102 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     setNotice('Saved selected emails to Timeline selection.');
   };
 
+  const toStoredMessage = (message: GmailSearchMessage): GmailMessage => ({
+    id: message.id,
+    threadId: message.threadId,
+    subject: message.subject,
+    from: message.from.name && message.from.email ? `${message.from.name} <${message.from.email}>` : message.from.name || message.from.email,
+    date: message.date,
+    snippet: message.snippet,
+  });
+
+  const mergeIntoLocalStorage = (incoming: GmailMessage[], successNotice: string) => {
+    const existing = parseStoredSelections();
+    const byId = new Map(existing.map((message) => [message.id, message]));
+    for (const message of incoming) {
+      byId.set(message.id, message);
+    }
+
+    const merged = Array.from(byId.values());
+    if (merged.length > MAX_SELECTION_ITEMS) {
+      const capped = merged.slice(0, MAX_SELECTION_ITEMS);
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(capped));
+      setSelectedIds(Array.from(new Set(capped.map((message) => message.id))));
+      setNotice('Selection capped at 500 items; refine filters.');
+      return;
+    }
+
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+    setSelectedIds(Array.from(new Set(merged.map((message) => message.id))));
+    setNotice(successNotice);
+  };
+
+  const runSearch = async (pageToken: string | null) => {
+    if (!queryPreview) {
+      setNotice('Query is empty. Adjust filters to continue.');
+      return;
+    }
+
+    setSearchLoading(true);
+    setSearchError(null);
+    setSearchRequestId(null);
+
+    const response = await fetch('/api/google/gmail/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ q: queryPreview, maxResults: 50, pageToken }),
+    });
+
+    const payload = (await response.json()) as {
+      ok?: boolean;
+      code?: string;
+      message?: string;
+      requestId?: string;
+      resultCount?: number;
+      nextPageToken?: string | null;
+      messages?: GmailSearchMessage[];
+    };
+
+    if (!response.ok) {
+      setSearchLoading(false);
+      setSearchRequestId(payload.requestId ?? null);
+      if (payload.code === 'reconnect_required') {
+        setError('reconnect_required');
+        return;
+      }
+
+      if (response.status === 429 || payload.code === 'rate_limited') {
+        setSearchError('Rate limited by Gmail. Please wait a moment and retry.');
+        return;
+      }
+
+      if (response.status >= 500) {
+        setSearchError(`Search failed. Please retry. Request ID: ${payload.requestId ?? 'unknown'}`);
+        return;
+      }
+
+      setSearchError(payload.message ?? 'Search failed.');
+      return;
+    }
+
+    setPendingSearch(queryPreview);
+    setSearchLoading(false);
+    setSearchResults(payload.messages ?? []);
+    setSearchSelectedIds([]);
+    setResultCount(payload.resultCount ?? 0);
+    setNextPageToken(payload.nextPageToken ?? null);
+    setSearchRequestId(payload.requestId ?? null);
+    setNotice(null);
+  };
+
+  const searchSelectionSet = useMemo(() => new Set(searchSelectedIds), [searchSelectedIds]);
+
+  const toggleSearchSelection = (messageId: string) => {
+    setSearchSelectedIds((prev) =>
+      prev.includes(messageId) ? prev.filter((id) => id !== messageId) : [...prev, messageId],
+    );
+  };
+
   const handleSearch = () => {
     if (selectedSenders.length === 0) {
       setNotice('Choose at least one sender before searching.');
@@ -257,8 +379,12 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
       return;
     }
 
-    setPendingSearch(queryPreview);
-    setNotice(null);
+    if (selectedSenders.length === 0 && !freeText.trim()) {
+      setNotice('This query may be too broad. Add sender(s) or text before searching.');
+      return;
+    }
+
+    void runSearch(null);
   };
 
   const reconnectNotice = (
@@ -431,11 +557,84 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
           </Button>
         </div>
 
+        {searchError ? <p className={styles.noticeWarning}>{searchError}</p> : null}
+
         {pendingSearch ? (
-          <div className={styles.emptyState}>
-            <p>Search endpoint not wired yet (Phase 2).</p>
-            <p className={styles.muted}>Pending query: {pendingSearch}</p>
-          </div>
+          <section className={styles.resultsPanel}>
+            <div className={styles.panelHeader}>
+              <h2>Results ({resultCount})</h2>
+              <span className={styles.itemMeta}>Query: {pendingSearch}</span>
+            </div>
+
+            {resultCount >= 50 && nextPageToken ? (
+              <p className={styles.noticeSubtle}>Showing first 50 results. Narrow your filters or paginate.</p>
+            ) : null}
+
+            <div className={styles.actions}>
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  const selected = searchResults.filter((message) => searchSelectionSet.has(message.id));
+                  if (selected.length === 0) {
+                    setNotice('Select at least one message to add.');
+                    return;
+                  }
+
+                  mergeIntoLocalStorage(
+                    selected.map(toStoredMessage),
+                    `Added ${selected.length} selected emails to Timeline selection.`,
+                  );
+                }}
+                disabled={searchSelectedIds.length === 0}
+              >
+                Add selected to Timeline
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() => setSearchSelectedIds(searchResults.map((message) => message.id))}
+                disabled={searchResults.length === 0}
+              >
+                Select all (this page)
+              </Button>
+              <Button variant="secondary" onClick={() => setSearchSelectedIds([])} disabled={searchSelectedIds.length === 0}>
+                Clear selection
+              </Button>
+              <Badge tone="neutral">{searchSelectedIds.length} selected on page</Badge>
+            </div>
+
+            {searchLoading ? <p className={styles.muted}>Searching Gmail…</p> : null}
+
+            <div className={styles.list}>
+              {searchResults.map((message) => (
+                <label key={message.id} className={styles.item}>
+                  <input
+                    type="checkbox"
+                    checked={searchSelectionSet.has(message.id)}
+                    onChange={() => toggleSearchSelection(message.id)}
+                  />
+                  <div>
+                    <div className={styles.itemHeader}>
+                      <strong>{message.subject || '(no subject)'}</strong>
+                      <span className={styles.itemMeta}>{new Date(message.internalDate).toLocaleString()}</span>
+                    </div>
+                    <p className={styles.itemMeta}>
+                      {message.from.name || message.from.email}
+                      {message.from.email && message.from.name !== message.from.email ? ` <${message.from.email}>` : ''}
+                    </p>
+                    <p className={styles.itemMeta}>{message.date}</p>
+                    <p className={styles.muted}>{message.snippet}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div className={styles.actions}>
+              <Button variant="secondary" onClick={() => void runSearch(nextPageToken)} disabled={!nextPageToken || searchLoading}>
+                Next page
+              </Button>
+              {searchRequestId ? <span className={styles.itemMeta}>Request ID: {searchRequestId}</span> : null}
+            </div>
+          </section>
         ) : null}
       </section>
 
