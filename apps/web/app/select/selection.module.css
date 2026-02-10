@@ -244,3 +244,21 @@
   gap: 8px;
   margin-left: auto;
 }
+
+.summarizeNowButton {
+  background: var(--accent, #2563eb);
+  color: #fff;
+}
+
+.summarizeNowButton:disabled {
+  opacity: 0.65;
+}
+
+.noticeSuccess {
+  margin: 0;
+  color: #14532d;
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  border-radius: 10px;
+  padding: 8px 10px;
+}

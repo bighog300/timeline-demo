@@ -4,7 +4,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import GmailSelectClient from './pageClient';
 
-describe('GmailSelectClient saved search run flow', () => {
+const baseSearchResult = {
+  id: 'msg-1',
+  threadId: 'thread-1',
+  internalDate: Date.now(),
+  snippet: 'Invoice attached',
+  from: { name: 'Billing', email: 'billing@example.com' },
+  subject: 'January invoice',
+  date: 'Mon, 1 Jan 2025 12:00:00 +0000',
+};
+
+describe('GmailSelectClient', () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -13,11 +23,7 @@ describe('GmailSelectClient saved search run flow', () => {
   it('runs a saved search using canonical query when Run is clicked', async () => {
     const fetchMock = vi
       .fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => ({ messages: [] }),
-      })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ messages: [] }) })
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -39,21 +45,7 @@ describe('GmailSelectClient saved search run flow', () => {
       .mockResolvedValueOnce({
         ok: true,
         status: 200,
-        json: async () => ({
-          resultCount: 1,
-          nextPageToken: null,
-          messages: [
-            {
-              id: 'msg-1',
-              threadId: 'thread-1',
-              internalDate: Date.now(),
-              snippet: 'Invoice attached',
-              from: { name: 'Billing', email: 'billing@example.com' },
-              subject: 'January invoice',
-              date: 'Mon, 1 Jan 2025 12:00:00 +0000',
-            },
-          ],
-        }),
+        json: async () => ({ resultCount: 1, nextPageToken: null, messages: [baseSearchResult] }),
       });
 
     vi.stubGlobal('fetch', fetchMock);
@@ -75,5 +67,90 @@ describe('GmailSelectClient saved search run flow', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ q: 'from:billing@example.com newer_than:30d', maxResults: 50, pageToken: null }),
     });
+  });
+
+  it('summarizes selected search results via timeline summarize endpoint', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ messages: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ sets: [] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ resultCount: 2, nextPageToken: null, messages: [baseSearchResult, { ...baseSearchResult, id: 'msg-2' }] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ artifacts: [{ sourceId: 'msg-1' }, { sourceId: 'msg-2' }], failed: [] }),
+      });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<GmailSelectClient isConfigured />);
+
+    await screen.findByText(/No saved searches yet/i);
+    fireEvent.change(screen.getByPlaceholderText(/Add sender email/i), { target: { value: 'billing@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add sender/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    await screen.findByText(/Results \(2\)/i);
+
+    fireEvent.click(screen.getByRole('button', { name: /Select all \(this page\)/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Summarize selected now/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/timeline/summarize', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          items: [
+            { source: 'gmail', id: 'msg-1' },
+            { source: 'gmail', id: 'msg-2' },
+          ],
+        }),
+      });
+    });
+
+    expect(await screen.findByText(/Summarized 2 emails/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open Timeline/i })).toHaveAttribute('href', '/timeline');
+  });
+
+  it('shows reconnect CTA when summarize returns reconnect_required', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ messages: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ sets: [] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ resultCount: 1, nextPageToken: null, messages: [baseSearchResult] }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        headers: new Headers({ 'x-request-id': 'req-401' }),
+        json: async () => ({ error: { code: 'reconnect_required', message: 'Reconnect required.' } }),
+        clone() {
+          return this;
+        },
+      });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<GmailSelectClient isConfigured />);
+
+    await screen.findByText(/No saved searches yet/i);
+    fireEvent.change(screen.getByPlaceholderText(/Add sender email/i), { target: { value: 'billing@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add sender/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    await screen.findByText(/Results \(1\)/i);
+
+    fireEvent.click(screen.getByRole('button', { name: /Select all \(this page\)/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Summarize selected now/i }));
+
+    expect(await screen.findByText(/Google connection expired/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Reconnect/i })).toHaveAttribute('href', '/connect');
   });
 });
