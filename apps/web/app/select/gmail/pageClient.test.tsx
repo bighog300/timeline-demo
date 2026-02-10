@@ -153,4 +153,105 @@ describe('GmailSelectClient', () => {
     expect(await screen.findByText(/Google connection expired/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Reconnect/i })).toHaveAttribute('href', '/connect');
   });
+
+  it('updates summarize progress while running multiple batches', async () => {
+    let resolveSecondBatch: ((value: { ok: boolean; status: number; json: () => Promise<{ artifacts: Array<{ sourceId: string }>; failed: [] }> }) => void) | null = null;
+    const secondBatchPromise = new Promise<{ ok: boolean; status: number; json: () => Promise<{ artifacts: Array<{ sourceId: string }>; failed: [] }> }>((resolve) => {
+      resolveSecondBatch = resolve;
+    });
+
+    const batchMessages = Array.from({ length: 11 }, (_, index) => ({
+      ...baseSearchResult,
+      id: `msg-${index + 1}`,
+      threadId: `thread-${index + 1}`,
+    }));
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ messages: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ sets: [] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ resultCount: 11, nextPageToken: null, messages: batchMessages }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ artifacts: batchMessages.slice(0, 10).map((message) => ({ sourceId: message.id })), failed: [] }),
+      })
+      .mockImplementationOnce(() => secondBatchPromise);
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<GmailSelectClient isConfigured />);
+
+    await screen.findByText(/No saved searches yet/i);
+    fireEvent.change(screen.getByPlaceholderText(/Add sender email/i), { target: { value: 'billing@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add sender/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    await screen.findByText(/Results \(11\)/i);
+
+    fireEvent.click(screen.getByRole('button', { name: /Select all \(this page\)/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Summarize selected now/i }));
+
+    expect(await screen.findByText('Summarizing 10 / 11…')).toBeInTheDocument();
+
+    resolveSecondBatch?.({
+      ok: true,
+      status: 200,
+      json: async () => ({ artifacts: [{ sourceId: 'msg-11' }], failed: [] }),
+    });
+
+    expect(await screen.findByText(/Summarized 11 emails/i)).toBeInTheDocument();
+  });
+
+  it('shows partial success summary when a later summarize batch fails', async () => {
+    const batchMessages = Array.from({ length: 15 }, (_, index) => ({
+      ...baseSearchResult,
+      id: `msg-${index + 1}`,
+      threadId: `thread-${index + 1}`,
+    }));
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ messages: [] }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ sets: [] }) })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ resultCount: 15, nextPageToken: null, messages: batchMessages }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ artifacts: batchMessages.slice(0, 10).map((message) => ({ sourceId: message.id })), failed: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        headers: new Headers({ 'x-request-id': 'req-partial-500' }),
+        json: async () => ({ error: { code: 'upstream_error', message: 'failed' } }),
+        clone() {
+          return this;
+        },
+      });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<GmailSelectClient isConfigured />);
+
+    await screen.findByText(/No saved searches yet/i);
+    fireEvent.change(screen.getByPlaceholderText(/Add sender email/i), { target: { value: 'billing@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: /Add sender/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+
+    await screen.findByText(/Results \(15\)/i);
+
+    fireEvent.click(screen.getByRole('button', { name: /Select all \(this page\)/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Summarize selected now/i }));
+
+    expect(await screen.findByText(/Summarized 10 of 15 emails\. 5 failed\. \(requestId: req-partial-500\)/i)).toBeInTheDocument();
+  });
 });

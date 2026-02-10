@@ -105,6 +105,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
   const [summarizeError, setSummarizeError] = useState<string | null>(null);
   const [summarizeRequestId, setSummarizeRequestId] = useState<string | null>(null);
   const [summarizedCount, setSummarizedCount] = useState<number | null>(null);
+  const [summarizePartialStatus, setSummarizePartialStatus] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedIds(parseStoredSelections().map((item) => item.id));
@@ -426,9 +427,13 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     setSummarizeError(null);
     setSummarizeRequestId(null);
     setSummarizedCount(null);
+    setSummarizePartialStatus(null);
 
     try {
       let totalArtifacts = 0;
+      let totalFailed = 0;
+      let partialFailureRequestId: string | null = null;
+      setSummarizeStatus(`Summarizing ${totalArtifacts} / ${selected.length}…`);
 
       for (let index = 0; index < selected.length; index += TIMELINE_SUMMARIZE_BATCH_SIZE) {
         const batch = selected.slice(index, index + TIMELINE_SUMMARIZE_BATCH_SIZE);
@@ -442,6 +447,14 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
 
         if (!response.ok) {
           const apiError = await parseApiError(response);
+          partialFailureRequestId = partialFailureRequestId ?? apiError?.requestId ?? null;
+
+          if (totalArtifacts > 0) {
+            totalFailed += batch.length;
+            setSummarizeStatus(`Summarizing ${totalArtifacts} / ${selected.length}…`);
+            continue;
+          }
+
           setSummarizeRequestId(apiError?.requestId ?? null);
           if (apiError?.code === 'reconnect_required') {
             setSummarizeError('reconnect_required');
@@ -464,11 +477,25 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
           return;
         }
 
-        const payload = (await response.json()) as { artifacts?: Array<{ sourceId?: string }> };
-        totalArtifacts += payload.artifacts?.length ?? 0;
+        const payload = (await response.json()) as {
+          artifacts?: Array<{ sourceId?: string }>;
+          failed?: Array<{ id?: string }>;
+        };
+        const batchSuccess = payload.artifacts?.length ?? 0;
+        const batchFailed = payload.failed?.length ?? Math.max(batch.length - batchSuccess, 0);
+
+        totalArtifacts += batchSuccess;
+        totalFailed += batchFailed;
+        setSummarizeStatus(`Summarizing ${totalArtifacts} / ${selected.length}…`);
       }
 
       setSummarizedCount(totalArtifacts);
+      if (totalFailed > 0) {
+        const requestIdText = partialFailureRequestId ? ` (requestId: ${partialFailureRequestId})` : '';
+        setSummarizePartialStatus(
+          `Summarized ${totalArtifacts} of ${selected.length} emails. ${totalFailed} failed.${requestIdText}`,
+        );
+      }
       setSummarizeStatus(null);
       setSummarizeError(null);
       setSearchSelectedIds([]);
@@ -923,6 +950,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
                 Summarized {summarizedCount} emails. <Link href="/timeline">Open Timeline</Link>
               </div>
             ) : null}
+            {summarizePartialStatus ? <p className={styles.noticeNeutral}>{summarizePartialStatus}</p> : null}
             {summarizeError === 'reconnect_required' ? (
               <div className={styles.notice}>
                 Google connection expired. <Link href="/connect">Reconnect</Link> and retry.
