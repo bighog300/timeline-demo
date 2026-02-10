@@ -6,6 +6,8 @@ import Link from 'next/link';
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
 import { buildGmailQuery, DateRangePreset, parseSender } from '../../lib/gmailQuery';
+import type { GmailSelectionSet } from '../../lib/selectionSets';
+import { hydrateGmailQueryControls } from './selectionSetHydration';
 import styles from '../selection.module.css';
 
 type GmailMessage = {
@@ -38,6 +40,12 @@ type SenderSuggestion = {
   email: string;
   name: string;
   count: number;
+};
+
+type SavedSelectionSetMetadata = {
+  id: string;
+  title: string;
+  updatedAt: string;
 };
 
 const STORAGE_KEY = 'timeline.gmailSelections';
@@ -85,6 +93,8 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
   const [searchSelectedIds, setSearchSelectedIds] = useState<string[]>([]);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [resultCount, setResultCount] = useState(0);
+  const [savedSets, setSavedSets] = useState<SavedSelectionSetMetadata[]>([]);
+  const [savedSetsLoading, setSavedSetsLoading] = useState(false);
 
   useEffect(() => {
     setSelectedIds(parseStoredSelections().map((item) => item.id));
@@ -118,6 +128,33 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     };
 
     fetchMessages();
+  }, [isConfigured]);
+
+  const loadSavedSelectionSets = async () => {
+    setSavedSetsLoading(true);
+    const response = await fetch('/api/selection-sets');
+    if (response.status === 401) {
+      setError('reconnect_required');
+      setSavedSetsLoading(false);
+      return;
+    }
+
+    if (!response.ok) {
+      setSavedSetsLoading(false);
+      return;
+    }
+
+    const payload = (await response.json()) as { sets?: SavedSelectionSetMetadata[] };
+    setSavedSets(payload.sets ?? []);
+    setSavedSetsLoading(false);
+  };
+
+  useEffect(() => {
+    if (!isConfigured) {
+      return;
+    }
+
+    void loadSavedSelectionSets();
   }, [isConfigured]);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
@@ -387,6 +424,109 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     void runSearch(null);
   };
 
+  const toPersistedDatePreset = (value: DateRangePreset): '7d' | '30d' | '90d' | 'custom' => {
+    if (value === '7') {
+      return '7d';
+    }
+    if (value === '30') {
+      return '30d';
+    }
+    if (value === '90') {
+      return '90d';
+    }
+    return 'custom';
+  };
+
+  const saveSelectionSet = async () => {
+    if (!queryPreview) {
+      setNotice('Query is empty. Adjust filters to continue.');
+      return;
+    }
+
+    const defaultTitle = `${selectedSenders[0] ?? 'Gmail search'} · ${daysBack === 'custom' ? 'Custom date' : `${daysBack} days`}`;
+    const rawTitle = window.prompt('Save search as selection set', defaultTitle);
+    if (!rawTitle) {
+      return;
+    }
+
+    const title = rawTitle.trim();
+    if (!title) {
+      setNotice('Selection set title is required.');
+      return;
+    }
+
+    const titleExists = savedSets.some((set) => set.title.toLowerCase() === title.toLowerCase());
+    if (titleExists) {
+      const shouldContinue = window.confirm('A saved search with this title already exists. Save anyway?');
+      if (!shouldContinue) {
+        return;
+      }
+    }
+
+    const response = await fetch('/api/selection-sets', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        title,
+        query: {
+          q: queryPreview,
+          senders: selectedSenders,
+          datePreset: toPersistedDatePreset(daysBack),
+          customAfter: daysBack === 'custom' && customAfter ? new Date(customAfter).toISOString() : null,
+          hasAttachment,
+          freeText,
+        },
+      }),
+    });
+
+    if (response.status === 401) {
+      setError('reconnect_required');
+      return;
+    }
+
+    if (!response.ok) {
+      setNotice('Unable to save selection set. Please try again.');
+      return;
+    }
+
+    setNotice(`Saved search as "${title}".`);
+    await loadSavedSelectionSets();
+  };
+
+  const applySavedSelectionSet = async (id: string) => {
+    const response = await fetch(`/api/selection-sets/${id}`);
+    if (response.status === 401) {
+      setError('reconnect_required');
+      return;
+    }
+
+    if (!response.ok) {
+      setNotice('Unable to load selection set.');
+      return;
+    }
+
+    const payload = (await response.json()) as { set?: GmailSelectionSet };
+    if (!payload.set) {
+      setNotice('Saved search payload was empty.');
+      return;
+    }
+
+    const hydrated = hydrateGmailQueryControls(payload.set);
+    setSelectedSenders(hydrated.selectedSenders);
+    setDaysBack(hydrated.daysBack);
+    setCustomAfter(hydrated.customAfter);
+    setHasAttachment(hydrated.hasAttachment);
+    setFreeText(hydrated.freeText);
+    setPendingSearch(null);
+    setSearchResults([]);
+    setSearchSelectedIds([]);
+    setSearchError(null);
+    setSearchRequestId(null);
+    setNextPageToken(null);
+    setResultCount(0);
+    setNotice(`Loaded saved search "${payload.set.title}". Click Search to run it.`);
+  };
+
   const reconnectNotice = (
     <div className={styles.notice}>
       Reconnect required. Please <Link href="/connect">connect your Google account</Link>.
@@ -423,6 +563,32 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
       {error === 'reconnect_required' ? reconnectNotice : null}
       {error && error !== 'reconnect_required' ? <div className={styles.notice}>{error}</div> : null}
       {notice ? <div className={styles.noticeNeutral}>{notice}</div> : null}
+
+      <section className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <h2>Saved searches</h2>
+          <Button variant="secondary" onClick={saveSelectionSet} disabled={!queryPreview}>
+            Save search as selection set
+          </Button>
+        </div>
+        {savedSetsLoading ? <p className={styles.muted}>Loading saved searches...</p> : null}
+        {!savedSetsLoading && savedSets.length === 0 ? (
+          <p className={styles.muted}>No saved searches yet.</p>
+        ) : null}
+        <div className={styles.savedSetList}>
+          {savedSets.map((set) => (
+            <button
+              key={set.id}
+              type="button"
+              className={styles.savedSetItem}
+              onClick={() => void applySavedSelectionSet(set.id)}
+            >
+              <span>{set.title}</span>
+              <span className={styles.itemMeta}>{new Date(set.updatedAt).toLocaleString()}</span>
+            </button>
+          ))}
+        </div>
+      </section>
 
       <section className={styles.panel}>
         <div className={styles.panelHeader}>

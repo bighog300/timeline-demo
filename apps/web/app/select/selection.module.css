@@ -215,3 +215,20 @@
   border-top: 1px solid var(--border);
   padding-top: 12px;
 }
+
+.savedSetList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.savedSetItem {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px 10px;
+  text-align: left;
+}
