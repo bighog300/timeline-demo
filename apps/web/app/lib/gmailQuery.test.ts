@@ -49,7 +49,17 @@ describe('parseSender', () => {
     });
   });
 
-  it('returns null for malformed headers', () => {
-    expect(parseSender('unknown sender')).toBeNull();
+  it('returns empty sender for malformed headers', () => {
+    expect(parseSender('unknown sender')).toEqual({
+      name: '',
+      email: '',
+    });
+  });
+
+  it('returns empty sender when bracketed email is invalid', () => {
+    expect(parseSender('No Email <not-an-email>')).toEqual({
+      name: '',
+      email: '',
+    });
   });
 });
