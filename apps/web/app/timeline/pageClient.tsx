@@ -421,9 +421,33 @@ export default function TimelinePageClient() {
     [driveSelections, gmailSelections],
   );
 
+  const mergedSelectionInputs = useMemo<TimelineSelectionInput[]>(() => {
+    const baseSelections = selectionInputs;
+    const selectionKeys = new Set(
+      baseSelections.map((selection) => artifactKey(selection.source, selection.id)),
+    );
+
+    const derivedSelectionsFromArtifacts = Object.values(artifacts)
+      .filter((artifact) => !selectionKeys.has(artifactKey(artifact.source, artifact.sourceId)))
+      .map((artifact) => ({
+        source: artifact.source,
+        id: artifact.sourceId,
+        title: artifact.title,
+        dateISO: artifact.createdAtISO,
+        metadata: {
+          from: artifact.sourceMetadata?.from,
+          subject: artifact.sourceMetadata?.subject,
+          mimeType: artifact.sourceMetadata?.mimeType,
+          modifiedTime: artifact.sourceMetadata?.driveModifiedTime,
+        },
+      }));
+
+    return [...baseSelections, ...derivedSelectionsFromArtifacts];
+  }, [artifacts, selectionInputs]);
+
   const timelineEntries = useMemo(
-    () => buildTimelineEntries(selectionInputs, artifacts, indexData),
-    [artifacts, indexData, selectionInputs],
+    () => buildTimelineEntries(mergedSelectionInputs, artifacts, indexData),
+    [artifacts, indexData, mergedSelectionInputs],
   );
 
   const sortedEntries = useMemo(() => sortEntries(timelineEntries), [timelineEntries]);
@@ -1496,6 +1520,9 @@ export default function TimelinePageClient() {
             {timelineEntries.length} selected, {summarizedCount} summarized, {pendingCount} pending
           </p>
           <p className={styles.syncMeta}>Last synced: {lastSyncLabel}</p>
+          <p className={styles.syncMeta}>
+            Showing summaries from Drive. Pending selections are shown when you add items.
+          </p>
         </div>
         <div className={styles.headerActions}>
           <div className={styles.actionRow}>
