@@ -22,6 +22,22 @@ type SelectionSet = SelectionSetMetadata & {
   query: { q: string };
 };
 
+type RunSummary = {
+  id: string;
+  action: 'run' | 'summarize';
+  status: 'success' | 'partial_success' | 'failed';
+  selectionSet: { id: string; title: string; source: 'gmail' | 'drive'; kind: SelectionSet['kind']; query: { q: string } };
+  startedAt: string;
+  finishedAt: string | null;
+  counts: {
+    foundCount: number;
+    processedCount: number;
+    failedCount: number;
+  };
+  requestIds: string[];
+  artifact: Record<string, unknown>;
+};
+
 type GmailResult = {
   id: string;
   threadId: string;
@@ -99,6 +115,19 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
   const [renameTitle, setRenameTitle] = useState('');
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
+  const [recentRuns, setRecentRuns] = useState<RunSummary[]>([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [runDetails, setRunDetails] = useState<RunSummary | null>(null);
+
+  const loadRuns = React.useCallback(async () => {
+    setRunsLoading(true);
+    const response = await fetch('/api/runs?limit=10');
+    const payload = (await response.json()) as { runs?: RunSummary[] };
+    if (response.ok) {
+      setRecentRuns(payload.runs ?? []);
+    }
+    setRunsLoading(false);
+  }, []);
 
   const loadSets = React.useCallback(async () => {
     setLoading(true);
@@ -122,7 +151,40 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
     }
 
     void loadSets();
-  }, [isConfigured, loadSets]);
+    void loadRuns();
+  }, [isConfigured, loadRuns, loadSets]);
+
+  const createRunArtifact = async ({
+    set,
+    action,
+    caps,
+  }: {
+    set: SelectionSet;
+    action: 'run' | 'summarize';
+    caps: { maxPages: number; maxItems: number; pageSize: number; batchSize: number };
+  }) => {
+    const response = await fetch('/api/runs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ selectionSet: set, action, caps }),
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload = (await response.json()) as { runId?: string };
+    return payload.runId ?? null;
+  };
+
+  const patchRunArtifact = async (runId: string, patch: Record<string, unknown>) => {
+    await fetch(`/api/runs/${runId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    await loadRuns();
+  };
 
   const visibleSets = useMemo(() => {
     const filtered = sets.filter((set) => set.title.toLowerCase().includes(filter.toLowerCase()));
@@ -163,6 +225,11 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
     }
 
     const endpoint = set.source === 'gmail' ? '/api/google/gmail/search' : '/api/google/drive/search';
+    const runId = await createRunArtifact({
+      set: fullSet,
+      action: 'run',
+      caps: { maxPages: 1, maxItems: 50, pageSize: 50, batchSize: 0 },
+    });
     const body = set.source === 'gmail' ? { q: fullSet.query.q, maxResults: 50, pageToken } : { q: fullSet.query.q, pageSize: 50, pageToken };
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -176,12 +243,41 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
       messages?: GmailResult[];
       files?: DriveResult[];
       nextPageToken?: string | null;
+      requestId?: string;
     };
 
     if (!response.ok) {
+      if (runId) {
+        await patchRunArtifact(runId, {
+          finishedAt: new Date().toISOString(),
+          result: {
+            status: 'failed',
+            foundCount: 0,
+            processedCount: 0,
+            failedCount: 0,
+            requestIds: payload.requestId ? [payload.requestId] : [],
+            note: payload.message ?? 'Run failed.',
+          },
+        });
+      }
       setRunError(payload.code === 'reconnect_required' ? 'Reconnect required.' : payload.message ?? 'Run failed.');
       setBusyId(null);
       return;
+    }
+
+    if (runId) {
+      const foundCount = ((set.source === 'gmail' ? payload.messages : payload.files) ?? []).length;
+      await patchRunArtifact(runId, {
+        finishedAt: new Date().toISOString(),
+        result: {
+          status: 'success',
+          foundCount,
+          processedCount: 0,
+          failedCount: 0,
+          requestIds: [],
+          note: null,
+        },
+      });
     }
 
     setResultsSet(set);
@@ -247,6 +343,12 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
     const endpoint = set.source === 'gmail' ? '/api/google/gmail/search' : '/api/google/drive/search';
     const ids: string[] = [];
     let pageToken: string | null = null;
+    const requestIds: string[] = [];
+    const runId = await createRunArtifact({
+      set: fullSet,
+      action: 'summarize',
+      caps: { maxPages: MAX_SUMMARY_PAGES, maxItems: MAX_SUMMARY_ITEMS, pageSize: 50, batchSize: SUMMARY_BATCH_SIZE },
+    });
 
     for (let page = 1; page <= MAX_SUMMARY_PAGES && ids.length < MAX_SUMMARY_ITEMS; page += 1) {
       setSummarizeStatus(`Collecting items (page ${page}/${MAX_SUMMARY_PAGES})...`);
@@ -269,6 +371,23 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
       };
 
       if (!response.ok) {
+        if (payload.requestId) {
+          requestIds.push(payload.requestId);
+        }
+        if (runId) {
+          await patchRunArtifact(runId, {
+            finishedAt: new Date().toISOString(),
+            result: {
+              status: 'failed',
+              foundCount: ids.length,
+              processedCount: 0,
+              failedCount: 0,
+              requestIds,
+              note: payload.message ?? 'Failed while collecting items.',
+            },
+            items: { ids: null, idsIncluded: false },
+          });
+        }
         if (payload.code === 'reconnect_required') {
           setSummarizeError('Reconnect required.');
         } else if (response.status === 429 || payload.code === 'rate_limited') {
@@ -311,6 +430,9 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
 
       if (!response.ok) {
         const apiError = await parseApiError(response);
+        if (apiError?.requestId) {
+          requestIds.push(apiError.requestId);
+        }
         if (apiError?.code === 'reconnect_required') {
           setSummarizeError('Reconnect required.');
         } else if (response.status === 429 || apiError?.code === 'rate_limited') {
@@ -333,6 +455,28 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
     setSummarizeDone({ total: success, failed });
     setConfirmSummarize(null);
     setBusyId(null);
+    if (runId) {
+      await patchRunArtifact(runId, {
+        finishedAt: new Date().toISOString(),
+        result: {
+          status: failed > 0 ? (success > 0 ? 'partial_success' : 'failed') : 'success',
+          foundCount: capped.length,
+          processedCount: success,
+          failedCount: failed,
+          requestIds,
+          note: failed > 0 ? 'One or more summarize batches failed.' : null,
+        },
+        items: { ids: null, idsIncluded: false },
+      });
+    }
+  };
+
+  const statusTone = (status: RunSummary['status']): 'success' | 'accent' | 'warning' => {
+    if (status === 'success') {
+      return 'success';
+    }
+
+    return status === 'partial_success' ? 'accent' : 'warning';
   };
 
   const saveRename = async (id: string) => {
@@ -443,6 +587,45 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
 
       {renderGroup('Gmail saved searches', grouped.gmail)}
       {renderGroup('Drive saved searches', grouped.drive)}
+
+      <section className={styles.group}>
+        <h2>Recent runs</h2>
+        {runsLoading ? <p className={styles.muted}>Loading recent runs…</p> : null}
+        {recentRuns.length === 0 ? (
+          <p className={styles.empty}>No run artifacts yet.</p>
+        ) : (
+          <ul className={styles.list}>
+            {recentRuns.map((run) => (
+              <li key={run.id} className={styles.item}>
+                <div className={styles.main}>
+                  <strong>{run.selectionSet.title}</strong>
+                  <div className={styles.meta}>
+                    <Badge tone={run.action === 'run' ? 'neutral' : 'accent'}>{run.action === 'run' ? 'Run' : 'Summarize'}</Badge>
+                    <Badge tone={statusTone(run.status)}>{run.status}</Badge>
+                    <time title={(run.finishedAt ?? run.startedAt)}>{formatRelative(run.finishedAt ?? run.startedAt)}</time>
+                  </div>
+                </div>
+                <p className={styles.muted}>
+                  Found: {run.counts.foundCount} • Processed: {run.counts.processedCount} • Failed: {run.counts.failedCount}
+                </p>
+                <div className={styles.actions}>
+                  <Button variant="secondary" onClick={() => setRunDetails(run)}>View details</Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {runDetails ? (
+        <section className={styles.confirmBox}>
+          <h3>Run details</h3>
+          <pre className={styles.runJson}>{JSON.stringify(runDetails.artifact, null, 2)}</pre>
+          <div className={styles.actions}>
+            <Button variant="secondary" onClick={() => setRunDetails(null)}>Close</Button>
+          </div>
+        </section>
+      ) : null}
 
       {confirmSummarize ? (
         <section className={styles.confirmBox}>

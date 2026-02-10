@@ -123,3 +123,14 @@
   outline: 2px solid #2563eb;
   outline-offset: 2px;
 }
+
+.runJson {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  max-height: 320px;
+  overflow: auto;
+  background: #f8fafc;
+  font-size: 12px;
+}
