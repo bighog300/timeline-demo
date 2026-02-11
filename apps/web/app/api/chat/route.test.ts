@@ -346,6 +346,12 @@ describe('POST /api/chat', () => {
 ## Key actors and entities
 - Actor [1].
 
+## Actor timelines
+- Actor timeline [1].
+
+## Themes grouped view
+- Theme grouping [1].
+
 ## Themes and turning points
 - Theme [1].
 
@@ -383,6 +389,8 @@ describe('POST /api/chat', () => {
     expect(response.status).toBe(200);
     expect(payload.reply).toContain('## Synthesized timeline');
     expect(payload.reply).toContain('## Key actors and entities');
+    expect(payload.reply).toContain('## Actor timelines');
+    expect(payload.reply).toContain('## Themes grouped view');
     expect(payload.reply).toContain('## Contradictions and uncertainties');
   });
 
@@ -411,6 +419,12 @@ describe('POST /api/chat', () => {
 
 ## Key actors and entities
 - Actor [1].
+
+## Actor timelines
+- Actor timeline [1].
+
+## Themes grouped view
+- Theme grouping [1].
 
 ## Themes and turning points
 - Theme [1].
@@ -448,8 +462,166 @@ describe('POST /api/chat', () => {
     const firstCall = mockCallLLM.mock.calls[0]?.[1];
     expect(firstCall?.systemPrompt).toContain('## Timeline summary');
     expect(firstCall?.systemPrompt).toContain('## Synthesized timeline');
+    expect(firstCall?.systemPrompt).toContain('## Actor timelines');
+    expect(firstCall?.systemPrompt).toContain('## Themes grouped view');
   });
 
+
+
+  it('filters extraction events without citations before synthesis write-up', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          answer: `## Synthesized timeline\n- Direct answer [1].`,
+          needsOriginals: false,
+          requestedArtifactIds: [],
+          reason: 'Sufficient summaries',
+        }),
+      })
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          entities: [
+            {
+              id: 'e1',
+              type: 'person',
+              canonical: 'A Person <a@example.com>',
+              aliases: ['A Person'],
+              confidence: 'high',
+              citations: [1],
+            },
+          ],
+          events: [
+            {
+              id: 'v1',
+              dateISO: null,
+              dateLabel: 'Unknown',
+              actors: ['e1'],
+              summary: 'Grounded event',
+              theme: 'coordination',
+              impact: 'Baseline',
+              citations: [1],
+            },
+            {
+              id: 'v2',
+              dateISO: null,
+              dateLabel: 'Unknown',
+              actors: ['e1'],
+              summary: 'Ungrounded event',
+              theme: 'coordination',
+              impact: 'Should be removed',
+              citations: [],
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({ text: `## Synthesized timeline\n- Planned answer [1].` });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Synthesize timeline', synthesisMode: true }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    const writeupCall = mockCallLLM.mock.calls[2]?.[1];
+    const planMessage = writeupCall?.messages?.find((msg: { content: string }) =>
+      msg.content.startsWith('PLAN JSON:'),
+    );
+    expect(planMessage?.content).toContain('Grounded event');
+    expect(planMessage?.content).not.toContain('Ungrounded event');
+  });
+
+  it('falls back to direct synthesis when extraction JSON is invalid', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          answer: `## Synthesized timeline
+- Event [1].
+
+## Key actors and entities
+- Actor [1].
+
+## Actor timelines
+- Actor timeline [1].
+
+## Themes grouped view
+- Theme grouping [1].
+
+## Themes and turning points
+- Theme [1].
+
+## Legal considerations (general information)
+- Note [1].
+- Not legal advice.
+
+## Psychological and interpersonal signals (non-clinical)
+- Signal [1].
+- Not a diagnosis.
+
+## Contradictions and uncertainties
+- Uncertainty [1].
+
+## Questions to clarify
+- Question?
+
+## Suggested next steps
+- Next step.`,
+          needsOriginals: false,
+          requestedArtifactIds: [],
+          reason: 'Sufficient summaries',
+        }),
+      })
+      .mockResolvedValueOnce({ text: 'not-json' });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Synthesize timeline', synthesisMode: true }),
+    });
+
+    const response = await POST(request);
+    const payload = (await response.json()) as { reply: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toContain('## Actor timelines');
+    expect(payload.reply).toContain('## Themes grouped view');
+  });
 
   it('falls back to stub when provider key is missing for non-admins', async () => {
     delete process.env.OPENAI_API_KEY;
