@@ -7,7 +7,6 @@ import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import Skeleton from '../components/ui/Skeleton';
-import { fetchWithTimeout } from '../lib/fetchWithTimeout';
 import styles from './page.module.css';
 
 type ChatMessage = {
@@ -37,10 +36,56 @@ type ChatStorage = {
   suggestions: string[];
 };
 
+type ChatErrorCode =
+  | 'not_configured'
+  | 'invalid_request'
+  | 'provider_unauthorized'
+  | 'provider_forbidden'
+  | 'rate_limited'
+  | 'upstream_timeout'
+  | 'upstream_error';
+
+type ChatApiErrorPayload = {
+  error?: {
+    code?: string;
+    message?: string;
+  };
+  error_code?: string;
+  requestId?: string;
+};
+
+type ChatErrorState = {
+  message: string;
+  requestId: string;
+  code: string | null;
+};
+
 const STORAGE_KEY = 'timeline-demo.chat';
 const ALLOW_ORIGINALS_SESSION_KEY = 'timeline.chat.allowOriginals';
 const ADVISOR_MODE_SESSION_KEY = 'timeline.chat.advisorMode';
 const MAX_HISTORY = 30;
+const CONFIG_ISSUE_CODES = new Set<ChatErrorCode>([
+  'not_configured',
+  'invalid_request',
+  'provider_unauthorized',
+  'provider_forbidden',
+]);
+
+const PROVIDER_ERROR_MESSAGES: Record<ChatErrorCode, string> = {
+  not_configured: 'Chat provider isn’t configured. Admin: check provider & model in /admin.',
+  invalid_request: 'Chat provider rejected the request (check model/parameters).',
+  provider_unauthorized: 'Chat provider credentials are invalid or expired.',
+  provider_forbidden: 'Chat provider request was forbidden (check account permissions).',
+  rate_limited: 'Chat provider rate limit exceeded. Try again later.',
+  upstream_timeout: 'Chat provider timed out. Try again later.',
+  upstream_error: 'Chat provider error. Please retry.',
+};
+
+const isChatErrorCode = (code: string | undefined): code is ChatErrorCode =>
+  typeof code === 'string' && code in PROVIDER_ERROR_MESSAGES;
+
+const isConfigIssueCode = (code: string | null): code is ChatErrorCode =>
+  typeof code === 'string' && CONFIG_ISSUE_CODES.has(code as ChatErrorCode);
 
 const createMessage = (role: ChatMessage['role'], content: string): ChatMessage => ({
   id: `${role}-${Date.now()}-${Math.random().toString(16).slice(2)}`,
@@ -48,11 +93,11 @@ const createMessage = (role: ChatMessage['role'], content: string): ChatMessage 
   content,
 });
 
-export default function ChatPageClient() {
+export default function ChatPageClient({ isAdmin = false }: { isAdmin?: boolean }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ChatErrorState | null>(null);
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
@@ -138,39 +183,64 @@ export default function ChatPageClient() {
       setLastPrompt(newMessage);
 
       try {
-        const response = await fetchWithTimeout('/api/chat', {
+        const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message: newMessage, allowOriginals, advisorMode }),
         });
 
-        const data = (await response.json()) as ChatResponse;
+        const data = (await response.json()) as ChatResponse | ChatApiErrorPayload;
+
+        if (!response.ok) {
+          const apiError = data as ChatApiErrorPayload;
+          const code = apiError.error?.code ?? apiError.error_code ?? null;
+          const maybeCode = code ?? undefined;
+          const requestId =
+            apiError.requestId ?? response.headers.get('x-request-id') ?? 'unknown';
+
+          if (isChatErrorCode(maybeCode)) {
+            setError({
+              message: PROVIDER_ERROR_MESSAGES[maybeCode],
+              requestId,
+              code: maybeCode,
+            });
+          } else {
+            setError({
+              message: `Chat failed (status ${response.status}).`,
+              requestId,
+              code,
+            });
+          }
+          setErrorStatus(response.status);
+          return;
+        }
+
+        const successfulResponse = data as ChatResponse;
         setMessages((prev) =>
           [
             ...prev,
             {
-              ...createMessage('assistant', data.reply),
-              citations: Array.isArray(data.citations) ? data.citations : [],
+              ...createMessage('assistant', successfulResponse.reply),
+              citations: Array.isArray(successfulResponse.citations)
+                ? successfulResponse.citations
+                : [],
             },
           ].slice(-MAX_HISTORY),
         );
-        setSuggestions(Array.isArray(data.suggested_actions) ? data.suggested_actions : []);
+        setSuggestions(
+          Array.isArray(successfulResponse.suggested_actions)
+            ? successfulResponse.suggested_actions
+            : [],
+        );
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
           return;
         }
-        const typedError = err as Error & { status?: number; requestId?: string };
-        if (
-          typeof typedError.status === 'number' &&
-          typeof typedError.requestId === 'string'
-        ) {
-          setError(
-            `Chat failed (status ${typedError.status}). Request ID: ${typedError.requestId}`,
-          );
-          setErrorStatus(typedError.status);
-        } else {
-          setError('We could not deliver that response. Please try again.');
-        }
+        setError({
+          message: 'We could not deliver that response. Please try again.',
+          requestId: 'unknown',
+          code: null,
+        });
       } finally {
         setLoading(false);
       }
@@ -295,7 +365,11 @@ export default function ChatPageClient() {
 
           {error ? (
             <div className={styles.errorBox}>
-              <p>{error}</p>
+              <p>{error.message}</p>
+              <p>Request ID: {error.requestId}</p>
+              {isConfigIssueCode(error.code) ? (
+                <p>{isAdmin ? 'Check /admin provider settings.' : 'Contact your administrator.'}</p>
+              ) : null}
               <div className={styles.errorActions}>
                 <Button type="button" variant="secondary" onClick={handleRetry}>
                   Retry

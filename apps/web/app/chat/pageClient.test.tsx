@@ -45,7 +45,6 @@ describe('ChatPageClient', () => {
     await waitFor(() => {
       expect((input as HTMLInputElement).value).toBe('Show priorities');
     });
-
   });
 
   it('stores allow originals and advisor mode toggles in sessionStorage and sends flags in payload', async () => {
@@ -122,7 +121,6 @@ describe('ChatPageClient', () => {
     render(<ChatPageClient />);
 
     expect(await screen.findByText(/Saved response/i)).toBeInTheDocument();
-
   });
 
   it('clears chat history and localStorage', async () => {
@@ -152,6 +150,101 @@ describe('ChatPageClient', () => {
       expect(screen.queryByText(/Temporary response/i)).not.toBeInTheDocument();
     });
     expect(localStorage.getItem(storageKey)).toBeNull();
+  });
 
+  it.each([
+    ['not_configured', 'Chat provider isn’t configured. Admin: check provider & model in /admin.'],
+    ['invalid_request', 'Chat provider rejected the request (check model/parameters).'],
+    ['provider_unauthorized', 'Chat provider credentials are invalid or expired.'],
+    ['provider_forbidden', 'Chat provider request was forbidden (check account permissions).'],
+    ['rate_limited', 'Chat provider rate limit exceeded. Try again later.'],
+    ['upstream_timeout', 'Chat provider timed out. Try again later.'],
+    ['upstream_error', 'Chat provider error. Please retry.'],
+  ])('shows mapped provider error message for code %s', async (code, expectedMessage) => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: { code, message: 'Raw provider error' },
+          requestId: 'req-provider-001',
+        }),
+        { status: 502, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ChatPageClient />);
+
+    const input = screen.getByLabelText(/chat input/i);
+    fireEvent.change(input, { target: { value: 'trigger error' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText(expectedMessage)).toBeInTheDocument();
+    expect(screen.getByText(/request id:\s*req-provider-001/i)).toBeInTheDocument();
+  });
+
+  it('falls back to generic error for unrecognized code and still shows request ID', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: { code: 'something_new', message: 'Unknown error code' },
+          requestId: 'req-generic-001',
+        }),
+        { status: 500, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ChatPageClient />);
+
+    const input = screen.getByLabelText(/chat input/i);
+    fireEvent.change(input, { target: { value: 'trigger generic error' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('Chat failed (status 500).')).toBeInTheDocument();
+    expect(screen.getByText(/request id:\s*req-generic-001/i)).toBeInTheDocument();
+  });
+
+  it('shows admin config hint for provider config issue codes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: { code: 'provider_unauthorized', message: 'bad creds' },
+          requestId: 'req-admin-001',
+        }),
+        { status: 401, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ChatPageClient isAdmin />);
+
+    const input = screen.getByLabelText(/chat input/i);
+    fireEvent.change(input, { target: { value: 'trigger admin hint' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('Check /admin provider settings.')).toBeInTheDocument();
+    expect(screen.queryByText('Contact your administrator.')).not.toBeInTheDocument();
+  });
+
+  it('shows non-admin hint for provider config issue codes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: { code: 'invalid_request', message: 'bad request' },
+          requestId: 'req-user-001',
+        }),
+        { status: 400, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ChatPageClient isAdmin={false} />);
+
+    const input = screen.getByLabelText(/chat input/i);
+    fireEvent.change(input, { target: { value: 'trigger user hint' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText('Contact your administrator.')).toBeInTheDocument();
+    expect(screen.queryByText('Check /admin provider settings.')).not.toBeInTheDocument();
   });
 });
