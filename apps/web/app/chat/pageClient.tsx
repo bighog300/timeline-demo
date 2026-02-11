@@ -16,12 +16,25 @@ type ChatMessage = {
   citations?: ChatCitation[];
 };
 
-type ChatCitation = {
-  artifactId: string;
-  title: string;
-  dateISO?: string;
-  kind: 'summary' | 'index' | 'selection_set' | 'original';
-};
+type ChatCitation =
+  | {
+      artifactId: string;
+      title: string;
+      dateISO?: string;
+      kind: 'summary' | 'index' | 'original';
+    }
+  | {
+      artifactId: string;
+      title: string;
+      kind: 'selection_set';
+      selectionSetId: string;
+    }
+  | {
+      artifactId: string;
+      title: string;
+      kind: 'run';
+      runId: string;
+    };
 
 type ChatResponse = {
   reply: string;
@@ -342,19 +355,21 @@ export default function ChatPageClient({ isAdmin = false }: { isAdmin?: boolean 
                     <div className={styles.citations}>
                       <p className={styles.citationsLabel}>Sources</p>
                       <ul className={styles.citationsList}>
-                        {message.citations.map((citation, index) => (
-                          <li key={`${citation.artifactId}-${index}`}>
-                            <a
-                              href={`/timeline?artifactId=${encodeURIComponent(
-                                citation.artifactId,
-                              )}`}
-                              className={styles.citationLink}
-                            >
-                              {citation.title}
-                              {citation.dateISO ? ` (${citation.dateISO})` : ''}
-                            </a>
-                          </li>
-                        ))}
+                        {message.citations.map((citation, index) => {
+                          const href =
+                            citation.kind === 'summary' || citation.kind === 'index' || citation.kind === 'original'
+                              ? `/timeline?artifactId=${encodeURIComponent(citation.artifactId)}`
+                              : '/selection-sets';
+
+                          return (
+                            <li key={`${citation.artifactId}-${index}`}>
+                              <a href={href} className={styles.citationLink}>
+                                {citation.title}
+                                {'dateISO' in citation && citation.dateISO ? ` (${citation.dateISO})` : ''}
+                              </a>
+                            </li>
+                          );
+                        })}
                       </ul>
                     </div>
                   ) : null}

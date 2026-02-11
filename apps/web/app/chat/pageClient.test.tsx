@@ -152,6 +152,41 @@ describe('ChatPageClient', () => {
     expect(localStorage.getItem(storageKey)).toBeNull();
   });
 
+
+  it('renders selection set and run citations to /selection-sets while keeping summary links', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          reply: 'With citations.',
+          citations: [
+            { artifactId: 'summary-1', title: 'Launch Plan', kind: 'summary', dateISO: '2024-01-02T00:00:00.000Z' },
+            { artifactId: 'set-1', title: 'Saved Search One', kind: 'selection_set', selectionSetId: 'set-1' },
+            { artifactId: 'run-1', title: 'Run run-1', kind: 'run', runId: 'run-1' },
+          ],
+          suggested_actions: [],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ChatPageClient />);
+
+    const input = screen.getByLabelText(/chat input/i);
+    fireEvent.change(input, { target: { value: 'show citations' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    expect(await screen.findByText(/With citations\./i)).toBeInTheDocument();
+
+    const launchLink = screen.getByRole('link', { name: /Launch Plan/i });
+    const setLink = screen.getByRole('link', { name: /Saved Search One/i });
+    const runLink = screen.getByRole('link', { name: /Run run-1/i });
+
+    expect(launchLink.getAttribute('href')).toContain('/timeline?artifactId=summary-1');
+    expect(setLink.getAttribute('href')).toBe('/selection-sets');
+    expect(runLink.getAttribute('href')).toBe('/selection-sets');
+  });
+
   it.each([
     ['not_configured', 'Chat provider isn’t configured. Admin: check provider & model in /admin.'],
     ['invalid_request', 'Chat provider rejected the request (check model/parameters).'],

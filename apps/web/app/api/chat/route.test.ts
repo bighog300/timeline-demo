@@ -237,6 +237,89 @@ describe('POST /api/chat', () => {
     expect(payload.reply).toContain('## Psychological and interpersonal signals (non-clinical)');
   });
 
+
+  it('includes saved search and run labels in advisor context and returns metadata citations', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({
+      id: 'folder-1',
+      name: 'Timeline Demo (App Data)',
+    });
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        type: 'admin_settings',
+        version: 1,
+        provider: 'stub',
+        model: 'stub',
+        systemPrompt: '',
+        maxContextItems: 8,
+        temperature: 0.2,
+        updatedAtISO: '2024-01-01T00:00:00.000Z',
+      },
+      fileId: undefined,
+      webViewLink: undefined,
+    });
+    mockBuildContextPack.mockResolvedValue({
+      items: [
+        defaultContextItem,
+        {
+          kind: 'selection_set',
+          id: 'set-1',
+          title: 'Saved Employment Search',
+          source: 'gmail',
+          q: 'termination manager',
+          updatedAtISO: '2024-05-01T00:00:00.000Z',
+          text: 'Saved search metadata only.',
+        },
+        {
+          kind: 'run',
+          id: 'run-1',
+          action: 'summarize',
+          selectionSetId: 'set-1',
+          selectionSetTitle: 'Saved Employment Search',
+          startedAtISO: '2024-05-01T00:10:00.000Z',
+          finishedAtISO: '2024-05-01T00:11:00.000Z',
+          status: 'partial_success',
+          foundCount: 10,
+          processedCount: 8,
+          failedCount: 2,
+          requestIds: ['req-1'],
+          text: 'Run metadata only.',
+        },
+      ],
+      debug: { usedIndex: true, totalConsidered: 3 },
+    });
+    mockCallLLM.mockResolvedValue({ text: '[stub: answer]' });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'What have I worked on?', advisorMode: true }),
+    });
+
+    const response = await POST(request);
+    const payload = (await response.json()) as {
+      citations: Array<{ kind: string; title: string; selectionSetId?: string; runId?: string }>;
+    };
+
+    const firstCall = mockCallLLM.mock.calls[0]?.[1];
+    const contextMessage = firstCall?.messages?.[0]?.content ?? '';
+
+    expect(contextMessage).toContain('(SAVED SEARCH)');
+    expect(contextMessage).toContain('(RUN)');
+    expect(response.status).toBe(200);
+    expect(payload.citations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'summary', title: 'Launch Plan' }),
+        expect.objectContaining({ kind: 'selection_set', selectionSetId: 'set-1' }),
+        expect.objectContaining({ kind: 'run', runId: 'run-1' }),
+      ]),
+    );
+  });
+
   it('falls back to stub when provider key is missing for non-admins', async () => {
     delete process.env.OPENAI_API_KEY;
     mockGetGoogleSession.mockResolvedValue({
