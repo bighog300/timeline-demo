@@ -39,6 +39,7 @@ type ChatStorage = {
 
 const STORAGE_KEY = 'timeline-demo.chat';
 const ALLOW_ORIGINALS_SESSION_KEY = 'timeline.chat.allowOriginals';
+const ADVISOR_MODE_SESSION_KEY = 'timeline.chat.advisorMode';
 const MAX_HISTORY = 30;
 
 const createMessage = (role: ChatMessage['role'], content: string): ChatMessage => ({
@@ -56,6 +57,7 @@ export default function ChatPageClient() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
   const [allowOriginals, setAllowOriginals] = useState(false);
+  const [advisorMode, setAdvisorMode] = useState(true);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -94,6 +96,20 @@ export default function ChatPageClient() {
       return;
     }
 
+    const stored = window.sessionStorage.getItem(ADVISOR_MODE_SESSION_KEY);
+    if (stored === null) {
+      setAdvisorMode(true);
+      window.sessionStorage.setItem(ADVISOR_MODE_SESSION_KEY, 'true');
+      return;
+    }
+    setAdvisorMode(stored === 'true');
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
     if (messages.length === 0 && suggestions.length === 0) {
       window.localStorage.removeItem(STORAGE_KEY);
       return;
@@ -125,7 +141,7 @@ export default function ChatPageClient() {
         const response = await fetchWithTimeout('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: newMessage, allowOriginals }),
+          body: JSON.stringify({ message: newMessage, allowOriginals, advisorMode }),
         });
 
         const data = (await response.json()) as ChatResponse;
@@ -159,7 +175,7 @@ export default function ChatPageClient() {
         setLoading(false);
       }
     },
-    [allowOriginals, setMessages],
+    [advisorMode, allowOriginals, setMessages],
   );
 
   const handleAllowOriginalsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -173,6 +189,14 @@ export default function ChatPageClient() {
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     void sendMessage(input);
+  };
+
+  const handleAdvisorModeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const next = event.target.checked;
+    setAdvisorMode(next);
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(ADVISOR_MODE_SESSION_KEY, next ? 'true' : 'false');
+    }
   };
 
   const handleRetry = () => {
@@ -303,19 +327,35 @@ export default function ChatPageClient() {
             </Button>
           </form>
 
-          <div className={styles.toggleRow}>
-            <label className={styles.toggleLabel}>
-              <input
-                type="checkbox"
-                checked={allowOriginals}
-                onChange={handleAllowOriginalsChange}
-              />
-              <span>Allow opening originals (this session)</span>
-            </label>
-            <p className={styles.toggleHelp}>
-              When enabled, Chat may fetch the original email/file for relevant sources to answer
-              more accurately. Originals are not stored.
-            </p>
+          <div className={styles.toggleGroup}>
+            <div className={styles.toggleRow}>
+              <label className={styles.toggleLabel}>
+                <input
+                  type="checkbox"
+                  checked={allowOriginals}
+                  onChange={handleAllowOriginalsChange}
+                />
+                <span>Allow opening originals (this session)</span>
+              </label>
+              <p className={styles.toggleHelp}>
+                When enabled, Chat may fetch the original email/file for relevant sources to answer
+                more accurately. Originals are not stored.
+              </p>
+            </div>
+
+            <div className={styles.toggleRow}>
+              <label className={styles.toggleLabel}>
+                <input
+                  type="checkbox"
+                  checked={advisorMode}
+                  onChange={handleAdvisorModeChange}
+                />
+                <span>Advisor mode (timeline insight)</span>
+              </label>
+              <p className={styles.toggleHelp}>
+                Structures answers as a timeline review with legal and psychological issue-spotting.
+              </p>
+            </div>
           </div>
 
           {suggestionList.length > 0 ? (

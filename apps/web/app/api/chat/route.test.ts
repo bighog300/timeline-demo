@@ -171,6 +171,72 @@ describe('POST /api/chat', () => {
     expect(payload.requestId).toEqual(expect.any(String));
   });
 
+
+  it('returns advisor structured headings when advisorMode is enabled with stub provider', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({
+      id: 'folder-1',
+      name: 'Timeline Demo (App Data)',
+    });
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        type: 'admin_settings',
+        version: 1,
+        provider: 'stub',
+        model: 'stub',
+        systemPrompt: '',
+        maxContextItems: 8,
+        temperature: 0.2,
+        updatedAtISO: '2024-01-01T00:00:00.000Z',
+      },
+      fileId: undefined,
+      webViewLink: undefined,
+    });
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM.mockResolvedValue({
+      text: `## Timeline summary
+- Event from source [1].
+
+## What stands out
+- Pattern [1].
+
+## Legal considerations (general information)
+- This may be relevant in context [1].
+- Not legal advice.
+
+## Psychological and interpersonal signals (non-clinical)
+- A communication dynamic may be present [1].
+- Not a diagnosis.
+
+## Questions to clarify
+- What happened first?
+
+## Suggested next steps
+- Open original for SOURCE 1.`,
+    });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Review this timeline', advisorMode: true }),
+    });
+
+    const response = await POST(request);
+    const payload = (await response.json()) as { reply: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toContain('## Timeline summary');
+    expect(payload.reply).toContain('## Legal considerations (general information)');
+    expect(payload.reply).toContain('## Psychological and interpersonal signals (non-clinical)');
+  });
+
   it('falls back to stub when provider key is missing for non-admins', async () => {
     delete process.env.OPENAI_API_KEY;
     mockGetGoogleSession.mockResolvedValue({
@@ -219,6 +285,41 @@ describe('POST /api/chat', () => {
     expect(response.status).toBe(200);
     expect(payload.provider).toEqual({ name: 'stub', model: 'stub' });
     expect(payload.reply).toContain('[stub:');
+  });
+
+
+  it('falls back safely when router returns invalid JSON in advisor mode', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM.mockResolvedValue({ text: 'not json' });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Need insights', advisorMode: true }),
+    });
+
+    const response = await POST(request);
+    const payload = (await response.json()) as { reply: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toContain('## Timeline summary');
+    expect(payload.reply).toContain('## Suggested next steps');
   });
 
   it('does not fetch originals when allowOriginals is false', async () => {
