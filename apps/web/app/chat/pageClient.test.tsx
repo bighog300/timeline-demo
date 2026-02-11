@@ -6,6 +6,7 @@ import ChatPageClient from './pageClient';
 
 describe('ChatPageClient', () => {
   const storageKey = 'timeline-demo.chat';
+  const allowOriginalsKey = 'timeline.chat.allowOriginals';
 
   beforeEach(() => {
     localStorage.clear();
@@ -43,6 +44,41 @@ describe('ChatPageClient', () => {
       expect((input as HTMLInputElement).value).toBe('Show priorities');
     });
 
+  });
+
+  it('stores allow originals toggle in sessionStorage and sends flag in payload', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          reply: 'Done.',
+          suggested_actions: [],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ChatPageClient />);
+
+    const toggle = screen.getByRole('checkbox', {
+      name: /allow opening originals \(this session\)/i,
+    });
+    fireEvent.click(toggle);
+
+    expect(sessionStorage.getItem(allowOriginalsKey)).toBe('true');
+
+    const input = screen.getByLabelText(/chat input/i);
+    fireEvent.change(input, { target: { value: 'Use originals' } });
+    fireEvent.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalled();
+    });
+
+    const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      allowOriginals: boolean;
+    };
+    expect(payload.allowOriginals).toBe(true);
   });
 
   it('persists chat messages to localStorage and restores them on reload', async () => {

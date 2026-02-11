@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { createHash, randomUUID } from 'crypto';
 
 import { isAdminSession } from '../../lib/adminAuth';
 import { readAdminSettingsFromDrive } from '../../lib/adminSettingsDrive';
@@ -9,18 +10,31 @@ import {
 import { buildContextPack, buildContextString } from '../../lib/chatContext';
 import { getGoogleAccessToken, getGoogleSession } from '../../lib/googleAuth';
 import { createDriveClient } from '../../lib/googleDrive';
+import { createGmailClient } from '../../lib/googleGmail';
 import { logGoogleError, mapGoogleError } from '../../lib/googleRequest';
 import { NotConfiguredError } from '../../lib/llm/errors';
 import { callLLM } from '../../lib/llm/index';
 import type { LLMProviderName } from '../../lib/llm/types';
 import { hashUserHint, logError, logInfo, logWarn, safeError } from '../../lib/logger';
+import {
+  fetchOriginalTextForArtifact,
+  MAX_ORIGINAL_CHARS_TOTAL,
+  type OpenedOriginal,
+} from '../../lib/originals';
 import { createCtx, withRequestId } from '../../lib/requestContext';
 
 type ChatCitation = {
   artifactId: string;
   title: string;
   dateISO?: string;
-  kind: 'summary' | 'index' | 'selection_set';
+  kind: 'summary' | 'index' | 'selection_set' | 'original';
+};
+
+type RouterDecision = {
+  answer: string;
+  needsOriginals: boolean;
+  requestedArtifactIds: string[];
+  reason: string;
 };
 
 type ChatResponse = {
@@ -84,6 +98,82 @@ const buildSuggestedActions = (message: string) => {
 const jsonChatError = (status: number, payload: ChatErrorResponse) =>
   NextResponse.json(payload, { status });
 
+const MAX_REQUESTED_ORIGINALS = 3;
+
+const ORIGINALS_ROUTER_PROMPT = [
+  'Return valid JSON only with keys: answer, needsOriginals, requestedArtifactIds, reason.',
+  'requestedArtifactIds must include only SOURCE artifact ids from context and at most 3 entries.',
+  'Set needsOriginals=true only if details are unavailable from summaries and originals are needed.',
+  'Keep answer grounded in summaries and cite as [1], [2].',
+].join('\n');
+
+const parseRouterDecision = (value: string): RouterDecision | null => {
+  const cleaned = value.trim().replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+  try {
+    const parsed = JSON.parse(cleaned) as Partial<RouterDecision>;
+    if (typeof parsed.answer !== 'string') {
+      return null;
+    }
+    return {
+      answer: parsed.answer,
+      needsOriginals: Boolean(parsed.needsOriginals),
+      requestedArtifactIds: Array.isArray(parsed.requestedArtifactIds)
+        ? parsed.requestedArtifactIds.filter((id): id is string => typeof id === 'string').slice(0, 3)
+        : [],
+      reason: typeof parsed.reason === 'string' ? parsed.reason : '',
+    };
+  } catch {
+    return null;
+  }
+};
+
+const hashQuestion = (message: string) => createHash('sha256').update(message).digest('hex');
+
+const writeChatRunArtifact = async (
+  drive: ReturnType<typeof createDriveClient>,
+  folderId: string,
+  payload: {
+    message: string;
+    opened: Array<{ artifactId: string; source: 'gmail' | 'drive'; sourceId: string }>;
+    truncatedCount: number;
+    status: 'success' | 'partial' | 'failed';
+    requestIds: string[];
+    startedAt: string;
+    finishedAt: string;
+  },
+) => {
+  const runId = randomUUID();
+  await drive.files.create({
+    requestBody: {
+      name: `ChatRun-${runId}.json`,
+      parents: [folderId],
+      mimeType: 'application/json',
+    },
+    media: {
+      mimeType: 'application/json',
+      body: JSON.stringify(
+        {
+          kind: 'chat_originals_opened',
+          version: 1,
+          startedAt: payload.startedAt,
+          finishedAt: payload.finishedAt,
+          questionHash: hashQuestion(payload.message),
+          opened: payload.opened,
+          counts: {
+            openedCount: payload.opened.length,
+            truncatedCount: payload.truncatedCount,
+          },
+          status: payload.status,
+          requestIds: payload.requestIds,
+        },
+        null,
+        2,
+      ),
+    },
+    fields: 'id',
+  });
+};
+
 export async function POST(request: Request) {
   const ctx = createCtx(request, '/api/chat');
   const startedAt = Date.now();
@@ -97,6 +187,7 @@ export async function POST(request: Request) {
 
   const body = await request.json().catch(() => ({}));
   const message = typeof body?.message === 'string' ? body.message.trim() : '';
+  const allowOriginals = body?.allowOriginals === true;
 
   const session = await getGoogleSession();
   const accessToken = await getGoogleAccessToken();
@@ -223,6 +314,7 @@ export async function POST(request: Request) {
         ]
       : []),
     { role: 'user' as const, content: message || 'Summarize recent timeline context.' },
+    { role: 'user' as const, content: ORIGINALS_ROUTER_PROMPT },
   ];
 
   const llmRequest = {
@@ -273,16 +365,127 @@ export async function POST(request: Request) {
     }
   }
 
-  const citations: ChatCitation[] = items.map((item) => ({
+  const baseCitations: ChatCitation[] = items.map((item) => ({
     artifactId: item.artifactId,
     title: item.title,
     dateISO: item.dateISO,
     kind: item.kind,
   }));
 
-  const reply =
+  const routerDecision =
+    llmProvider === 'stub'
+      ? null
+      : parseRouterDecision(llmResponseText);
+
+  let reply =
+    routerDecision?.answer ||
     llmResponseText ||
     'I could not find enough detail in your saved summaries. Try syncing or summarizing more items.';
+  let citations = baseCitations;
+
+  if (!allowOriginals && routerDecision?.needsOriginals) {
+    reply = `${reply}\n\nEnable “Allow opening originals” to verify details.`;
+  }
+
+  if (allowOriginals && routerDecision?.needsOriginals) {
+    const requestedSet = new Set(routerDecision.requestedArtifactIds.slice(0, MAX_REQUESTED_ORIGINALS));
+    const candidates = items
+      .filter((item) => requestedSet.has(item.artifactId))
+      .slice(0, MAX_REQUESTED_ORIGINALS);
+    const gmail = createGmailClient(accessToken);
+    const openedOriginals: OpenedOriginal[] = [];
+    const originalErrors: string[] = [];
+    let totalChars = 0;
+
+    for (const item of candidates) {
+      try {
+        const opened = await fetchOriginalTextForArtifact(drive, gmail, {
+          artifactId: item.artifactId,
+          title: item.title,
+          source: item.source,
+          sourceId: item.sourceId,
+        });
+        if (totalChars >= MAX_ORIGINAL_CHARS_TOTAL) {
+          continue;
+        }
+        const remaining = MAX_ORIGINAL_CHARS_TOTAL - totalChars;
+        const text = opened.text.length > remaining ? `${opened.text.slice(0, Math.max(0, remaining - 15)).trimEnd()}...[truncated]` : opened.text;
+        totalChars += text.length;
+        openedOriginals.push({ ...opened, text, truncated: opened.truncated || text !== opened.text });
+      } catch (error) {
+        originalErrors.push(`I couldn't open the original for SOURCE ${item.title} (${item.artifactId}).`);
+        logWarn(ctx, 'chat_original_fetch_failed', {
+          artifactId: item.artifactId,
+          source: item.source,
+          error: safeError(error),
+        });
+      }
+    }
+
+    if (openedOriginals.length > 0) {
+      const originalContext = openedOriginals
+        .map(
+          (item, index) =>
+            `ORIGINAL SOURCE ${index + 1} (${item.artifactId}): ${item.title}\n${item.text}`,
+        )
+        .join('\n\n');
+      const pass2Messages = [
+        ...(context
+          ? [{ role: 'user' as const, content: `Summary context:\n${context}` }]
+          : []),
+        { role: 'user' as const, content: `Original context:\n${originalContext}` },
+        {
+          role: 'user' as const,
+          content:
+            'Use summary and original context to answer. Cite summary sources [1], [2] and original sources as [O1], [O2] when used.',
+        },
+        { role: 'user' as const, content: message || 'Summarize recent timeline context.' },
+      ];
+
+      try {
+        const pass2 = await callLLM(llmProvider, {
+          model: llmProvider === 'stub' ? 'stub' : model,
+          systemPrompt,
+          messages: pass2Messages,
+          temperature: adminSettings?.temperature,
+        });
+        reply = pass2.text || reply;
+      } catch (error) {
+        logWarn(ctx, 'chat_pass2_failed', { error: safeError(error) });
+      }
+
+      citations = [
+        ...baseCitations,
+        ...openedOriginals.map((item) => ({
+          artifactId: item.artifactId,
+          title: `${item.title} (original)`,
+          kind: 'original' as const,
+        })),
+      ];
+
+      if (originalErrors.length > 0) {
+        reply = `${reply}\n\n${originalErrors.join(' ')}`;
+      }
+
+      try {
+        await writeChatRunArtifact(drive, driveFolderId, {
+          message,
+          opened: openedOriginals.map((item) => ({
+            artifactId: item.artifactId,
+            source: item.source,
+            sourceId: item.sourceId,
+          })),
+          truncatedCount: openedOriginals.filter((item) => item.truncated).length,
+          status: originalErrors.length === 0 ? 'success' : 'partial',
+          requestIds: [ctx.requestId],
+          startedAt: new Date(startedAt).toISOString(),
+          finishedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        logWarn(ctx, 'chat_run_artifact_failed', { error: safeError(error) });
+      }
+    }
+  }
 
   const responsePayload: ChatResponse = {
     reply,

@@ -21,7 +21,7 @@ type ChatCitation = {
   artifactId: string;
   title: string;
   dateISO?: string;
-  kind: 'summary' | 'index' | 'selection_set';
+  kind: 'summary' | 'index' | 'selection_set' | 'original';
 };
 
 type ChatResponse = {
@@ -38,6 +38,7 @@ type ChatStorage = {
 };
 
 const STORAGE_KEY = 'timeline-demo.chat';
+const ALLOW_ORIGINALS_SESSION_KEY = 'timeline.chat.allowOriginals';
 const MAX_HISTORY = 30;
 
 const createMessage = (role: ChatMessage['role'], content: string): ChatMessage => ({
@@ -54,6 +55,7 @@ export default function ChatPageClient() {
   const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
+  const [allowOriginals, setAllowOriginals] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -76,6 +78,15 @@ export default function ChatPageClient() {
     } catch {
       window.localStorage.removeItem(STORAGE_KEY);
     }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const stored = window.sessionStorage.getItem(ALLOW_ORIGINALS_SESSION_KEY);
+    setAllowOriginals(stored === 'true');
   }, []);
 
   useEffect(() => {
@@ -114,7 +125,7 @@ export default function ChatPageClient() {
         const response = await fetchWithTimeout('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: newMessage }),
+          body: JSON.stringify({ message: newMessage, allowOriginals }),
         });
 
         const data = (await response.json()) as ChatResponse;
@@ -148,8 +159,16 @@ export default function ChatPageClient() {
         setLoading(false);
       }
     },
-    [setMessages],
+    [allowOriginals, setMessages],
   );
+
+  const handleAllowOriginalsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const next = event.target.checked;
+    setAllowOriginals(next);
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(ALLOW_ORIGINALS_SESSION_KEY, next ? 'true' : 'false');
+    }
+  };
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -283,6 +302,21 @@ export default function ChatPageClient() {
               {loading ? 'Sending...' : 'Send'}
             </Button>
           </form>
+
+          <div className={styles.toggleRow}>
+            <label className={styles.toggleLabel}>
+              <input
+                type="checkbox"
+                checked={allowOriginals}
+                onChange={handleAllowOriginalsChange}
+              />
+              <span>Allow opening originals (this session)</span>
+            </label>
+            <p className={styles.toggleHelp}>
+              When enabled, Chat may fetch the original email/file for relevant sources to answer
+              more accurately. Originals are not stored.
+            </p>
+          </div>
 
           {suggestionList.length > 0 ? (
             <div className={styles.suggestionRow}>
