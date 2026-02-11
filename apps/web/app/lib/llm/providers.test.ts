@@ -39,6 +39,18 @@ describe('LLM providers', () => {
     );
   });
 
+
+  it('returns advisor headings when system prompt requests advisor mode', async () => {
+    const response = await callStub({
+      ...baseRequest,
+      systemPrompt: 'Use sections like ## Timeline summary and legal considerations.',
+    });
+
+    expect(response.text).toContain('## Timeline summary');
+    expect(response.text).toContain('## Legal considerations (general information)');
+    expect(response.text).toContain('## Psychological and interpersonal signals (non-clinical)');
+  });
+
   it('throws NotConfiguredError when OpenAI key is missing', async () => {
     delete process.env.OPENAI_API_KEY;
     await expect(callOpenAI(baseRequest)).rejects.toBeInstanceOf(NotConfiguredError);

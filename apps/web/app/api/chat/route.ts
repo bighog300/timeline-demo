@@ -35,6 +35,7 @@ type RouterDecision = {
   needsOriginals: boolean;
   requestedArtifactIds: string[];
   reason: string;
+  suggested_actions?: string[];
 };
 
 type ChatResponse = {
@@ -61,6 +62,85 @@ const APP_RULES = [
 const buildSystemPrompt = (systemPrompt: string) =>
   [systemPrompt?.trim(), APP_RULES].filter(Boolean).join('\n\n');
 
+const ADVISOR_PROMPT_ADDENDUM = [
+  'Role: timeline advisor reviewing summarized documents and (if allowed) opened originals.',
+  'Grounding rules:',
+  '- Only state facts supported by provided SOURCES.',
+  '- Every factual statement should include citations like [1], [2] in the same paragraph.',
+  '- If information is missing or ambiguous, say “Not enough evidence in the provided sources.”',
+  'Legal rules:',
+  '- Provide general legal considerations and issue-spotting only.',
+  '- Use cautious language: “may,” “could,” “might be relevant to…”',
+  '- Do not give legal advice; recommend consulting a solicitor for jurisdiction-specific advice.',
+  'Psychological rules:',
+  '- Do not diagnose or label people with disorders.',
+  '- Discuss “signals,” “patterns,” “communication dynamics,” “risk indicators” cautiously.',
+  '- If content implies self-harm or immediate danger, recommend contacting emergency services/local crisis resources (generic, non-location-specific).',
+  'Output format: MUST use these sections with headings:',
+  '',
+  '## Timeline summary',
+  '- Bullet points of key events in chronological order (include dates if present)',
+  '- For each bullet: include citations',
+  '',
+  '## What stands out',
+  '- Themes/patterns across documents (bullets), with citations',
+  '',
+  '## Legal considerations (general information)',
+  '- Issue-spotting bullets (contracts, employment, harassment, confidentiality, defamation, safeguarding, data protection, etc. as relevant)',
+  '- Each bullet cites sources and uses cautious language',
+  '- Add disclaimer: “Not legal advice.”',
+  '',
+  '## Psychological and interpersonal signals (non-clinical)',
+  '- Bullets describing dynamics (escalation, boundary setting, coercion indicators, manipulation tactics, stress responses, etc.) when supported',
+  '- Use cautious language and cite sources',
+  '- Add disclaimer: “Not a diagnosis.”',
+  '',
+  '## Questions to clarify',
+  '- Up to 5 questions that, if answered, would reduce uncertainty',
+  '- Can reference what additional documents to open/summarize',
+  '',
+  '## Suggested next steps',
+  '- Practical next actions: “Summarize X”, “Open original for SOURCE Y”, “Tag these items”, “Consult a professional”',
+  '- Keep it action-oriented and bounded',
+].join('\n');
+
+const buildChatSystemPrompt = (systemPrompt: string, advisorMode: boolean) =>
+  advisorMode
+    ? [buildSystemPrompt(systemPrompt), ADVISOR_PROMPT_ADDENDUM].filter(Boolean).join('\n\n')
+    : buildSystemPrompt(systemPrompt);
+
+const formatAdvisorFallbackReply = (sourceCount: number) => {
+  const sourceLabel = sourceCount > 0 ? `${sourceCount} source${sourceCount === 1 ? '' : 's'}` : 'no sources';
+  return [
+    '## Timeline summary',
+    sourceCount > 0
+      ? `- I reviewed ${sourceLabel} relevant to your question [1].`
+      : '- Not enough evidence in the provided sources.',
+    '',
+    '## What stands out',
+    sourceCount > 0
+      ? '- The available summaries may indicate a sequence worth validating with additional details [1].'
+      : '- Not enough evidence in the provided sources.',
+    '',
+    '## Legal considerations (general information)',
+    '- Available records may be relevant to contractual, employment, confidentiality, or safeguarding questions depending on context [1].',
+    '- Not legal advice.',
+    '',
+    '## Psychological and interpersonal signals (non-clinical)',
+    '- Communication patterns may suggest stress or escalation dynamics, but evidence is limited [1].',
+    '- Not a diagnosis.',
+    '',
+    '## Questions to clarify',
+    '- Which event date or interaction should be verified first?',
+    '- Are there additional summaries or originals to review for missing context?',
+    '',
+    '## Suggested next steps',
+    '- Summarize additional related documents for the same date range.',
+    '- Open originals for the most relevant sources if details are needed.',
+    '- Consult a solicitor or other qualified professional for situation-specific guidance.',
+  ].join('\n');
+};
+
 const uniqueActions = (actions: string[]) => Array.from(new Set(actions));
 
 const extractKeyword = (message: string) => {
@@ -75,7 +155,7 @@ const extractKeyword = (message: string) => {
   return tokens[0] ?? null;
 };
 
-const buildSuggestedActions = (message: string) => {
+const buildSuggestedActions = (message: string, advisorMode = false) => {
   const normalized = message.toLowerCase();
   const actions = ['Show pending summaries', 'Sync from Drive', 'Open Calendar'];
 
@@ -92,7 +172,17 @@ const buildSuggestedActions = (message: string) => {
     actions.push(`Search timeline for “${keyword}”`);
   }
 
-  return uniqueActions(actions);
+  if (advisorMode) {
+    actions.unshift(
+      'Open originals for SOURCE 1 and SOURCE 2',
+      'Summarize emails from key sender between key dates',
+      'Create an index for key timeline topic',
+      'Tag timeline entries tied to potential legal or interpersonal issues',
+      'List unanswered clarification questions',
+    );
+  }
+
+  return uniqueActions(actions).slice(0, advisorMode ? 5 : 10);
 };
 
 const jsonChatError = (status: number, payload: ChatErrorResponse) =>
@@ -101,7 +191,7 @@ const jsonChatError = (status: number, payload: ChatErrorResponse) =>
 const MAX_REQUESTED_ORIGINALS = 3;
 
 const ORIGINALS_ROUTER_PROMPT = [
-  'Return valid JSON only with keys: answer, needsOriginals, requestedArtifactIds, reason.',
+  'Return valid JSON only with keys: answer, needsOriginals, requestedArtifactIds, reason, suggested_actions.',
   'requestedArtifactIds must include only SOURCE artifact ids from context and at most 3 entries.',
   'Set needsOriginals=true only if details are unavailable from summaries and originals are needed.',
   'Keep answer grounded in summaries and cite as [1], [2].',
@@ -121,6 +211,11 @@ const parseRouterDecision = (value: string): RouterDecision | null => {
         ? parsed.requestedArtifactIds.filter((id): id is string => typeof id === 'string').slice(0, 3)
         : [],
       reason: typeof parsed.reason === 'string' ? parsed.reason : '',
+      suggested_actions: Array.isArray(parsed.suggested_actions)
+        ? parsed.suggested_actions
+            .filter((action): action is string => typeof action === 'string')
+            .slice(0, 5)
+        : undefined,
     };
   } catch {
     return null;
@@ -188,6 +283,7 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({}));
   const message = typeof body?.message === 'string' ? body.message.trim() : '';
   const allowOriginals = body?.allowOriginals === true;
+  const advisorMode = body?.advisorMode === true;
 
   const session = await getGoogleSession();
   const accessToken = await getGoogleAccessToken();
@@ -300,7 +396,7 @@ export async function POST(request: Request) {
   }
 
   const { context, items } = buildContextString(contextPack.items);
-  const systemPrompt = buildSystemPrompt(adminSettings?.systemPrompt ?? '');
+  const systemPrompt = buildChatSystemPrompt(adminSettings?.systemPrompt ?? '', advisorMode);
   const provider = adminSettings?.provider ?? 'stub';
   const model = adminSettings?.model ?? 'stub';
 
@@ -372,16 +468,21 @@ export async function POST(request: Request) {
     kind: item.kind,
   }));
 
-  const routerDecision =
-    llmProvider === 'stub'
-      ? null
-      : parseRouterDecision(llmResponseText);
+  const routerDecision = llmProvider === 'stub' ? null : parseRouterDecision(llmResponseText);
 
   let reply =
     routerDecision?.answer ||
     llmResponseText ||
-    'I could not find enough detail in your saved summaries. Try syncing or summarizing more items.';
+    (advisorMode
+      ? formatAdvisorFallbackReply(items.length)
+      : 'I could not find enough detail in your saved summaries. Try syncing or summarizing more items.');
   let citations = baseCitations;
+
+  if (llmProvider !== 'stub' && !routerDecision) {
+    reply = advisorMode
+      ? formatAdvisorFallbackReply(items.length)
+      : 'I could not parse the model response. Please try again.';
+  }
 
   if (!allowOriginals && routerDecision?.needsOriginals) {
     reply = `${reply}\n\nEnable “Allow opening originals” to verify details.`;
@@ -449,7 +550,7 @@ export async function POST(request: Request) {
           messages: pass2Messages,
           temperature: adminSettings?.temperature,
         });
-        reply = pass2.text || reply;
+        reply = pass2.text || (advisorMode ? formatAdvisorFallbackReply(items.length) : reply);
       } catch (error) {
         logWarn(ctx, 'chat_pass2_failed', { error: safeError(error) });
       }
@@ -490,7 +591,10 @@ export async function POST(request: Request) {
   const responsePayload: ChatResponse = {
     reply,
     citations,
-    suggested_actions: buildSuggestedActions(message),
+    suggested_actions:
+      routerDecision?.suggested_actions && routerDecision.suggested_actions.length > 0
+        ? uniqueActions(routerDecision.suggested_actions).slice(0, 5)
+        : buildSuggestedActions(message, advisorMode),
     provider: { name: llmProvider, model: llmProvider === 'stub' ? 'stub' : model },
     requestId: ctx.requestId,
   };

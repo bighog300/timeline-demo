@@ -149,6 +149,11 @@
   gap: 8px;
 }
 
+.toggleGroup {
+  display: grid;
+  gap: 12px;
+}
+
 .toggleRow {
   display: grid;
   gap: 6px;
