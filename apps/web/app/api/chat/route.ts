@@ -23,12 +23,25 @@ import {
 } from '../../lib/originals';
 import { createCtx, withRequestId } from '../../lib/requestContext';
 
-type ChatCitation = {
-  artifactId: string;
-  title: string;
-  dateISO?: string;
-  kind: 'summary' | 'index' | 'selection_set' | 'original';
-};
+type ChatCitation =
+  | {
+      artifactId: string;
+      title: string;
+      dateISO?: string;
+      kind: 'summary' | 'index' | 'original';
+    }
+  | {
+      artifactId: string;
+      title: string;
+      kind: 'selection_set';
+      selectionSetId: string;
+    }
+  | {
+      artifactId: string;
+      title: string;
+      kind: 'run';
+      runId: string;
+    };
 
 type RouterDecision = {
   answer: string;
@@ -536,12 +549,32 @@ export async function POST(request: Request) {
     }
   }
 
-  const baseCitations: ChatCitation[] = items.map((item) => ({
-    artifactId: item.artifactId,
-    title: item.title,
-    dateISO: item.dateISO,
-    kind: item.kind,
-  }));
+  const baseCitations: ChatCitation[] = items.map((item) => {
+    if (item.kind === 'summary') {
+      return {
+        artifactId: item.artifactId,
+        title: item.title,
+        dateISO: item.dateISO,
+        kind: item.kind,
+      };
+    }
+
+    if (item.kind === 'selection_set') {
+      return {
+        artifactId: item.id,
+        title: item.title,
+        kind: 'selection_set',
+        selectionSetId: item.id,
+      };
+    }
+
+    return {
+      artifactId: item.id,
+      title: item.selectionSetTitle ? `Run ${item.id} (${item.selectionSetTitle})` : `Run ${item.id}`,
+      kind: 'run',
+      runId: item.id,
+    };
+  });
 
   const routerDecision = llmProvider === 'stub' ? null : parseRouterDecision(llmResponseText);
 
@@ -566,6 +599,7 @@ export async function POST(request: Request) {
   if (allowOriginals && routerDecision?.needsOriginals) {
     const requestedSet = new Set(routerDecision.requestedArtifactIds.slice(0, MAX_REQUESTED_ORIGINALS));
     const candidates = items
+      .filter((item): item is Extract<(typeof items)[number], { kind: 'summary' }> => item.kind === 'summary')
       .filter((item) => requestedSet.has(item.artifactId))
       .slice(0, MAX_REQUESTED_ORIGINALS);
     const gmail = createGmailClient(accessToken);
