@@ -117,10 +117,61 @@ const ADVISOR_PROMPT_ADDENDUM = [
   '- Keep it action-oriented and bounded',
 ].join('\n');
 
-const buildChatSystemPrompt = (systemPrompt: string, advisorMode: boolean) =>
-  advisorMode
-    ? [buildSystemPrompt(systemPrompt), ADVISOR_PROMPT_ADDENDUM].filter(Boolean).join('\n\n')
-    : buildSystemPrompt(systemPrompt);
+const SYNTHESIS_PROMPT_ADDENDUM = [
+  'You are performing timeline synthesis across SOURCES.',
+  'Use only provided SOURCES; do not invent facts.',
+  'Prefer dates from summaries; if missing, infer relative order but label as “date not specified”.',
+  'Extract key events as normalized bullets:',
+  '- Date/Time (or “Unknown”)',
+  '- Actor(s)',
+  '- Action',
+  '- Evidence (citations)',
+  '- Relevance/Impact',
+  'Identify key actors/entities and how they relate.',
+  'Identify themes and turning points, citing evidence.',
+  'Include cautious “Legal considerations (general)” and “Psychological/interpersonal signals (non-clinical)” sections tied to specific events (cite each).',
+  'If context limits are tight, prioritize the 10 most relevant events.',
+  'Output MUST include these headings, in this order:',
+  '',
+  '## Synthesized timeline',
+  '(chronological table-like bullets; each event includes citations)',
+  '',
+  '## Key actors and entities',
+  '(list with brief roles and citations)',
+  '',
+  '## Themes and turning points',
+  '(bullets; cite)',
+  '',
+  '## Legal considerations (general information)',
+  '(issue-spotting bullets; cite; include “Not legal advice.”)',
+  '',
+  '## Psychological and interpersonal signals (non-clinical)',
+  '(signals/dynamics bullets; cite; include “Not a diagnosis.”)',
+  '',
+  '## Contradictions and uncertainties',
+  '(list any conflicting accounts or missing dates; cite)',
+  '',
+  '## Questions to clarify',
+  '(up to 5)',
+  '',
+  '## Suggested next steps',
+  '(actionable next steps; may suggest enabling originals if needed)',
+].join('\n');
+
+const buildChatSystemPrompt = (
+  systemPrompt: string,
+  advisorMode: boolean,
+  synthesisMode: boolean,
+) => {
+  const promptParts = [buildSystemPrompt(systemPrompt)];
+  if (advisorMode || synthesisMode) {
+    promptParts.push(ADVISOR_PROMPT_ADDENDUM);
+  }
+  if (synthesisMode) {
+    promptParts.push(SYNTHESIS_PROMPT_ADDENDUM);
+  }
+  return promptParts.filter(Boolean).join('\n\n');
+};
 
 const formatAdvisorFallbackReply = (sourceCount: number) => {
   const sourceLabel = sourceCount > 0 ? `${sourceCount} source${sourceCount === 1 ? '' : 's'}` : 'no sources';
@@ -154,6 +205,44 @@ const formatAdvisorFallbackReply = (sourceCount: number) => {
   ].join('\n');
 };
 
+const formatSynthesisFallbackReply = (sourceCount: number) => {
+  const sourceLabel = sourceCount > 0 ? `${sourceCount} source${sourceCount === 1 ? '' : 's'}` : 'no sources';
+  return [
+    '## Synthesized timeline',
+    sourceCount > 0
+      ? `- Date/Time: Unknown | Actor(s): Unspecified | Action: Reviewed ${sourceLabel}. | Evidence: [1] | Relevance/Impact: Establishes baseline chronology [1].`
+      : '- Date/Time: Unknown | Actor(s): Unknown | Action: Not enough evidence in the provided sources. | Evidence: none | Relevance/Impact: Additional sources are needed.',
+    '',
+    '## Key actors and entities',
+    sourceCount > 0
+      ? '- Available summaries reference timeline participants, but specific roles remain limited in the current context [1].'
+      : '- Not enough evidence in the provided sources.',
+    '',
+    '## Themes and turning points',
+    '- A potential escalation-to-resolution pattern may be present, pending fuller date coverage [1].',
+    '',
+    '## Legal considerations (general information)',
+    '- Depending on full facts, contractual, employment, confidentiality, or safeguarding issues may be relevant [1].',
+    '- Not legal advice.',
+    '',
+    '## Psychological and interpersonal signals (non-clinical)',
+    '- The available records may suggest stress or communication-strain dynamics, but evidence is limited [1].',
+    '- Not a diagnosis.',
+    '',
+    '## Contradictions and uncertainties',
+    '- Dates and actor-level attribution are incomplete in the provided summaries [1].',
+    '',
+    '## Questions to clarify',
+    '- Which event date should be verified first?',
+    '- Which source should be opened to resolve missing detail?',
+    '',
+    '## Suggested next steps',
+    '- Open originals for SOURCE 1 and SOURCE 2 if exact wording matters.',
+    '- Summarize additional timeline documents covering the same period.',
+    '- Review contradictions around key dates and participants.',
+  ].join('\n');
+};
+
 const uniqueActions = (actions: string[]) => Array.from(new Set(actions));
 
 const extractKeyword = (message: string) => {
@@ -168,7 +257,17 @@ const extractKeyword = (message: string) => {
   return tokens[0] ?? null;
 };
 
-const buildSuggestedActions = (message: string, advisorMode = false) => {
+const buildSuggestedActions = (message: string, advisorMode = false, synthesisMode = false) => {
+  if (synthesisMode) {
+    return [
+      'Open originals for SOURCE 1 and SOURCE 2',
+      'Summarize these additional emails/files for missing timeline dates',
+      'Create/refresh an index for the key timeline topic',
+      'Tag events as escalation, agreement, and follow-up',
+      'Review contradictions around a disputed date or person',
+    ];
+  }
+
   const normalized = message.toLowerCase();
   const actions = ['Show pending summaries', 'Sync from Drive', 'Open Calendar'];
 
@@ -203,11 +302,17 @@ const jsonChatError = (status: number, payload: ChatErrorResponse) =>
 
 const MAX_REQUESTED_ORIGINALS = 3;
 
-const ORIGINALS_ROUTER_PROMPT = [
+const buildOriginalsRouterPrompt = (synthesisMode: boolean) => [
   'Return valid JSON only with keys: answer, needsOriginals, requestedArtifactIds, reason, suggested_actions.',
   'requestedArtifactIds must include only SOURCE artifact ids from context and at most 3 entries.',
   'Set needsOriginals=true only if details are unavailable from summaries and originals are needed.',
   'Keep answer grounded in summaries and cite as [1], [2].',
+  ...(synthesisMode
+    ? [
+        'answer must use synthesis headings in this order: ## Synthesized timeline; ## Key actors and entities; ## Themes and turning points; ## Legal considerations (general information); ## Psychological and interpersonal signals (non-clinical); ## Contradictions and uncertainties; ## Questions to clarify; ## Suggested next steps.',
+        'suggested_actions should include 3 to 5 actionable synthesis-focused items.',
+      ]
+    : []),
 ].join('\n');
 
 const parseRouterDecision = (value: string): RouterDecision | null => {
@@ -297,6 +402,8 @@ export async function POST(request: Request) {
   const message = typeof body?.message === 'string' ? body.message.trim() : '';
   const allowOriginals = body?.allowOriginals === true;
   const advisorMode = body?.advisorMode === true;
+  const synthesisMode = body?.synthesisMode === true;
+  const effectiveAdvisorMode = advisorMode || synthesisMode;
 
   const session = await getGoogleSession();
   const accessToken = await getGoogleAccessToken();
@@ -409,7 +516,11 @@ export async function POST(request: Request) {
   }
 
   const { context, items } = buildContextString(contextPack.items);
-  const systemPrompt = buildChatSystemPrompt(adminSettings?.systemPrompt ?? '', advisorMode);
+  const systemPrompt = buildChatSystemPrompt(
+    adminSettings?.systemPrompt ?? '',
+    effectiveAdvisorMode,
+    synthesisMode,
+  );
   const provider = adminSettings?.provider ?? 'stub';
   const model = adminSettings?.model ?? 'stub';
 
@@ -423,7 +534,7 @@ export async function POST(request: Request) {
         ]
       : []),
     { role: 'user' as const, content: message || 'Summarize recent timeline context.' },
-    { role: 'user' as const, content: ORIGINALS_ROUTER_PROMPT },
+    { role: 'user' as const, content: buildOriginalsRouterPrompt(synthesisMode) },
   ];
 
   const llmRequest = {
@@ -581,13 +692,17 @@ export async function POST(request: Request) {
   let reply =
     routerDecision?.answer ||
     llmResponseText ||
-    (advisorMode
+    (synthesisMode
+      ? formatSynthesisFallbackReply(items.length)
+      : effectiveAdvisorMode
       ? formatAdvisorFallbackReply(items.length)
       : 'I could not find enough detail in your saved summaries. Try syncing or summarizing more items.');
   let citations = baseCitations;
 
   if (llmProvider !== 'stub' && !routerDecision) {
-    reply = advisorMode
+    reply = synthesisMode
+      ? formatSynthesisFallbackReply(items.length)
+      : effectiveAdvisorMode
       ? formatAdvisorFallbackReply(items.length)
       : 'I could not parse the model response. Please try again.';
   }
@@ -646,8 +761,9 @@ export async function POST(request: Request) {
         { role: 'user' as const, content: `Original context:\n${originalContext}` },
         {
           role: 'user' as const,
-          content:
-            'Use summary and original context to answer. Cite summary sources [1], [2] and original sources as [O1], [O2] when used.',
+          content: synthesisMode
+            ? 'Use summary and original context to answer in synthesis format. Keep required headings and order. Cite summary sources [1], [2] and original sources as [O1], [O2] when used.'
+            : 'Use summary and original context to answer. Cite summary sources [1], [2] and original sources as [O1], [O2] when used.',
         },
         { role: 'user' as const, content: message || 'Summarize recent timeline context.' },
       ];
@@ -659,7 +775,13 @@ export async function POST(request: Request) {
           messages: pass2Messages,
           temperature: adminSettings?.temperature,
         });
-        reply = pass2.text || (advisorMode ? formatAdvisorFallbackReply(items.length) : reply);
+        reply =
+          pass2.text ||
+          (synthesisMode
+            ? formatSynthesisFallbackReply(items.length)
+            : effectiveAdvisorMode
+            ? formatAdvisorFallbackReply(items.length)
+            : reply);
       } catch (error) {
         logWarn(ctx, 'chat_pass2_failed', { error: safeError(error) });
       }
@@ -703,7 +825,7 @@ export async function POST(request: Request) {
     suggested_actions:
       routerDecision?.suggested_actions && routerDecision.suggested_actions.length > 0
         ? uniqueActions(routerDecision.suggested_actions).slice(0, 5)
-        : buildSuggestedActions(message, advisorMode),
+        : buildSuggestedActions(message, effectiveAdvisorMode, synthesisMode),
     provider: { name: llmProvider, model: llmProvider === 'stub' ? 'stub' : model },
     requestId: ctx.requestId,
   };

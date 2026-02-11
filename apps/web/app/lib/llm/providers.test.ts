@@ -59,6 +59,23 @@ describe('LLM providers', () => {
     expect(response.text).toContain('## Psychological and interpersonal signals (non-clinical)');
   });
 
+  it('returns synthesis headings when system prompt requests synthesis mode', async () => {
+    const response = await callStub({
+      ...baseRequest,
+      systemPrompt: 'Use sections like ## Synthesized timeline and ## Key actors and entities.',
+      messages: [{ role: 'user', content: `Context:
+SOURCE 1: item
+SOURCE 2: item` }],
+    });
+
+    expect(response.text).toContain('## Synthesized timeline');
+    expect(response.text).toContain('## Key actors and entities');
+    expect(response.text).toContain('## Contradictions and uncertainties');
+    expect(response.text).toContain('Not legal advice.');
+    expect(response.text).toContain('Not a diagnosis.');
+  });
+
+
   it('throws ProviderError not_configured when OpenAI key is missing', async () => {
     await expect(callOpenAI(baseRequest)).rejects.toMatchObject({
       code: 'not_configured',
