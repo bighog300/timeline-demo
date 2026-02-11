@@ -44,7 +44,7 @@ import { readAdminSettingsFromDrive } from '../../lib/adminSettingsDrive';
 import { resolveOrProvisionAppDriveFolder } from '../../lib/appDriveFolder';
 import { buildContextPack } from '../../lib/chatContext';
 import { getGoogleAccessToken, getGoogleSession } from '../../lib/googleAuth';
-import { NotConfiguredError } from '../../lib/llm/errors';
+import { ProviderError } from '../../lib/llm/providerErrors';
 import { callLLM } from '../../lib/llm/index';
 import { fetchOriginalTextForArtifact, truncateOriginalText } from '../../lib/originals';
 import { POST } from './route';
@@ -267,7 +267,7 @@ describe('POST /api/chat', () => {
       debug: { usedIndex: true, totalConsidered: 1 },
     });
     mockCallLLM
-      .mockRejectedValueOnce(new NotConfiguredError('openai'))
+      .mockRejectedValueOnce(new ProviderError({ code: 'not_configured', status: 400, provider: 'openai', message: 'Provider not configured.' }))
       .mockResolvedValueOnce({ text: '[stub: fallback]' });
 
     const request = new Request('http://localhost/api/chat', {
@@ -287,6 +287,132 @@ describe('POST /api/chat', () => {
     expect(payload.reply).toContain('[stub:');
   });
 
+
+
+
+  it('maps provider invalid_request errors to 400 with safe details and request id header', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM.mockRejectedValueOnce(
+      new ProviderError({
+        code: 'invalid_request',
+        status: 400,
+        provider: 'openai',
+        message: 'invalid request',
+        details: {
+          providerStatus: 400,
+          providerMessage: 'x'.repeat(300),
+        },
+      }),
+    );
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Status update' }),
+    });
+
+    const response = await POST(request);
+    const payload = (await response.json()) as {
+      error: { code: string; message: string; details?: { providerStatus?: number; providerMessage?: string } };
+      requestId: string;
+    };
+
+    expect(response.status).toBe(400);
+    expect(payload.error.code).toBe('invalid_request');
+    expect(payload.error.message).toContain('rejected the request');
+    expect(payload.error.details?.providerStatus).toBe(400);
+    expect(payload.error.details?.providerMessage?.length).toBeLessThanOrEqual(200);
+    expect(payload.requestId).toEqual(expect.any(String));
+    expect(response.headers.get('x-request-id')).toBe(payload.requestId);
+  });
+
+  it('maps provider unauthorized and rate_limited errors', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+
+    mockCallLLM.mockRejectedValueOnce(
+      new ProviderError({
+        code: 'unauthorized',
+        status: 401,
+        provider: 'openai',
+        message: 'unauthorized',
+      }),
+    );
+
+    const unauthorizedRequest = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Status update' }),
+    });
+
+    const unauthorizedResponse = await POST(unauthorizedRequest);
+    const unauthorizedPayload = (await unauthorizedResponse.json()) as {
+      error: { code: string; message: string };
+      requestId: string;
+    };
+
+    expect(unauthorizedResponse.status).toBe(401);
+    expect(unauthorizedPayload.error.code).toBe('provider_unauthorized');
+    expect(unauthorizedPayload.requestId).toEqual(expect.any(String));
+
+    mockCallLLM.mockRejectedValueOnce(
+      new ProviderError({
+        code: 'rate_limited',
+        status: 429,
+        provider: 'openai',
+        message: 'rate limit',
+        retryAfterSec: 30,
+      }),
+    );
+
+    const rateLimitedRequest = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Status update' }),
+    });
+
+    const rateLimitedResponse = await POST(rateLimitedRequest);
+    const rateLimitedPayload = (await rateLimitedResponse.json()) as {
+      error: { code: string; message: string; retryAfterSec?: number };
+      requestId: string;
+    };
+
+    expect(rateLimitedResponse.status).toBe(429);
+    expect(rateLimitedPayload.error.code).toBe('rate_limited');
+    expect(rateLimitedPayload.error.message).toContain('rate limit exceeded');
+    expect(rateLimitedPayload.requestId).toEqual(expect.any(String));
+  });
 
   it('falls back safely when router returns invalid JSON in advisor mode', async () => {
     mockGetGoogleSession.mockResolvedValue({
