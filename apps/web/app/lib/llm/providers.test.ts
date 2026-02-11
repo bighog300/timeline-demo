@@ -70,6 +70,8 @@ SOURCE 2: item` }],
 
     expect(response.text).toContain('## Synthesized timeline');
     expect(response.text).toContain('## Key actors and entities');
+    expect(response.text).toContain('## Actor timelines');
+    expect(response.text).toContain('## Themes grouped view');
     expect(response.text).toContain('## Contradictions and uncertainties');
     expect(response.text).toContain('Not legal advice.');
     expect(response.text).toContain('Not a diagnosis.');

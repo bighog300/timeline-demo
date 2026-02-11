@@ -127,6 +127,9 @@ const SYNTHESIS_PROMPT_ADDENDUM = [
   '- Action',
   '- Evidence (citations)',
   '- Relevance/Impact',
+  'Extract entities in categories: Person, Organization, Location, Case/Claim/Matter, Document/Artifact.',
+  'Create a canonical label per entity: prefer Name <email> when email exists, otherwise most complete name.',
+  'Track aliases for each canonical entity and mark weak matches as “possible alias”.',
   'Identify key actors/entities and how they relate.',
   'Identify themes and turning points, citing evidence.',
   'Include cautious “Legal considerations (general)” and “Psychological/interpersonal signals (non-clinical)” sections tied to specific events (cite each).',
@@ -134,10 +137,16 @@ const SYNTHESIS_PROMPT_ADDENDUM = [
   'Output MUST include these headings, in this order:',
   '',
   '## Synthesized timeline',
-  '(chronological table-like bullets; each event includes citations)',
+  '(chronological table-like bullets; max 10 events; each event includes Date/Actor(s)/Action/Outcome-Impact/Evidence [#]; omit uncited events)',
   '',
   '## Key actors and entities',
-  '(list with brief roles and citations)',
+  '(list with canonical labels, aliases/possible aliases, brief roles, and citations)',
+  '',
+  '## Actor timelines',
+  '(for top 3-5 actors: chronological bullets with Date/Actor(s)/Action/Outcome-Impact/Evidence [#]; omit any uncited event)',
+  '',
+  '## Themes grouped view',
+  '(group into 4-8 themes; include turning points and cross-actor interactions; cite every bullet)',
   '',
   '## Themes and turning points',
   '(bullets; cite)',
@@ -149,7 +158,7 @@ const SYNTHESIS_PROMPT_ADDENDUM = [
   '(signals/dynamics bullets; cite; include “Not a diagnosis.”)',
   '',
   '## Contradictions and uncertainties',
-  '(list any conflicting accounts or missing dates; cite)',
+  '(list conflicting dates/claims, unresolved identity mapping, and missing source coverage; cite)',
   '',
   '## Questions to clarify',
   '(up to 5)',
@@ -157,6 +166,113 @@ const SYNTHESIS_PROMPT_ADDENDUM = [
   '## Suggested next steps',
   '(actionable next steps; may suggest enabling originals if needed)',
 ].join('\n');
+
+type SynthesisEntity = {
+  id: string;
+  type: 'person' | 'org' | 'location' | 'matter' | 'document';
+  canonical: string;
+  aliases: string[];
+  confidence: 'high' | 'medium' | 'low';
+  citations: number[];
+};
+
+type SynthesisEvent = {
+  id: string;
+  dateISO: string | null;
+  dateLabel: string;
+  actors: string[];
+  summary: string;
+  theme: string;
+  impact: string;
+  citations: number[];
+};
+
+type SynthesisPlan = {
+  entities: SynthesisEntity[];
+  events: SynthesisEvent[];
+};
+
+const SYNTHESIS_PLAN_LIMITS = {
+  entities: 25,
+  events: 15,
+};
+
+const parseSynthesisPlan = (value: string, sourceCount: number): SynthesisPlan | null => {
+  const cleaned = value.trim().replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
+  try {
+    const parsed = JSON.parse(cleaned) as Partial<SynthesisPlan>;
+    if (!Array.isArray(parsed.entities) || !Array.isArray(parsed.events)) {
+      return null;
+    }
+
+    const inRangeCitations = (citations: unknown): number[] =>
+      Array.isArray(citations)
+        ? citations
+            .filter((citation): citation is number => Number.isInteger(citation))
+            .filter((citation) => citation >= 1 && citation <= sourceCount)
+        : [];
+
+    const entities = parsed.entities
+      .map((entity) => {
+        if (!entity || typeof entity !== 'object') {
+          return null;
+        }
+        const typed = entity as Partial<SynthesisEntity>;
+        if (
+          typeof typed.id !== 'string' ||
+          typeof typed.canonical !== 'string' ||
+          !['person', 'org', 'location', 'matter', 'document'].includes(typed.type as string)
+        ) {
+          return null;
+        }
+        const confidence = ['high', 'medium', 'low'].includes(typed.confidence as string)
+          ? (typed.confidence as SynthesisEntity['confidence'])
+          : 'low';
+        return {
+          id: typed.id,
+          type: typed.type as SynthesisEntity['type'],
+          canonical: typed.canonical,
+          aliases: Array.isArray(typed.aliases)
+            ? typed.aliases.filter((alias): alias is string => typeof alias === 'string').slice(0, 6)
+            : [],
+          confidence,
+          citations: inRangeCitations(typed.citations),
+        };
+      })
+      .filter((entity): entity is SynthesisEntity => entity !== null)
+      .slice(0, SYNTHESIS_PLAN_LIMITS.entities);
+
+    const events = parsed.events
+      .map((event) => {
+        if (!event || typeof event !== 'object') {
+          return null;
+        }
+        const typed = event as Partial<SynthesisEvent>;
+        if (typeof typed.id !== 'string' || typeof typed.summary !== 'string') {
+          return null;
+        }
+        return {
+          id: typed.id,
+          dateISO: typeof typed.dateISO === 'string' ? typed.dateISO : null,
+          dateLabel: typeof typed.dateLabel === 'string' ? typed.dateLabel : 'Unknown',
+          actors: Array.isArray(typed.actors)
+            ? typed.actors.filter((actor): actor is string => typeof actor === 'string').slice(0, 5)
+            : [],
+          summary: typed.summary,
+          theme: typeof typed.theme === 'string' ? typed.theme : 'general',
+          impact: typeof typed.impact === 'string' ? typed.impact : 'impact unclear',
+          citations: inRangeCitations(typed.citations),
+        };
+      })
+      .filter((event): event is SynthesisEvent => event !== null)
+      .filter((event) => event.citations.length > 0)
+      .slice(0, SYNTHESIS_PLAN_LIMITS.events);
+
+    return { entities, events };
+  } catch {
+    return null;
+  }
+};
 
 const buildChatSystemPrompt = (
   systemPrompt: string,
@@ -218,6 +334,12 @@ const formatSynthesisFallbackReply = (sourceCount: number) => {
       ? '- Available summaries reference timeline participants, but specific roles remain limited in the current context [1].'
       : '- Not enough evidence in the provided sources.',
     '',
+    '## Actor timelines',
+    '- Actor: Unspecified | Date/Time: Unknown | Action: Insufficient grounded detail for actor-specific chronology [1].',
+    '',
+    '## Themes grouped view',
+    '- Theme: chronology baseline | Events remain high-level until additional grounded details are available [1].',
+    '',
     '## Themes and turning points',
     '- A potential escalation-to-resolution pattern may be present, pending fuller date coverage [1].',
     '',
@@ -231,6 +353,7 @@ const formatSynthesisFallbackReply = (sourceCount: number) => {
     '',
     '## Contradictions and uncertainties',
     '- Dates and actor-level attribution are incomplete in the provided summaries [1].',
+    '- Identity mapping remains unresolved for some participants (possible aliases) [1].',
     '',
     '## Questions to clarify',
     '- Which event date should be verified first?',
@@ -310,6 +433,7 @@ const buildOriginalsRouterPrompt = (synthesisMode: boolean) => [
   ...(synthesisMode
     ? [
         'answer must use synthesis headings in this order: ## Synthesized timeline; ## Key actors and entities; ## Themes and turning points; ## Legal considerations (general information); ## Psychological and interpersonal signals (non-clinical); ## Contradictions and uncertainties; ## Questions to clarify; ## Suggested next steps.',
+        'for synthesis, also include headings ## Actor timelines and ## Themes grouped view immediately after ## Key actors and entities.',
         'suggested_actions should include 3 to 5 actionable synthesis-focused items.',
       ]
     : []),
@@ -689,7 +813,58 @@ export async function POST(request: Request) {
 
   const routerDecision = llmProvider === 'stub' ? null : parseRouterDecision(llmResponseText);
 
+  let synthesisPlanReply: string | null = null;
+  if (synthesisMode && llmProvider !== 'stub') {
+    try {
+      const extraction = await callLLM(llmProvider, {
+        model,
+        systemPrompt,
+        messages: [
+          ...(context
+            ? [{ role: 'user' as const, content: `SOURCES:
+${context}` }]
+            : []),
+          { role: 'user' as const, content: message || 'Synthesize recent timeline context.' },
+          {
+            role: 'user' as const,
+            content:
+              'Return STRICT JSON only with shape {"entities":[{"id":"e1","type":"person|org|location|matter|document","canonical":"...","aliases":["..."],"confidence":"high|medium|low","citations":[1]}],"events":[{"id":"v1","dateISO":null,"dateLabel":"Unknown","actors":["e1"],"summary":"...","theme":"...","impact":"...","citations":[1]}]}. Entity normalization: prefer Name <email> when email appears; otherwise most complete name. Include aliases and mark uncertain links as possible aliases via low confidence aliases. Event grouping: keep only cited events and omit uncited events.',
+          },
+        ],
+        temperature: adminSettings?.temperature,
+      });
+      const plan = parseSynthesisPlan(extraction.text, items.length);
+      if (plan) {
+        const writeup = await callLLM(llmProvider, {
+          model,
+          systemPrompt,
+          messages: [
+            ...(context
+              ? [{ role: 'user' as const, content: `SOURCES:
+${context}` }]
+              : []),
+            { role: 'user' as const, content: `PLAN JSON:
+${JSON.stringify(plan)}` },
+            {
+              role: 'user' as const,
+              content:
+                'Write final synthesis using PLAN + SOURCES. Keep required heading order including ## Actor timelines and ## Themes grouped view after ## Key actors and entities. In ## Synthesized timeline provide at most 10 events and each bullet must include Date/Actor(s)/Action/Outcome-Impact/Evidence [#]. Omit any event that lacks citations. In contradictions call out conflicting dates/claims, unresolved identity mappings, and missing source coverage.',
+            },
+            { role: 'user' as const, content: message || 'Synthesize recent timeline context.' },
+          ],
+          temperature: adminSettings?.temperature,
+        });
+        if (writeup.text.trim()) {
+          synthesisPlanReply = writeup.text;
+        }
+      }
+    } catch (error) {
+      logWarn(ctx, 'synthesis_plan_failed', { error: safeError(error) });
+    }
+  }
+
   let reply =
+    synthesisPlanReply ||
     routerDecision?.answer ||
     llmResponseText ||
     (synthesisMode
@@ -699,7 +874,7 @@ export async function POST(request: Request) {
       : 'I could not find enough detail in your saved summaries. Try syncing or summarizing more items.');
   let citations = baseCitations;
 
-  if (llmProvider !== 'stub' && !routerDecision) {
+  if (llmProvider !== 'stub' && !routerDecision && !synthesisPlanReply) {
     reply = synthesisMode
       ? formatSynthesisFallbackReply(items.length)
       : effectiveAdvisorMode
