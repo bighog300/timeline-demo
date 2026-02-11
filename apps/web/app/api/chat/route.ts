@@ -12,7 +12,7 @@ import { getGoogleAccessToken, getGoogleSession } from '../../lib/googleAuth';
 import { createDriveClient } from '../../lib/googleDrive';
 import { createGmailClient } from '../../lib/googleGmail';
 import { logGoogleError, mapGoogleError } from '../../lib/googleRequest';
-import { NotConfiguredError } from '../../lib/llm/errors';
+import { isProviderError } from '../../lib/llm/providerErrors';
 import { callLLM } from '../../lib/llm/index';
 import type { LLMProviderName } from '../../lib/llm/types';
 import { hashUserHint, logError, logInfo, logWarn, safeError } from '../../lib/logger';
@@ -47,7 +47,7 @@ type ChatResponse = {
 };
 
 type ChatErrorResponse = {
-  error: { code: string; message?: string; details?: unknown };
+  error: { code: string; message?: string; details?: unknown; retryAfterSec?: number };
   error_code?: string;
   requestId: string;
 };
@@ -427,28 +427,103 @@ export async function POST(request: Request) {
     const response = await callLLM(provider, llmRequest);
     llmResponseText = response.text;
   } catch (error) {
-    if (error instanceof NotConfiguredError) {
-      const isAdmin = isAdminSession(session);
-      if (isAdmin) {
+    if (isProviderError(error)) {
+      if (error.code === 'not_configured') {
+        const isAdmin = isAdminSession(session);
+        if (isAdmin) {
+          return respond(
+            jsonChatError(400, {
+              error: {
+                code: 'not_configured',
+                message: 'Chat provider is not configured.',
+              },
+              error_code: 'not_configured',
+              requestId: ctx.requestId,
+            }),
+          );
+        }
+
+        llmProvider = 'stub';
+        logWarn(ctx, 'provider_not_configured', { provider });
+        const response = await callLLM('stub', {
+          ...llmRequest,
+          model: 'stub',
+        });
+        llmResponseText = response.text;
+      } else {
+        const details = error.details
+          ? {
+              providerStatus: error.details.providerStatus,
+              ...(error.details.providerMessage
+                ? { providerMessage: error.details.providerMessage.slice(0, 200) }
+                : {}),
+            }
+          : undefined;
+
+        const payloadByCode: Record<
+          Exclude<typeof error.code, 'not_configured'>,
+          {
+            status: number;
+            code: string;
+            message: string;
+            includeDetails?: boolean;
+          }
+        > = {
+          invalid_request: {
+            status: 400,
+            code: 'invalid_request',
+            message: 'Chat provider rejected the request (check model/settings).',
+            includeDetails: true,
+          },
+          unauthorized: {
+            status: 401,
+            code: 'provider_unauthorized',
+            message: 'Chat provider credentials are invalid or expired.',
+          },
+          forbidden: {
+            status: 403,
+            code: 'provider_forbidden',
+            message: 'Chat provider request was forbidden.',
+          },
+          rate_limited: {
+            status: 429,
+            code: 'rate_limited',
+            message: 'Chat provider rate limit exceeded. Try again later.',
+          },
+          upstream_timeout: {
+            status: 504,
+            code: 'upstream_timeout',
+            message: 'Chat provider timed out.',
+          },
+          upstream_error: {
+            status: 502,
+            code: 'upstream_error',
+            message: 'Chat provider error. Please retry.',
+          },
+        };
+
+        const mapped = payloadByCode[error.code];
+        logError(ctx, 'llm_provider_error', {
+          code: error.code,
+          provider: error.provider,
+          status: mapped.status,
+          details,
+        });
         return respond(
-          jsonChatError(400, {
+          jsonChatError(mapped.status, {
             error: {
-              code: 'not_configured',
-              message: 'The selected provider is not configured. Set the API key on the server.',
+              code: mapped.code,
+              message: mapped.message,
+              ...(mapped.includeDetails && details ? { details } : {}),
+              ...(error.code === 'rate_limited' && error.retryAfterSec !== undefined
+                ? { retryAfterSec: error.retryAfterSec }
+                : {}),
             },
-            error_code: 'not_configured',
+            error_code: mapped.code,
             requestId: ctx.requestId,
           }),
         );
       }
-
-      llmProvider = 'stub';
-      logWarn(ctx, 'provider_not_configured', { provider });
-      const response = await callLLM('stub', {
-        ...llmRequest,
-        model: 'stub',
-      });
-      llmResponseText = response.text;
     } else {
       logError(ctx, 'llm_error', { error: safeError(error) });
       return respond(
