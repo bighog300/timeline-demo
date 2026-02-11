@@ -8,6 +8,7 @@ describe('ChatPageClient', () => {
   const storageKey = 'timeline-demo.chat';
   const allowOriginalsKey = 'timeline.chat.allowOriginals';
   const advisorModeKey = 'timeline.chat.advisorMode';
+  const synthesisModeKey = 'timeline.chat.synthesisMode';
 
   beforeEach(() => {
     localStorage.clear();
@@ -47,7 +48,7 @@ describe('ChatPageClient', () => {
     });
   });
 
-  it('stores allow originals and advisor mode toggles in sessionStorage and sends flags in payload', async () => {
+  it('stores allow originals, advisor mode, and synthesis mode toggles in sessionStorage and sends flags in payload', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -74,6 +75,12 @@ describe('ChatPageClient', () => {
     fireEvent.click(advisorToggle);
     expect(sessionStorage.getItem(advisorModeKey)).toBe('false');
 
+    const synthesisToggle = screen.getByRole('checkbox', {
+      name: /synthesis mode \(timeline overview\)/i,
+    });
+    fireEvent.click(synthesisToggle);
+    expect(sessionStorage.getItem(synthesisModeKey)).toBe('true');
+
     const input = screen.getByLabelText(/chat input/i);
     fireEvent.change(input, { target: { value: 'Use originals' } });
     fireEvent.click(screen.getByRole('button', { name: /send/i }));
@@ -85,9 +92,11 @@ describe('ChatPageClient', () => {
     const payload = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
       allowOriginals: boolean;
       advisorMode: boolean;
+      synthesisMode: boolean;
     };
     expect(payload.allowOriginals).toBe(true);
     expect(payload.advisorMode).toBe(false);
+    expect(payload.synthesisMode).toBe(true);
   });
 
   it('persists chat messages to localStorage and restores them on reload', async () => {

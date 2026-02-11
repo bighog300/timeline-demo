@@ -320,6 +320,137 @@ describe('POST /api/chat', () => {
     );
   });
 
+  it('returns synthesis headings when synthesisMode is enabled', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM.mockResolvedValue({
+      text: JSON.stringify({
+        answer: `## Synthesized timeline
+- Event [1].
+
+## Key actors and entities
+- Actor [1].
+
+## Themes and turning points
+- Theme [1].
+
+## Legal considerations (general information)
+- Note [1].
+- Not legal advice.
+
+## Psychological and interpersonal signals (non-clinical)
+- Signal [1].
+- Not a diagnosis.
+
+## Contradictions and uncertainties
+- Uncertainty [1].
+
+## Questions to clarify
+- Question?
+
+## Suggested next steps
+- Next step.`,
+        needsOriginals: false,
+        requestedArtifactIds: [],
+        reason: 'Sufficient summaries',
+      }),
+    });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Synthesize last month', synthesisMode: true }),
+    });
+
+    const response = await POST(request);
+    const payload = (await response.json()) as { reply: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toContain('## Synthesized timeline');
+    expect(payload.reply).toContain('## Key actors and entities');
+    expect(payload.reply).toContain('## Contradictions and uncertainties');
+  });
+
+  it('applies advisor and synthesis prompt addenda when synthesisMode is true', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM.mockResolvedValue({
+      text: JSON.stringify({
+        answer: `## Synthesized timeline
+- Event [1].
+
+## Key actors and entities
+- Actor [1].
+
+## Themes and turning points
+- Theme [1].
+
+## Legal considerations (general information)
+- Note [1].
+- Not legal advice.
+
+## Psychological and interpersonal signals (non-clinical)
+- Signal [1].
+- Not a diagnosis.
+
+## Contradictions and uncertainties
+- Uncertainty [1].
+
+## Questions to clarify
+- Question?
+
+## Suggested next steps
+- Next step.`,
+        needsOriginals: false,
+        requestedArtifactIds: [],
+        reason: 'Sufficient summaries',
+      }),
+    });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Synthesize timeline', synthesisMode: true, advisorMode: false }),
+    });
+
+    await POST(request);
+
+    const firstCall = mockCallLLM.mock.calls[0]?.[1];
+    expect(firstCall?.systemPrompt).toContain('## Timeline summary');
+    expect(firstCall?.systemPrompt).toContain('## Synthesized timeline');
+  });
+
+
   it('falls back to stub when provider key is missing for non-admins', async () => {
     delete process.env.OPENAI_API_KEY;
     mockGetGoogleSession.mockResolvedValue({

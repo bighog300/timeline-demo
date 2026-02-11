@@ -76,6 +76,7 @@ type ChatErrorState = {
 const STORAGE_KEY = 'timeline-demo.chat';
 const ALLOW_ORIGINALS_SESSION_KEY = 'timeline.chat.allowOriginals';
 const ADVISOR_MODE_SESSION_KEY = 'timeline.chat.advisorMode';
+const SYNTHESIS_MODE_SESSION_KEY = 'timeline.chat.synthesisMode';
 const MAX_HISTORY = 30;
 const CONFIG_ISSUE_CODES = new Set<ChatErrorCode>([
   'not_configured',
@@ -116,6 +117,7 @@ export default function ChatPageClient({ isAdmin = false }: { isAdmin?: boolean 
   const [lastPrompt, setLastPrompt] = useState<string | null>(null);
   const [allowOriginals, setAllowOriginals] = useState(false);
   const [advisorMode, setAdvisorMode] = useState(true);
+  const [synthesisMode, setSynthesisMode] = useState(false);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -168,6 +170,15 @@ export default function ChatPageClient({ isAdmin = false }: { isAdmin?: boolean 
       return;
     }
 
+    const stored = window.sessionStorage.getItem(SYNTHESIS_MODE_SESSION_KEY);
+    setSynthesisMode(stored === 'true');
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
     if (messages.length === 0 && suggestions.length === 0) {
       window.localStorage.removeItem(STORAGE_KEY);
       return;
@@ -199,7 +210,12 @@ export default function ChatPageClient({ isAdmin = false }: { isAdmin?: boolean 
         const response = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: newMessage, allowOriginals, advisorMode }),
+          body: JSON.stringify({
+            message: newMessage,
+            allowOriginals,
+            advisorMode,
+            synthesisMode,
+          }),
         });
 
         const data = (await response.json()) as ChatResponse | ChatApiErrorPayload;
@@ -258,7 +274,7 @@ export default function ChatPageClient({ isAdmin = false }: { isAdmin?: boolean 
         setLoading(false);
       }
     },
-    [advisorMode, allowOriginals, setMessages],
+    [advisorMode, allowOriginals, setMessages, synthesisMode],
   );
 
   const handleAllowOriginalsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -279,6 +295,14 @@ export default function ChatPageClient({ isAdmin = false }: { isAdmin?: boolean 
     setAdvisorMode(next);
     if (typeof window !== 'undefined') {
       window.sessionStorage.setItem(ADVISOR_MODE_SESSION_KEY, next ? 'true' : 'false');
+    }
+  };
+
+  const handleSynthesisModeChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const next = event.target.checked;
+    setSynthesisMode(next);
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(SYNTHESIS_MODE_SESSION_KEY, next ? 'true' : 'false');
     }
   };
 
@@ -443,6 +467,20 @@ export default function ChatPageClient({ isAdmin = false }: { isAdmin?: boolean 
               </label>
               <p className={styles.toggleHelp}>
                 Structures answers as a timeline review with legal and psychological issue-spotting.
+              </p>
+            </div>
+
+            <div className={styles.toggleRow}>
+              <label className={styles.toggleLabel}>
+                <input
+                  type="checkbox"
+                  checked={synthesisMode}
+                  onChange={handleSynthesisModeChange}
+                />
+                <span>Synthesis mode (timeline overview)</span>
+              </label>
+              <p className={styles.toggleHelp}>
+                Builds a cross-document timeline of events, actors, and themes.
               </p>
             </div>
           </div>
