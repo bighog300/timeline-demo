@@ -149,6 +149,24 @@
   gap: 8px;
 }
 
+.toggleRow {
+  display: grid;
+  gap: 6px;
+}
+
+.toggleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.toggleHelp {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .suggestionLabel {
   font-size: 0.85rem;
   color: var(--muted);

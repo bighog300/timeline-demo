@@ -15,6 +15,8 @@ export type ChatContextItem = {
   dateISO?: string;
   snippet: string;
   kind: 'summary';
+  source: 'gmail' | 'drive';
+  sourceId: string;
 };
 
 export type ChatContextPack = {
@@ -115,6 +117,8 @@ const buildContextItem = (
   dateISO: artifact.createdAtISO || artifact.sourceMetadata?.dateISO || undefined,
   snippet: truncateText(snippet, maxSnippetChars),
   kind: 'summary',
+  source: artifact.source,
+  sourceId: artifact.sourceId,
 });
 
 export const buildContextString = (
