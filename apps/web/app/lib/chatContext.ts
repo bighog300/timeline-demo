@@ -94,6 +94,7 @@ const MAX_JSON_DOWNLOADS = 20;
 const MAX_SELECTION_SETS = 5;
 const MAX_RECENT_RUNS = 10;
 const MAX_META_TEXT_CHARS = 800;
+const SYNTHESIS_FALLBACK_MAX_SUMMARIES = 10;
 
 const parseDriveJson = (data: unknown): unknown => {
   if (typeof data === 'string') {
@@ -287,6 +288,72 @@ const scoreSelectionSet = (set: ChatSelectionSetContextItem, normalizedQuery: st
   return queryTokens.reduce((score, token) => (haystack.includes(token) ? score + 1 : score), 0);
 };
 
+const computeMetaBudget = (maxContextItems: number) =>
+  Math.min(5, Math.max(2, Math.floor(maxContextItems * 0.25)));
+
+type RankedSummaryContextItem = {
+  item: ChatSummaryContextItem;
+  artifactKey: string;
+  recencyTs: number;
+};
+
+const rankedSummaryRecency = (artifact: SummaryArtifact, fallbackDateISO?: string) =>
+  toTimestamp(artifact.sourceMetadata?.driveModifiedTime || fallbackDateISO || artifact.createdAtISO);
+
+const prioritizeSummaryItems = ({
+  selectedSummaries,
+  allSummaries,
+  synthesisMode,
+  maxContextItems,
+  metaItems,
+}: {
+  selectedSummaries: RankedSummaryContextItem[];
+  allSummaries: RankedSummaryContextItem[];
+  synthesisMode?: boolean;
+  maxContextItems: number;
+  metaItems: ChatContextItem[];
+}) => {
+  const requiresSynthesisMinimum = synthesisMode && allSummaries.length >= 2;
+  let limitedMetaItems = metaItems;
+  let summaryBudget = Math.max(0, maxContextItems - limitedMetaItems.length);
+
+  if (requiresSynthesisMinimum && summaryBudget < 2) {
+    limitedMetaItems = limitedMetaItems.slice(0, Math.max(0, maxContextItems - 2));
+    summaryBudget = Math.max(0, maxContextItems - limitedMetaItems.length);
+  }
+
+  let prioritizedSummaries = selectedSummaries;
+
+  if (synthesisMode && prioritizedSummaries.length === 0 && allSummaries.length > 0) {
+    const remainingBudgetForSummaries = Math.max(0, maxContextItems - computeMetaBudget(maxContextItems));
+    const fallbackCount = Math.min(
+      SYNTHESIS_FALLBACK_MAX_SUMMARIES,
+      Math.max(1, remainingBudgetForSummaries),
+    );
+    prioritizedSummaries = allSummaries.slice(0, fallbackCount);
+  }
+
+  if (requiresSynthesisMinimum && prioritizedSummaries.length < 2) {
+    const remainingBudgetForSummaries = Math.max(0, maxContextItems - computeMetaBudget(maxContextItems));
+    const fallbackCount = Math.min(
+      SYNTHESIS_FALLBACK_MAX_SUMMARIES,
+      Math.max(2, remainingBudgetForSummaries),
+    );
+    const deduped = new Map<string, RankedSummaryContextItem>();
+    for (const candidate of [...allSummaries.slice(0, fallbackCount), ...prioritizedSummaries]) {
+      if (!deduped.has(candidate.artifactKey)) {
+        deduped.set(candidate.artifactKey, candidate);
+      }
+    }
+    prioritizedSummaries = [...deduped.values()];
+  }
+
+  return {
+    summaries: prioritizedSummaries.slice(0, summaryBudget).map((entry) => entry.item),
+    metaItems: limitedMetaItems,
+  };
+};
+
 const buildMetaItems = ({
   selectionSets,
   runs,
@@ -302,7 +369,7 @@ const buildMetaItems = ({
     return [] as ChatContextItem[];
   }
 
-  const metaBudget = Math.min(5, Math.max(2, Math.floor(maxContextItems * 0.25)));
+  const metaBudget = computeMetaBudget(maxContextItems);
   const sortedSets = [...selectionSets].sort((left, right) => {
     const scoreDiff = scoreSelectionSet(right, query) - scoreSelectionSet(left, query);
     if (scoreDiff !== 0) {
@@ -604,6 +671,7 @@ export const buildContextPackFromIndexData = ({
   maxContextChars = DEFAULT_MAX_CONTEXT_CHARS,
   selectionSets = [],
   runs = [],
+  synthesisMode = false,
 }: {
   queryText: string;
   summaries: TimelineIndexSummary[];
@@ -613,21 +681,44 @@ export const buildContextPackFromIndexData = ({
   maxContextChars?: number;
   selectionSets?: ChatSelectionSetContextItem[];
   runs?: ChatRunContextItem[];
+  synthesisMode?: boolean;
 }): ChatContextPack => {
   const normalizedQuery = normalizeQuery(queryText);
   const maxContextItems = clampMaxItems(maxItems);
   const artifactMap = new Map(artifacts.map((artifact) => [artifact.driveFileId, artifact]));
   const matchedSummaries = summaries.filter((summary) => matchIndexSummary(summary, normalizedQuery));
-  const summaryItems: ChatSummaryContextItem[] = [];
+  const selectedSummaries: RankedSummaryContextItem[] = [];
 
   for (const summary of matchedSummaries.slice(0, maxContextItems)) {
     const artifact = artifactMap.get(summary.driveFileId);
     if (!artifact) {
       continue;
     }
+
     const snippet = pickSnippet(artifact, normalizedQuery);
-    summaryItems.push(buildSummaryContextItem(artifact, snippet, maxSnippetChars));
+    selectedSummaries.push({
+      item: buildSummaryContextItem(artifact, snippet, maxSnippetChars),
+      artifactKey: artifact.driveFileId || artifact.artifactId,
+      recencyTs: rankedSummaryRecency(artifact, summary.updatedAtISO || summary.createdAtISO),
+    });
   }
+
+  const allSummaries = summaries
+    .map((summary) => {
+      const artifact = artifactMap.get(summary.driveFileId);
+      if (!artifact) {
+        return null;
+      }
+
+      const snippet = pickSnippet(artifact, normalizedQuery);
+      return {
+        item: buildSummaryContextItem(artifact, snippet, maxSnippetChars),
+        artifactKey: artifact.driveFileId || artifact.artifactId,
+        recencyTs: rankedSummaryRecency(artifact, summary.updatedAtISO || summary.createdAtISO),
+      } satisfies RankedSummaryContextItem;
+    })
+    .filter((entry): entry is RankedSummaryContextItem => entry !== null)
+    .sort((left, right) => right.recencyTs - left.recencyTs);
 
   const metaItems = buildMetaItems({
     selectionSets,
@@ -636,8 +727,15 @@ export const buildContextPackFromIndexData = ({
     maxContextItems,
   });
 
-  const prioritizedSummaries = summaryItems.slice(0, Math.max(0, maxContextItems - metaItems.length));
-  const limited = buildContextString([...prioritizedSummaries, ...metaItems], maxContextChars);
+  const prioritized = prioritizeSummaryItems({
+    selectedSummaries,
+    allSummaries,
+    synthesisMode,
+    maxContextItems,
+    metaItems,
+  });
+
+  const limited = buildContextString([...prioritized.summaries, ...prioritized.metaItems], maxContextChars);
   return {
     items: limited.items,
     debug: { usedIndex: true, totalConsidered: summaries.length },
@@ -652,6 +750,7 @@ export const buildContextPack = async ({
   ctx,
   maxSnippetChars = DEFAULT_MAX_SNIPPET_CHARS,
   maxContextChars = DEFAULT_MAX_CONTEXT_CHARS,
+  synthesisMode = false,
 }: {
   queryText: string;
   drive: drive_v3.Drive;
@@ -660,6 +759,7 @@ export const buildContextPack = async ({
   ctx?: LogContext;
   maxSnippetChars?: number;
   maxContextChars?: number;
+  synthesisMode?: boolean;
 }): Promise<ChatContextPack> => {
   const normalizedQuery = normalizeQuery(queryText);
   const maxContextItems = clampMaxItems(maxItems);
@@ -677,11 +777,20 @@ export const buildContextPack = async ({
   if (indexFile?.id) {
     const index = await readIndexFile(drive, indexFile.id, driveFolderId, ctx);
     if (index) {
-      const matchedSummaries = index.summaries.filter((summary) =>
-        matchIndexSummary(summary, normalizedQuery),
+      const sortedSummaries = [...index.summaries].sort(
+        (left, right) =>
+          toTimestamp(right.updatedAtISO || right.createdAtISO) -
+          toTimestamp(left.updatedAtISO || left.createdAtISO),
       );
+
+      const summariesToRead = synthesisMode
+        ? sortedSummaries.slice(0, MAX_JSON_DOWNLOADS)
+        : sortedSummaries
+            .filter((summary) => matchIndexSummary(summary, normalizedQuery))
+            .slice(0, maxContextItems);
+
       const artifacts: SummaryArtifact[] = [];
-      for (const summary of matchedSummaries.slice(0, maxContextItems)) {
+      for (const summary of summariesToRead) {
         if (!summary.driveFileId) {
           continue;
         }
@@ -695,13 +804,14 @@ export const buildContextPack = async ({
 
       return buildContextPackFromIndexData({
         queryText,
-        summaries: matchedSummaries,
+        summaries: sortedSummaries,
         artifacts,
         maxItems: maxContextItems,
         maxSnippetChars,
         maxContextChars,
         selectionSets: selectionSetItems,
         runs: runItems,
+        synthesisMode,
       });
     }
   }
@@ -732,7 +842,9 @@ export const buildContextPack = async ({
     : await listOperation();
   const candidates = (listResponse.data.files ?? []).filter(isSummaryJsonFile);
 
-  const summaryItems: ChatSummaryContextItem[] = [];
+  const selectedSummaries: RankedSummaryContextItem[] = [];
+  const allSummaries: RankedSummaryContextItem[] = [];
+
   for (const file of candidates.slice(0, MAX_JSON_DOWNLOADS)) {
     if (!file.id) {
       continue;
@@ -745,14 +857,28 @@ export const buildContextPack = async ({
       continue;
     }
 
-    const match = matchSummaryArtifact(artifact, normalizedQuery);
-    if (!match.matched) {
-      continue;
-    }
+    const baseSnippet = pickSnippet(artifact, normalizedQuery);
+    const rankedSummary = {
+      item: buildSummaryContextItem(artifact, baseSnippet, maxSnippetChars),
+      artifactKey: artifact.driveFileId || artifact.artifactId,
+      recencyTs: rankedSummaryRecency(artifact, file.modifiedTime || undefined),
+    } satisfies RankedSummaryContextItem;
 
-    const snippet = match.snippet || pickSnippet(artifact, normalizedQuery);
-    summaryItems.push(buildSummaryContextItem(artifact, snippet, maxSnippetChars));
+    allSummaries.push(rankedSummary);
+
+    const match = matchSummaryArtifact(artifact, normalizedQuery);
+    if (match.matched) {
+      selectedSummaries.push({
+        ...rankedSummary,
+        item: {
+          ...rankedSummary.item,
+          snippet: truncateText(match.snippet || baseSnippet, maxSnippetChars),
+        },
+      });
+    }
   }
+
+  allSummaries.sort((left, right) => right.recencyTs - left.recencyTs);
 
   const metaItems = buildMetaItems({
     selectionSets: selectionSetItems,
@@ -761,8 +887,15 @@ export const buildContextPack = async ({
     maxContextItems,
   });
 
-  const summaryBudget = Math.max(0, maxContextItems - metaItems.length);
-  const limited = buildContextString([...summaryItems.slice(0, summaryBudget), ...metaItems], maxContextChars);
+  const prioritized = prioritizeSummaryItems({
+    selectedSummaries,
+    allSummaries,
+    synthesisMode,
+    maxContextItems,
+    metaItems,
+  });
+
+  const limited = buildContextString([...prioritized.summaries, ...prioritized.metaItems], maxContextChars);
   return {
     items: limited.items,
     debug: { usedIndex: false, totalConsidered: candidates.length },
