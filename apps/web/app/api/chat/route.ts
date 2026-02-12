@@ -670,6 +670,10 @@ export async function POST(request: Request) {
   }
 
   const { context, items } = buildContextString(contextPack.items);
+  const summaryItems = items.filter(
+    (item): item is Extract<(typeof items)[number], { kind: 'summary' }> => item.kind === 'summary',
+  );
+  const summaryCount = summaryItems.length;
   const systemPrompt = buildChatSystemPrompt(
     adminSettings?.systemPrompt ?? '',
     effectiveAdvisorMode,
@@ -678,12 +682,12 @@ export async function POST(request: Request) {
   const provider = adminSettings?.provider ?? 'stub';
   const model = adminSettings?.model ?? 'stub';
 
-  if ((synthesisMode && items.length < 2) || items.length === 0) {
+  if ((synthesisMode && summaryCount < 2) || summaryCount === 0) {
     return respond(
       NextResponse.json(
         buildNoSourceGuidanceResponse({
           synthesisMode,
-          sourceCount: items.length,
+          sourceCount: summaryCount,
           provider,
           model,
           requestId: ctx.requestId,
@@ -877,7 +881,7 @@ ${context}` }]
         ],
         temperature: adminSettings?.temperature,
       });
-      const plan = parseSynthesisPlan(extraction.text, items.length);
+      const plan = parseSynthesisPlan(extraction.text, summaryCount);
       if (plan) {
         const writeup = await callLLM(llmProvider, {
           model,
@@ -912,17 +916,17 @@ ${JSON.stringify(plan)}` },
     routerDecision?.answer ||
     llmResponseText ||
     (synthesisMode
-      ? formatSynthesisFallbackReply(items.length)
+      ? formatSynthesisFallbackReply(summaryCount)
       : effectiveAdvisorMode
-      ? formatAdvisorFallbackReply(items.length)
+      ? formatAdvisorFallbackReply(summaryCount)
       : 'I could not find enough detail in your saved summaries. Try syncing or summarizing more items.');
   let citations = baseCitations;
 
   if (llmProvider !== 'stub' && !routerDecision && !synthesisPlanReply) {
     reply = synthesisMode
-      ? formatSynthesisFallbackReply(items.length)
+      ? formatSynthesisFallbackReply(summaryCount)
       : effectiveAdvisorMode
-      ? formatAdvisorFallbackReply(items.length)
+      ? formatAdvisorFallbackReply(summaryCount)
       : 'I could not parse the model response. Please try again.';
   }
 
@@ -997,9 +1001,9 @@ ${JSON.stringify(plan)}` },
         reply =
           pass2.text ||
           (synthesisMode
-            ? formatSynthesisFallbackReply(items.length)
+            ? formatSynthesisFallbackReply(summaryCount)
             : effectiveAdvisorMode
-            ? formatAdvisorFallbackReply(items.length)
+            ? formatAdvisorFallbackReply(summaryCount)
             : reply);
       } catch (error) {
         logWarn(ctx, 'chat_pass2_failed', { error: safeError(error) });
