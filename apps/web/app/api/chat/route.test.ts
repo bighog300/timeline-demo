@@ -67,6 +67,13 @@ const defaultContextItem = {
   sourceId: 'msg-1',
 };
 
+const secondContextItem = {
+  ...defaultContextItem,
+  artifactId: 'summary-2',
+  sourceId: 'msg-2',
+  title: 'Follow-up Notes',
+};
+
 describe('POST /api/chat', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -335,8 +342,8 @@ describe('POST /api/chat', () => {
       },
     } as never);
     mockBuildContextPack.mockResolvedValue({
-      items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      items: [defaultContextItem, secondContextItem],
+      debug: { usedIndex: true, totalConsidered: 2 },
     });
     mockCallLLM.mockResolvedValue({
       text: JSON.stringify({
@@ -394,7 +401,49 @@ describe('POST /api/chat', () => {
     expect(payload.reply).toContain('## Contradictions and uncertainties');
   });
 
-  it('applies advisor and synthesis prompt addenda when synthesisMode is true', async () => {
+  it('returns synthesis guidance and skips LLM when synthesisMode has 0 sources', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [],
+      debug: { usedIndex: true, totalConsidered: 0 },
+    });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Synthesize timeline', synthesisMode: true }),
+    });
+
+    const response = await POST(request);
+    const payload = (await response.json()) as {
+      reply: string;
+      citations: unknown[];
+      suggested_actions: string[];
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toBe('Need at least 2 sources to synthesize a timeline.');
+    expect(payload.citations).toEqual([]);
+    expect(payload.suggested_actions).toEqual([
+      'Go to /timeline and click Full sync',
+      'Summarize items in /select/gmail or /select/drive',
+    ]);
+    expect(mockCallLLM).not.toHaveBeenCalled();
+  });
+
+  it('returns synthesis guidance and skips LLM when synthesisMode has 1 source', async () => {
     mockGetGoogleSession.mockResolvedValue({
       driveFolderId: 'folder-1',
       user: { email: 'person@example.com' },
@@ -411,6 +460,80 @@ describe('POST /api/chat', () => {
     mockBuildContextPack.mockResolvedValue({
       items: [defaultContextItem],
       debug: { usedIndex: true, totalConsidered: 1 },
+    });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Synthesize timeline', synthesisMode: true }),
+    });
+
+    const response = await POST(request);
+    const payload = (await response.json()) as {
+      reply: string;
+      citations: unknown[];
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toBe('Need at least 2 sources to synthesize a timeline.');
+    expect(payload.citations).toEqual([]);
+    expect(mockCallLLM).not.toHaveBeenCalled();
+  });
+
+  it('returns no-source guidance in normal mode when context is empty', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [],
+      debug: { usedIndex: true, totalConsidered: 0 },
+    });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'What happened?' }),
+    });
+
+    const response = await POST(request);
+    const payload = (await response.json()) as {
+      reply: string;
+      citations: unknown[];
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toBe('No timeline sources available to analyze.');
+    expect(payload.citations).toEqual([]);
+    expect(mockCallLLM).not.toHaveBeenCalled();
+  });
+
+  it('applies advisor and synthesis prompt addenda when synthesisMode is true', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem, secondContextItem],
+      debug: { usedIndex: true, totalConsidered: 2 },
     });
     mockCallLLM.mockResolvedValue({
       text: JSON.stringify({
@@ -483,8 +606,8 @@ describe('POST /api/chat', () => {
       },
     } as never);
     mockBuildContextPack.mockResolvedValue({
-      items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      items: [defaultContextItem, secondContextItem],
+      debug: { usedIndex: true, totalConsidered: 2 },
     });
     mockCallLLM
       .mockResolvedValueOnce({
@@ -565,8 +688,8 @@ describe('POST /api/chat', () => {
       },
     } as never);
     mockBuildContextPack.mockResolvedValue({
-      items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      items: [defaultContextItem, secondContextItem],
+      debug: { usedIndex: true, totalConsidered: 2 },
     });
     mockCallLLM
       .mockResolvedValueOnce({

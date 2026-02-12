@@ -420,6 +420,34 @@ const buildSuggestedActions = (message: string, advisorMode = false, synthesisMo
   return uniqueActions(actions).slice(0, advisorMode ? 5 : 10);
 };
 
+const EMPTY_SOURCE_GUIDANCE_STEPS = [
+  'Go to /timeline and click Full sync',
+  'Summarize items in /select/gmail or /select/drive',
+];
+
+const buildNoSourceGuidanceResponse = ({
+  synthesisMode,
+  sourceCount,
+  provider,
+  model,
+  requestId,
+}: {
+  synthesisMode: boolean;
+  sourceCount: number;
+  provider: LLMProviderName;
+  model: string;
+  requestId: string;
+}): ChatResponse => ({
+  reply:
+    synthesisMode && sourceCount < 2
+      ? 'Need at least 2 sources to synthesize a timeline.'
+      : 'No timeline sources available to analyze.',
+  citations: [],
+  suggested_actions: EMPTY_SOURCE_GUIDANCE_STEPS,
+  provider: { name: provider, model },
+  requestId,
+});
+
 const jsonChatError = (status: number, payload: ChatErrorResponse) =>
   NextResponse.json(payload, { status });
 
@@ -647,6 +675,20 @@ export async function POST(request: Request) {
   );
   const provider = adminSettings?.provider ?? 'stub';
   const model = adminSettings?.model ?? 'stub';
+
+  if ((synthesisMode && items.length < 2) || items.length === 0) {
+    return respond(
+      NextResponse.json(
+        buildNoSourceGuidanceResponse({
+          synthesisMode,
+          sourceCount: items.length,
+          provider,
+          model,
+          requestId: ctx.requestId,
+        }),
+      ),
+    );
+  }
 
   const messages = [
     ...(context
