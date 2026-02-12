@@ -74,6 +74,28 @@ const secondContextItem = {
   title: 'Follow-up Notes',
 };
 
+const selectionSetMetaItem = {
+  kind: 'selection_set' as const,
+  id: 'sel-1',
+  title: 'Saved search',
+  source: 'gmail' as const,
+  q: 'from:person@example.com',
+  updatedAtISO: '2024-01-03T00:00:00.000Z',
+  text: 'Saved search metadata only.',
+};
+
+const runMetaItem = {
+  kind: 'run' as const,
+  id: 'run-1',
+  action: 'run' as const,
+  selectionSetId: 'sel-1',
+  selectionSetTitle: 'Saved search',
+  startedAtISO: '2024-01-03T00:00:00.000Z',
+  finishedAtISO: '2024-01-03T00:01:00.000Z',
+  status: 'success' as const,
+  text: 'Run metadata only.',
+};
+
 describe('POST /api/chat', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -476,6 +498,80 @@ describe('POST /api/chat', () => {
 
     expect(response.status).toBe(200);
     expect(payload.reply).toBe('Need at least 2 sources to synthesize a timeline.');
+    expect(payload.citations).toEqual([]);
+    expect(mockCallLLM).not.toHaveBeenCalled();
+  });
+
+  it('returns no-source guidance when context has only metadata items', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [selectionSetMetaItem, runMetaItem],
+      debug: { usedIndex: true, totalConsidered: 2 },
+    });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'What happened?' }),
+    });
+
+    const response = await POST(request);
+    const payload = (await response.json()) as {
+      reply: string;
+      citations: unknown[];
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toContain('No timeline sources available');
+    expect(payload.citations).toEqual([]);
+    expect(mockCallLLM).not.toHaveBeenCalled();
+  });
+
+  it('returns synthesis guidance with one summary even when metadata items are present', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem, selectionSetMetaItem],
+      debug: { usedIndex: true, totalConsidered: 2 },
+    });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Synthesize timeline', synthesisMode: true }),
+    });
+
+    const response = await POST(request);
+    const payload = (await response.json()) as {
+      reply: string;
+      citations: unknown[];
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toContain('Need at least 2 sources');
     expect(payload.citations).toEqual([]);
     expect(mockCallLLM).not.toHaveBeenCalled();
   });
