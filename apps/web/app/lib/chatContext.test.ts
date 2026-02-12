@@ -220,6 +220,124 @@ describe('chatContext', () => {
     expect(context).toContain('(RUN)');
   });
 
+
+
+  it('uses most recent summaries fallback in synthesis mode when relevance yields fewer than 2', () => {
+    const summaries: TimelineIndexSummary[] = [
+      {
+        driveFileId: 'summary-1',
+        title: 'Old Planning Notes',
+        source: 'drive',
+        sourceId: 'drive:file-1',
+        updatedAtISO: '2024-04-01T00:00:00.000Z',
+      },
+      {
+        driveFileId: 'summary-2',
+        title: 'Mid Project Recap',
+        source: 'drive',
+        sourceId: 'drive:file-2',
+        updatedAtISO: '2024-04-02T00:00:00.000Z',
+      },
+      {
+        driveFileId: 'summary-3',
+        title: 'Newest Incident Notes',
+        source: 'drive',
+        sourceId: 'drive:file-3',
+        updatedAtISO: '2024-04-03T00:00:00.000Z',
+      },
+    ];
+
+    const artifacts = [
+      buildArtifact({ driveFileId: 'summary-1', title: 'Old Planning Notes', summary: 'older summary' }),
+      buildArtifact({ driveFileId: 'summary-2', title: 'Mid Project Recap', summary: 'mid summary' }),
+      buildArtifact({ driveFileId: 'summary-3', title: 'Newest Incident Notes', summary: 'newest summary' }),
+    ];
+
+    const pack = buildContextPackFromIndexData({
+      queryText: 'incident',
+      summaries,
+      artifacts,
+      maxItems: 6,
+      synthesisMode: true,
+    });
+
+    const summaryItems = pack.items.filter((item) => item.kind === 'summary');
+    expect(summaryItems.length).toBeGreaterThanOrEqual(2);
+    expect(summaryItems[0]?.title).toBe('Newest Incident Notes');
+    expect(summaryItems[1]?.title).toBe('Mid Project Recap');
+  });
+
+  it('does not force fallback summaries when synthesis mode is disabled', () => {
+    const summaries: TimelineIndexSummary[] = [
+      {
+        driveFileId: 'summary-1',
+        title: 'Old Planning Notes',
+        source: 'drive',
+        sourceId: 'drive:file-1',
+        updatedAtISO: '2024-04-01T00:00:00.000Z',
+      },
+      {
+        driveFileId: 'summary-2',
+        title: 'Mid Project Recap',
+        source: 'drive',
+        sourceId: 'drive:file-2',
+        updatedAtISO: '2024-04-02T00:00:00.000Z',
+      },
+      {
+        driveFileId: 'summary-3',
+        title: 'Newest Incident Notes',
+        source: 'drive',
+        sourceId: 'drive:file-3',
+        updatedAtISO: '2024-04-03T00:00:00.000Z',
+      },
+    ];
+
+    const artifacts = [
+      buildArtifact({ driveFileId: 'summary-1', title: 'Old Planning Notes', summary: 'older summary' }),
+      buildArtifact({ driveFileId: 'summary-2', title: 'Mid Project Recap', summary: 'mid summary' }),
+      buildArtifact({ driveFileId: 'summary-3', title: 'Newest Incident Notes', summary: 'newest summary' }),
+    ];
+
+    const pack = buildContextPackFromIndexData({
+      queryText: 'incident',
+      summaries,
+      artifacts,
+      maxItems: 6,
+      synthesisMode: false,
+    });
+
+    const summaryItems = pack.items.filter((item) => item.kind === 'summary');
+    expect(summaryItems).toHaveLength(1);
+    expect(summaryItems[0]?.title).toBe('Newest Incident Notes');
+  });
+
+  it('returns one summary in synthesis mode when only one valid summary exists', () => {
+    const summaries: TimelineIndexSummary[] = [
+      {
+        driveFileId: 'summary-1',
+        title: 'Newest Incident Notes',
+        source: 'drive',
+        sourceId: 'drive:file-1',
+        updatedAtISO: '2024-04-03T00:00:00.000Z',
+      },
+    ];
+
+    const artifacts = [
+      buildArtifact({ driveFileId: 'summary-1', title: 'Newest Incident Notes', summary: 'newest summary' }),
+    ];
+
+    const pack = buildContextPackFromIndexData({
+      queryText: 'generic request',
+      summaries,
+      artifacts,
+      maxItems: 6,
+      synthesisMode: true,
+    });
+
+    const summaryItems = pack.items.filter((item) => item.kind === 'summary');
+    expect(summaryItems).toHaveLength(1);
+  });
+
   it('ignores Summary.md exports when filtering listing files', () => {
     expect(isSummaryJsonFile({ name: 'Project - Summary.json' })).toBe(true);
     expect(isSummaryJsonFile({ name: 'Project - Summary.md' })).toBe(false);

@@ -134,6 +134,7 @@ const SYNTHESIS_PROMPT_ADDENDUM = [
   'Identify themes and turning points, citing evidence.',
   'Include cautious “Legal considerations (general)” and “Psychological/interpersonal signals (non-clinical)” sections tied to specific events (cite each).',
   'If context limits are tight, prioritize the 10 most relevant events.',
+  'If the user request is broad, prefer the most recent relevant summaries.',
   'Output MUST include these headings, in this order:',
   '',
   '## Synthesized timeline',
@@ -649,6 +650,7 @@ export async function POST(request: Request) {
       driveFolderId,
       maxItems: maxContextItems,
       ctx,
+      synthesisMode,
     });
   } catch (error) {
     logGoogleError(error, 'drive.files.get', ctx);
