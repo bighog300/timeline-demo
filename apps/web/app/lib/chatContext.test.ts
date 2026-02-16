@@ -338,6 +338,141 @@ describe('chatContext', () => {
     expect(summaryItems).toHaveLength(1);
   });
 
+  it('selects summaries from different date buckets when possible', () => {
+    const summaries: TimelineIndexSummary[] = [
+      {
+        driveFileId: 'summary-1',
+        title: 'Incident Day One',
+        source: 'drive',
+        sourceId: 'drive:file-1',
+        updatedAtISO: '2024-04-10T10:00:00.000Z',
+      },
+      {
+        driveFileId: 'summary-2',
+        title: 'Incident Day One Follow-up',
+        source: 'drive',
+        sourceId: 'drive:file-2',
+        updatedAtISO: '2024-04-10T09:00:00.000Z',
+      },
+      {
+        driveFileId: 'summary-3',
+        title: 'Incident Day Two',
+        source: 'drive',
+        sourceId: 'drive:file-3',
+        updatedAtISO: '2024-04-11T08:00:00.000Z',
+      },
+    ];
+
+    const artifacts = [
+      buildArtifact({ driveFileId: 'summary-1', title: 'Incident Day One', summary: 'day one summary', createdAtISO: '2024-04-10T10:00:00.000Z' }),
+      buildArtifact({ driveFileId: 'summary-2', title: 'Incident Day One Follow-up', summary: 'day one follow-up summary', createdAtISO: '2024-04-10T09:00:00.000Z' }),
+      buildArtifact({ driveFileId: 'summary-3', title: 'Incident Day Two', summary: 'day two summary', createdAtISO: '2024-04-11T08:00:00.000Z' }),
+    ];
+
+    const pack = buildContextPackFromIndexData({
+      queryText: 'incident',
+      summaries,
+      artifacts,
+      maxItems: 3,
+    });
+
+    const summaryItems = pack.items.filter((item) => item.kind === 'summary');
+    expect(summaryItems.length).toBeGreaterThanOrEqual(2);
+    const uniqueDates = new Set(summaryItems.map((item) => item.dateISO?.slice(0, 10)));
+    expect(uniqueDates.size).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not underfill when pool is small and diversity rules would conflict', () => {
+    const summaries: TimelineIndexSummary[] = [
+      {
+        driveFileId: 'summary-1',
+        title: 'Daily Update A',
+        source: 'drive',
+        sourceId: 'drive:file-1',
+        updatedAtISO: '2024-04-10T10:00:00.000Z',
+      },
+      {
+        driveFileId: 'summary-2',
+        title: 'Daily Update B',
+        source: 'drive',
+        sourceId: 'drive:file-2',
+        updatedAtISO: '2024-04-10T09:00:00.000Z',
+      },
+    ];
+
+    const artifacts = [
+      buildArtifact({ driveFileId: 'summary-1', title: 'Daily Update A', summary: 'first update', createdAtISO: '2024-04-10T10:00:00.000Z' }),
+      buildArtifact({ driveFileId: 'summary-2', title: 'Daily Update B', summary: 'second update', createdAtISO: '2024-04-10T09:00:00.000Z' }),
+    ];
+
+    const pack = buildContextPackFromIndexData({
+      queryText: 'daily',
+      summaries,
+      artifacts,
+      maxItems: 2,
+    });
+
+    const summaryItems = pack.items.filter((item) => item.kind === 'summary');
+    expect(summaryItems).toHaveLength(2);
+  });
+
+  it('avoids selecting duplicate title/source summaries when alternatives exist', () => {
+    const summaries: TimelineIndexSummary[] = [
+      {
+        driveFileId: 'summary-1',
+        title: 'Quarterly Review',
+        source: 'drive',
+        sourceId: 'drive:file-1',
+        updatedAtISO: '2024-04-12T10:00:00.000Z',
+      },
+      {
+        driveFileId: 'summary-2',
+        title: 'Quarterly   Review',
+        source: 'drive',
+        sourceId: 'drive:file-1',
+        updatedAtISO: '2024-04-12T09:00:00.000Z',
+      },
+      {
+        driveFileId: 'summary-3',
+        title: 'Review Roadmap',
+        source: 'drive',
+        sourceId: 'drive:file-3',
+        updatedAtISO: '2024-04-11T10:00:00.000Z',
+      },
+    ];
+
+    const artifacts = [
+      buildArtifact({ driveFileId: 'summary-1', title: 'Quarterly Review', summary: 'review summary one', createdAtISO: '2024-04-12T10:00:00.000Z' }),
+      buildArtifact({ driveFileId: 'summary-2', title: 'Quarterly   Review', summary: 'review summary duplicate', createdAtISO: '2024-04-12T09:00:00.000Z', sourceId: 'drive:file-1' }),
+      buildArtifact({ driveFileId: 'summary-3', title: 'Review Roadmap', summary: 'roadmap summary', createdAtISO: '2024-04-11T10:00:00.000Z', sourceId: 'drive:file-3' }),
+    ];
+
+    const selectionSets: ChatSelectionSetContextItem[] = [
+      {
+        kind: 'selection_set',
+        id: 'set-1',
+        title: 'Review Queries',
+        source: 'drive',
+        q: 'review',
+        updatedAtISO: '2024-04-13T10:00:00.000Z',
+        text: 'Saved search metadata only',
+      },
+    ];
+
+    const pack = buildContextPackFromIndexData({
+      queryText: 'review',
+      summaries,
+      artifacts,
+      selectionSets,
+      maxItems: 3,
+    });
+
+    const summaryItems = pack.items.filter((item) => item.kind === 'summary');
+    expect(summaryItems).toHaveLength(2);
+    const normalizedSourceIds = summaryItems.map((item) => `${item.source}:${item.sourceId}`);
+    expect(new Set(normalizedSourceIds).size).toBe(2);
+  });
+
   it('ignores Summary.md exports when filtering listing files', () => {
     expect(isSummaryJsonFile({ name: 'Project - Summary.json' })).toBe(true);
     expect(isSummaryJsonFile({ name: 'Project - Summary.md' })).toBe(false);

@@ -297,6 +297,164 @@ type RankedSummaryContextItem = {
   recencyTs: number;
 };
 
+const RECENCY_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const RECENCY_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+
+const normalizeSummaryTitle = (title: string) => title.toLowerCase().replace(/\s+/g, ' ').trim();
+
+const dateBucketKey = (dateISO?: string) => {
+  const timestamp = toTimestamp(dateISO);
+  if (!timestamp) {
+    return 'unknown';
+  }
+
+  const date = new Date(timestamp);
+  const day = date.toISOString().slice(0, 10);
+  return day;
+};
+
+const rankSummariesWithRecencyAndDiversity = (
+  candidates: RankedSummaryContextItem[],
+  desiredCount: number,
+  nowTs = Date.now(),
+) => {
+  if (desiredCount <= 0) {
+    return [] as RankedSummaryContextItem[];
+  }
+
+  if (candidates.length <= desiredCount) {
+    return candidates.slice(0, desiredCount);
+  }
+
+  const scored = candidates
+    .map((candidate, index) => {
+      const ageMs = candidate.recencyTs > 0 ? Math.max(0, nowTs - candidate.recencyTs) : Number.POSITIVE_INFINITY;
+      const recencyBoost = ageMs <= RECENCY_WEEK_MS ? 0.35 : ageMs <= RECENCY_MONTH_MS ? 0.15 : 0;
+      return {
+        candidate,
+        index,
+        score: candidates.length - index + recencyBoost,
+      };
+    })
+    .sort((left, right) => right.score - left.score || left.index - right.index);
+
+  const hasDateDiversity = new Set(candidates.map((candidate) => dateBucketKey(candidate.item.dateISO))).size >= 2;
+  const applyDateBucketLimit = hasDateDiversity && candidates.length >= desiredCount + 1;
+  const perDayBucketLimit = desiredCount >= 4 ? 2 : 1;
+  const applyDedupe = candidates.length >= desiredCount + 1;
+
+  const selected: RankedSummaryContextItem[] = [];
+  const selectedKeys = new Set<string>();
+  const bucketCounts = new Map<string, number>();
+  const normalizedTitles = new Set<string>();
+  const sourceIds = new Set<string>();
+
+  for (const entry of scored) {
+    if (selected.length >= desiredCount) {
+      break;
+    }
+
+    const { candidate } = entry;
+    const titleKey = normalizeSummaryTitle(candidate.item.title);
+    const sourceKey = `${candidate.item.source}:${candidate.item.sourceId}`;
+    const bucketKey = dateBucketKey(candidate.item.dateISO);
+    const bucketCount = bucketCounts.get(bucketKey) ?? 0;
+
+    if (applyDedupe && (normalizedTitles.has(titleKey) || sourceIds.has(sourceKey))) {
+      continue;
+    }
+    if (applyDateBucketLimit && bucketCount >= perDayBucketLimit) {
+      continue;
+    }
+
+    selected.push(candidate);
+    selectedKeys.add(candidate.artifactKey);
+    bucketCounts.set(bucketKey, bucketCount + 1);
+    normalizedTitles.add(titleKey);
+    sourceIds.add(sourceKey);
+  }
+
+  if (selected.length < desiredCount) {
+    for (const entry of scored) {
+      if (selected.length >= desiredCount) {
+        break;
+      }
+      if (selectedKeys.has(entry.candidate.artifactKey)) {
+        continue;
+      }
+
+      const titleKey = normalizeSummaryTitle(entry.candidate.item.title);
+      const sourceKey = `${entry.candidate.item.source}:${entry.candidate.item.sourceId}`;
+      if (applyDedupe && (normalizedTitles.has(titleKey) || sourceIds.has(sourceKey))) {
+        continue;
+      }
+
+      selected.push(entry.candidate);
+      selectedKeys.add(entry.candidate.artifactKey);
+      normalizedTitles.add(titleKey);
+      sourceIds.add(sourceKey);
+    }
+  }
+
+  if (selected.length < desiredCount) {
+    for (const entry of scored) {
+      if (selected.length >= desiredCount) {
+        break;
+      }
+      if (selectedKeys.has(entry.candidate.artifactKey)) {
+        continue;
+      }
+      selected.push(entry.candidate);
+      selectedKeys.add(entry.candidate.artifactKey);
+    }
+  }
+
+  if (applyDedupe && selected.length > 1) {
+    const dedupedSelection: RankedSummaryContextItem[] = [];
+    const dedupedKeys = new Set<string>();
+    const dedupedTitles = new Set<string>();
+    const dedupedSources = new Set<string>();
+
+    for (const candidate of selected) {
+      const titleKey = normalizeSummaryTitle(candidate.item.title);
+      const sourceKey = `${candidate.item.source}:${candidate.item.sourceId}`;
+      if (dedupedTitles.has(titleKey) || dedupedSources.has(sourceKey)) {
+        continue;
+      }
+      dedupedSelection.push(candidate);
+      dedupedKeys.add(candidate.artifactKey);
+      dedupedTitles.add(titleKey);
+      dedupedSources.add(sourceKey);
+    }
+
+    if (dedupedSelection.length < desiredCount) {
+      for (const entry of scored) {
+        if (dedupedSelection.length >= desiredCount) {
+          break;
+        }
+        if (dedupedKeys.has(entry.candidate.artifactKey)) {
+          continue;
+        }
+        const titleKey = normalizeSummaryTitle(entry.candidate.item.title);
+        const sourceKey = `${entry.candidate.item.source}:${entry.candidate.item.sourceId}`;
+        if (dedupedTitles.has(titleKey) || dedupedSources.has(sourceKey)) {
+          continue;
+        }
+        dedupedSelection.push(entry.candidate);
+        dedupedKeys.add(entry.candidate.artifactKey);
+        dedupedTitles.add(titleKey);
+        dedupedSources.add(sourceKey);
+      }
+    }
+
+    if (dedupedSelection.length >= desiredCount) {
+      return dedupedSelection.slice(0, desiredCount);
+    }
+  }
+
+  return selected;
+};
+
 const rankedSummaryRecency = (artifact: SummaryArtifact, fallbackDateISO?: string) =>
   toTimestamp(artifact.sourceMetadata?.driveModifiedTime || fallbackDateISO || artifact.createdAtISO);
 
@@ -348,8 +506,10 @@ const prioritizeSummaryItems = ({
     prioritizedSummaries = [...deduped.values()];
   }
 
+  const rankedSummaries = rankSummariesWithRecencyAndDiversity(prioritizedSummaries, summaryBudget);
+
   return {
-    summaries: prioritizedSummaries.slice(0, summaryBudget).map((entry) => entry.item),
+    summaries: rankedSummaries.map((entry) => entry.item),
     metaItems: limitedMetaItems,
   };
 };
