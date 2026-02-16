@@ -198,81 +198,94 @@ const SYNTHESIS_PLAN_LIMITS = {
   events: 15,
 };
 
-const parseSynthesisPlan = (value: string, sourceCount: number): SynthesisPlan | null => {
+const extractJsonObjectFromText = (value: string): unknown | null => {
   const cleaned = value.trim().replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
   try {
-    const parsed = JSON.parse(cleaned) as Partial<SynthesisPlan>;
-    if (!Array.isArray(parsed.entities) || !Array.isArray(parsed.events)) {
+    return JSON.parse(cleaned);
+  } catch {
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace === -1 || lastBrace === -1 || firstBrace >= lastBrace) {
       return null;
     }
+    try {
+      return JSON.parse(cleaned.slice(firstBrace, lastBrace + 1));
+    } catch {
+      return null;
+    }
+  }
+};
 
-    const inRangeCitations = (citations: unknown): number[] =>
-      Array.isArray(citations)
-        ? citations
-            .filter((citation): citation is number => Number.isInteger(citation))
-            .filter((citation) => citation >= 1 && citation <= sourceCount)
-        : [];
-
-    const entities = parsed.entities
-      .map((entity) => {
-        if (!entity || typeof entity !== 'object') {
-          return null;
-        }
-        const typed = entity as Partial<SynthesisEntity>;
-        if (
-          typeof typed.id !== 'string' ||
-          typeof typed.canonical !== 'string' ||
-          !['person', 'org', 'location', 'matter', 'document'].includes(typed.type as string)
-        ) {
-          return null;
-        }
-        const confidence = ['high', 'medium', 'low'].includes(typed.confidence as string)
-          ? (typed.confidence as SynthesisEntity['confidence'])
-          : 'low';
-        return {
-          id: typed.id,
-          type: typed.type as SynthesisEntity['type'],
-          canonical: typed.canonical,
-          aliases: Array.isArray(typed.aliases)
-            ? typed.aliases.filter((alias): alias is string => typeof alias === 'string').slice(0, 6)
-            : [],
-          confidence,
-          citations: inRangeCitations(typed.citations),
-        };
-      })
-      .filter((entity): entity is SynthesisEntity => entity !== null)
-      .slice(0, SYNTHESIS_PLAN_LIMITS.entities);
-
-    const events = parsed.events
-      .map((event) => {
-        if (!event || typeof event !== 'object') {
-          return null;
-        }
-        const typed = event as Partial<SynthesisEvent>;
-        if (typeof typed.id !== 'string' || typeof typed.summary !== 'string') {
-          return null;
-        }
-        return {
-          id: typed.id,
-          dateISO: typeof typed.dateISO === 'string' ? typed.dateISO : null,
-          dateLabel: typeof typed.dateLabel === 'string' ? typed.dateLabel : 'Unknown',
-          actors: Array.isArray(typed.actors)
-            ? typed.actors.filter((actor): actor is string => typeof actor === 'string').slice(0, 5)
-            : [],
-          summary: typed.summary,
-          theme: typeof typed.theme === 'string' ? typed.theme : 'general',
-          impact: typeof typed.impact === 'string' ? typed.impact : 'impact unclear',
-          citations: inRangeCitations(typed.citations),
-        };
-      })
-      .filter((event): event is SynthesisEvent => event !== null)
-      .filter((event) => event.citations.length > 0)
-      .slice(0, SYNTHESIS_PLAN_LIMITS.events);
-
-    return { entities, events };
-  } catch {
+const parseSynthesisPlan = (value: string, sourceCount: number): SynthesisPlan | null => {
+  const parsed = extractJsonObjectFromText(value) as Partial<SynthesisPlan> | null;
+  if (!parsed || !Array.isArray(parsed.entities) || !Array.isArray(parsed.events)) {
     return null;
   }
+
+  const inRangeCitations = (citations: unknown): number[] =>
+    Array.isArray(citations)
+      ? citations
+          .filter((citation): citation is number => Number.isInteger(citation))
+          .filter((citation) => citation >= 1 && citation <= sourceCount)
+      : [];
+
+  const entities = parsed.entities
+    .map((entity) => {
+      if (!entity || typeof entity !== 'object') {
+        return null;
+      }
+      const typed = entity as Partial<SynthesisEntity>;
+      if (
+        typeof typed.id !== 'string' ||
+        typeof typed.canonical !== 'string' ||
+        !['person', 'org', 'location', 'matter', 'document'].includes(typed.type as string)
+      ) {
+        return null;
+      }
+      const confidence = ['high', 'medium', 'low'].includes(typed.confidence as string)
+        ? (typed.confidence as SynthesisEntity['confidence'])
+        : 'low';
+      return {
+        id: typed.id,
+        type: typed.type as SynthesisEntity['type'],
+        canonical: typed.canonical,
+        aliases: Array.isArray(typed.aliases)
+          ? typed.aliases.filter((alias): alias is string => typeof alias === 'string').slice(0, 6)
+          : [],
+        confidence,
+        citations: inRangeCitations(typed.citations),
+      };
+    })
+    .filter((entity): entity is SynthesisEntity => entity !== null)
+    .slice(0, SYNTHESIS_PLAN_LIMITS.entities);
+
+  const events = parsed.events
+    .map((event) => {
+      if (!event || typeof event !== 'object') {
+        return null;
+      }
+      const typed = event as Partial<SynthesisEvent>;
+      if (typeof typed.id !== 'string' || typeof typed.summary !== 'string') {
+        return null;
+      }
+      return {
+        id: typed.id,
+        dateISO: typeof typed.dateISO === 'string' ? typed.dateISO : null,
+        dateLabel: typeof typed.dateLabel === 'string' ? typed.dateLabel : 'Unknown',
+        actors: Array.isArray(typed.actors)
+          ? typed.actors.filter((actor): actor is string => typeof actor === 'string').slice(0, 5)
+          : [],
+        summary: typed.summary,
+        theme: typeof typed.theme === 'string' ? typed.theme : 'general',
+        impact: typeof typed.impact === 'string' ? typed.impact : 'impact unclear',
+        citations: inRangeCitations(typed.citations),
+      };
+    })
+    .filter((event): event is SynthesisEvent => event !== null)
+    .filter((event) => event.citations.length > 0)
+    .slice(0, SYNTHESIS_PLAN_LIMITS.events);
+
+  return { entities, events };
 };
 
 const buildChatSystemPrompt = (
