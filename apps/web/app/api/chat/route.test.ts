@@ -1356,6 +1356,66 @@ Thanks`,
     ]);
   });
 
+
+  it('deduplicates logically identical counting occurrences before computing total', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem, secondContextItem],
+      debug: { usedIndex: true, totalConsidered: 2 },
+    });
+    mockCallLLM.mockResolvedValue({
+      text: JSON.stringify({
+        occurrences: [
+          {
+            who: ' Yvette ',
+            action: 'called the police',
+            when: 'Monday',
+            where: 'Home',
+            evidence: 'Summary 1 references one call.',
+            citations: [1],
+          },
+          {
+            who: 'yvette',
+            action: 'called the police',
+            when: ' monday ',
+            where: ' home ',
+            evidence: 'Summary 2 references the same call.',
+            citations: [2],
+          },
+        ],
+        notes: null,
+      }),
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'How many times did Yvette call the police?' }),
+      }),
+    );
+    const payload = (await response.json()) as {
+      reply: string;
+      citations: Array<{ artifactId: string }>;
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toContain('I found 1 occurrence');
+    expect(payload.citations.map((citation) => citation.artifactId)).toEqual(['summary-1', 'summary-2']);
+  });
+
   it('does not guess counting answers when summaries are insufficient', async () => {
     mockGetGoogleSession.mockResolvedValue({
       driveFolderId: 'folder-1',

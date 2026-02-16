@@ -399,13 +399,47 @@ const uniqueActions = (actions: string[]) => Array.from(new Set(actions));
 const isCountingQuestion = (message: string) =>
   /\b(how many times|how often|number of|count|how many)\b/i.test(message);
 
+const normalizeCountingKeyPart = (value: string | null) =>
+  (value ?? '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+
+const dedupeCountingOccurrences = (occurrences: CountingOccurrence[]): CountingOccurrence[] => {
+  const deduped = new Map<string, CountingOccurrence>();
+
+  for (const occurrence of occurrences) {
+    const key = [
+      normalizeCountingKeyPart(occurrence.who),
+      normalizeCountingKeyPart(occurrence.action),
+      normalizeCountingKeyPart(occurrence.when),
+      normalizeCountingKeyPart(occurrence.where),
+    ].join('|');
+
+    const existing = deduped.get(key);
+    if (!existing) {
+      deduped.set(key, {
+        ...occurrence,
+        citations: Array.from(new Set(occurrence.citations)).sort((a, b) => a - b),
+      });
+      continue;
+    }
+
+    existing.citations = Array.from(new Set([...existing.citations, ...occurrence.citations])).sort(
+      (a, b) => a - b,
+    );
+  }
+
+  return Array.from(deduped.values());
+};
+
 const parseCountingExtraction = (value: string, sourceCount: number): CountingExtraction | null => {
   const parsed = extractJsonObjectFromText(value) as Partial<CountingExtraction> | null;
   if (!parsed || !Array.isArray(parsed.occurrences)) {
     return null;
   }
 
-  const occurrences = parsed.occurrences
+  const validatedOccurrences = parsed.occurrences
     .map((occurrence) => {
       if (!occurrence || typeof occurrence !== 'object') {
         return null;
@@ -427,15 +461,17 @@ const parseCountingExtraction = (value: string, sourceCount: number): CountingEx
         return null;
       }
       return {
-        who: typed.who,
-        action: typed.action,
-        when: typeof typed.when === 'string' ? typed.when : null,
-        where: typeof typed.where === 'string' ? typed.where : null,
-        evidence: typed.evidence,
+        who: typed.who.trim(),
+        action: typed.action.trim(),
+        when: typeof typed.when === 'string' ? typed.when.trim() : null,
+        where: typeof typed.where === 'string' ? typed.where.trim() : null,
+        evidence: typed.evidence.trim(),
         citations,
       };
     })
     .filter((occurrence): occurrence is CountingOccurrence => occurrence !== null);
+
+  const occurrences = dedupeCountingOccurrences(validatedOccurrences);
 
   return {
     occurrences,
