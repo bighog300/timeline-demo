@@ -1224,6 +1224,182 @@ Thanks`,
     expect(payload.reply).toContain('## Suggested next steps');
   });
 
+  it('routes counting intent ahead of synthesisMode toggle', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM.mockResolvedValue({
+      text: JSON.stringify({
+        occurrences: [
+          {
+            who: 'Yvette',
+            action: 'called the police',
+            when: null,
+            where: null,
+            evidence: 'Summary evidence',
+            citations: [1],
+          },
+        ],
+        notes: null,
+      }),
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'How many times was the police called?', synthesisMode: true }),
+      }),
+    );
+    const payload = (await response.json()) as { reply: string };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toContain('Count found in summaries: 1');
+    expect(payload.reply).toContain('Occurrences:');
+    expect(mockCallLLM).toHaveBeenCalledTimes(1);
+    expect(mockCallLLM.mock.calls[0]?.[1].messages[2].content).toContain('Return STRICT JSON only with shape');
+    expect(mockCallLLM.mock.calls[0]?.[1].messages[2].content).not.toContain('Return valid JSON only with keys');
+  });
+
+  it('routes counting intent ahead of advisorMode toggle', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM.mockResolvedValue({
+      text: JSON.stringify({
+        occurrences: [
+          {
+            who: 'Yvette',
+            action: 'called the police',
+            when: null,
+            where: null,
+            evidence: 'Summary evidence',
+            citations: [1],
+          },
+        ],
+        notes: null,
+      }),
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'How many times was the police called?', advisorMode: true }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockCallLLM).toHaveBeenCalledTimes(1);
+    expect(mockCallLLM.mock.calls[0]?.[1].messages[2].content).toContain('Return STRICT JSON only with shape');
+    expect(mockCallLLM.mock.calls[0]?.[1].messages[2].content).not.toContain('Return valid JSON only with keys');
+  });
+
+  it('parses router decision JSON when wrapped in prose', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM.mockResolvedValue({
+      text: `I reviewed the summaries.
+{"answer":"Grounded reply [1].","needsOriginals":false,"requestedArtifactIds":["summary-1","summary-2","summary-3","summary-4"],"reason":"enough","suggested_actions":["a","b","c","d","e","f"]}`,
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'Need insights', advisorMode: true }),
+      }),
+    );
+    const payload = (await response.json()) as { reply: string; suggested_actions: string[] };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toBe('Grounded reply [1].');
+    expect(payload.suggested_actions).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+
+  it('parses router decision JSON from fenced block with trailing prose', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM.mockResolvedValue({
+      text: `
+\`\`\`json
+{"answer":"Fenced grounded reply [1].","needsOriginals":false,"requestedArtifactIds":["summary-1"],"reason":"enough","suggested_actions":["step 1"]}
+\`\`\`
+Some trailing explanation.`,
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'Need insights', advisorMode: true }),
+      }),
+    );
+    const payload = (await response.json()) as { reply: string; suggested_actions: string[] };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toBe('Fenced grounded reply [1].');
+    expect(payload.suggested_actions).toEqual(['step 1']);
+  });
+
   it('returns server-computed count for counting questions', async () => {
     mockGetGoogleSession.mockResolvedValue({
       driveFolderId: 'folder-1',
@@ -1283,7 +1459,10 @@ Thanks`,
     };
 
     expect(response.status).toBe(200);
-    expect(payload.reply).toContain('I found 2 occurrences');
+    expect(payload.reply).toContain('Count found in summaries: 2');
+    expect(payload.reply).toContain('Occurrences:');
+    expect(payload.reply).toContain('[1]');
+    expect(payload.reply).toContain('[2]');
     expect(payload.citations.map((citation) => citation.artifactId)).toEqual(['summary-1', 'summary-2']);
     expect(mockCallLLM).toHaveBeenCalledTimes(1);
     expect(mockCallLLM.mock.calls[0]?.[1].messages[2].content).toContain('Return STRICT JSON only with shape');
@@ -1345,7 +1524,7 @@ Thanks`,
     };
 
     expect(response.status).toBe(200);
-    expect(payload.reply).toContain('I found 1 occurrence');
+    expect(payload.reply).toContain('Count found in summaries: 1');
     expect(payload.citations).toEqual([
       {
         artifactId: 'summary-2',
@@ -1412,7 +1591,7 @@ Thanks`,
     };
 
     expect(response.status).toBe(200);
-    expect(payload.reply).toContain('I found 1 occurrence');
+    expect(payload.reply).toContain('Count found in summaries: 1');
     expect(payload.citations.map((citation) => citation.artifactId)).toEqual(['summary-1', 'summary-2']);
   });
 
