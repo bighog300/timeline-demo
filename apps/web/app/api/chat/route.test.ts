@@ -789,7 +789,8 @@ describe('POST /api/chat', () => {
         }),
       })
       .mockResolvedValueOnce({
-        text: JSON.stringify({
+        text: `Here is the plan:
+${JSON.stringify({
           entities: [
             {
               id: 'e1',
@@ -821,8 +822,19 @@ describe('POST /api/chat', () => {
               impact: 'Should be removed',
               citations: [],
             },
+            {
+              id: 'v3',
+              dateISO: null,
+              dateLabel: 'Unknown',
+              actors: ['e1'],
+              summary: 'Out of range citation event',
+              theme: 'coordination',
+              impact: 'Should be removed',
+              citations: [99],
+            },
           ],
-        }),
+        })}
+Thanks`,
       })
       .mockResolvedValueOnce({ text: `## Synthesized timeline\n- Planned answer [1].` });
 
@@ -841,6 +853,84 @@ describe('POST /api/chat', () => {
     );
     expect(planMessage?.content).toContain('Grounded event');
     expect(planMessage?.content).not.toContain('Ungrounded event');
+    expect(planMessage?.content).not.toContain('Out of range citation event');
+  });
+
+
+  it('parses fenced synthesis extraction JSON with trailing prose', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem, secondContextItem],
+      debug: { usedIndex: true, totalConsidered: 2 },
+    });
+    mockCallLLM
+      .mockResolvedValueOnce({
+        text: JSON.stringify({
+          answer: `## Synthesized timeline
+- Direct answer [1].`,
+          needsOriginals: false,
+          requestedArtifactIds: [],
+          reason: 'Sufficient summaries',
+        }),
+      })
+      .mockResolvedValueOnce({
+        text: `\`\`\`json
+${JSON.stringify({
+  entities: [
+    {
+      id: 'e1',
+      type: 'person',
+      canonical: 'A Person <a@example.com>',
+      aliases: ['A Person'],
+      confidence: 'high',
+      citations: [1],
+    },
+  ],
+  events: [
+    {
+      id: 'v1',
+      dateISO: null,
+      dateLabel: 'Unknown',
+      actors: ['e1'],
+      summary: 'Fenced grounded event',
+      theme: 'coordination',
+      impact: 'Baseline',
+      citations: [1],
+    },
+  ],
+})}
+\`\`\`
+Thanks`,
+      })
+      .mockResolvedValueOnce({ text: `## Synthesized timeline
+- Planned answer [1].` });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Synthesize timeline', synthesisMode: true }),
+    });
+
+    const response = await POST(request);
+
+    expect(response.status).toBe(200);
+    const writeupCall = mockCallLLM.mock.calls[2]?.[1];
+    const planMessage = writeupCall?.messages?.find((msg: { content: string }) =>
+      msg.content.startsWith('PLAN JSON:'),
+    );
+    expect(planMessage?.content).toContain('Fenced grounded event');
   });
 
   it('falls back to direct synthesis when extraction JSON is invalid', async () => {
