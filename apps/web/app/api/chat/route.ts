@@ -579,28 +579,24 @@ const buildOriginalsRouterPrompt = (synthesisMode: boolean) => [
 ].join('\n');
 
 const parseRouterDecision = (value: string): RouterDecision | null => {
-  const cleaned = value.trim().replace(/^```json\s*/i, '').replace(/```$/i, '').trim();
-  try {
-    const parsed = JSON.parse(cleaned) as Partial<RouterDecision>;
-    if (typeof parsed.answer !== 'string') {
-      return null;
-    }
-    return {
-      answer: parsed.answer,
-      needsOriginals: Boolean(parsed.needsOriginals),
-      requestedArtifactIds: Array.isArray(parsed.requestedArtifactIds)
-        ? parsed.requestedArtifactIds.filter((id): id is string => typeof id === 'string').slice(0, 3)
-        : [],
-      reason: typeof parsed.reason === 'string' ? parsed.reason : '',
-      suggested_actions: Array.isArray(parsed.suggested_actions)
-        ? parsed.suggested_actions
-            .filter((action): action is string => typeof action === 'string')
-            .slice(0, 5)
-        : undefined,
-    };
-  } catch {
+  const parsed = extractJsonObjectFromText(value) as Partial<RouterDecision> | null;
+  if (!parsed || typeof parsed.answer !== 'string') {
     return null;
   }
+
+  return {
+    answer: parsed.answer,
+    needsOriginals: Boolean(parsed.needsOriginals),
+    requestedArtifactIds: Array.isArray(parsed.requestedArtifactIds)
+      ? parsed.requestedArtifactIds.filter((id): id is string => typeof id === 'string').slice(0, 3)
+      : [],
+    reason: typeof parsed.reason === 'string' ? parsed.reason : '',
+    suggested_actions: Array.isArray(parsed.suggested_actions)
+      ? parsed.suggested_actions
+          .filter((action): action is string => typeof action === 'string')
+          .slice(0, 5)
+      : undefined,
+  };
 };
 
 const hashQuestion = (message: string) => createHash('sha256').update(message).digest('hex');
@@ -668,8 +664,9 @@ export async function POST(request: Request) {
   const allowOriginals = body?.allowOriginals === true;
   const advisorMode = body?.advisorMode === true;
   const synthesisMode = body?.synthesisMode === true;
-  const countingMode = !synthesisMode && isCountingQuestion(message);
-  const effectiveAdvisorMode = advisorMode || synthesisMode;
+  const countingMode = isCountingQuestion(message);
+  const effectiveSynthesisMode = synthesisMode && !countingMode;
+  const effectiveAdvisorMode = (advisorMode || effectiveSynthesisMode) && !countingMode;
 
   const session = await getGoogleSession();
   const accessToken = await getGoogleAccessToken();
@@ -763,7 +760,7 @@ export async function POST(request: Request) {
       driveFolderId,
       maxItems: maxContextItems,
       ctx,
-      synthesisMode,
+      synthesisMode: effectiveSynthesisMode,
     });
   } catch (error) {
     logGoogleError(error, 'drive.files.get', ctx);
@@ -790,16 +787,16 @@ export async function POST(request: Request) {
   const systemPrompt = buildChatSystemPrompt(
     adminSettings?.systemPrompt ?? '',
     effectiveAdvisorMode,
-    synthesisMode,
+    effectiveSynthesisMode,
   );
   const provider = adminSettings?.provider ?? 'stub';
   const model = adminSettings?.model ?? 'stub';
 
-  if ((synthesisMode && summaryCount < 2) || summaryCount === 0) {
+  if ((effectiveSynthesisMode && summaryCount < 2) || summaryCount === 0) {
     return respond(
       NextResponse.json(
         buildNoSourceGuidanceResponse({
-          synthesisMode,
+          synthesisMode: effectiveSynthesisMode,
           sourceCount: summaryCount,
           provider,
           model,
@@ -823,7 +820,7 @@ export async function POST(request: Request) {
       role: 'user' as const,
       content: countingMode
         ? 'Return STRICT JSON only with shape {"occurrences":[{"who":"...","action":"...","when":null,"where":null,"evidence":"...","citations":[1]}],"notes":null}. Extract discrete occurrences needed to answer the counting question using summary sources only. Each occurrence MUST include at least one citation like [1] referencing SOURCE numbers. If evidence is insufficient to count reliably, return an empty occurrences array and explain uncertainty in notes. No prose outside JSON.'
-        : buildOriginalsRouterPrompt(synthesisMode),
+        : buildOriginalsRouterPrompt(effectiveSynthesisMode),
     },
   ];
 
@@ -1007,7 +1004,7 @@ export async function POST(request: Request) {
         })
         .join('\n');
       const notesLine = extraction?.notes ? `\n\nNotes: ${extraction.notes}` : '';
-      countingReply = `Based on the available summaries, I found ${occurrences.length} occurrence${occurrences.length === 1 ? '' : 's'} supported by citations.\n\n${lines}${notesLine}`;
+      countingReply = `Count found in summaries: ${occurrences.length}\n\nOccurrences:\n${lines}${notesLine}\n\nNext step: Enable “Allow opening originals” for exact verification if needed.`;
       countingActions = uniqueActions([
         'Enable “Allow opening originals” if you want line-by-line verification of each occurrence.',
       ]);
@@ -1032,7 +1029,7 @@ export async function POST(request: Request) {
   }
 
   let synthesisPlanReply: string | null = null;
-  if (synthesisMode && llmProvider !== 'stub') {
+  if (effectiveSynthesisMode && llmProvider !== 'stub') {
     try {
       const extraction = await callLLM(llmProvider, {
         model,
@@ -1086,13 +1083,13 @@ ${JSON.stringify(plan)}` },
     synthesisPlanReply ||
     routerDecision?.answer ||
     llmResponseText ||
-    (synthesisMode
+    (effectiveSynthesisMode
       ? formatSynthesisFallbackReply(summaryCount)
       : effectiveAdvisorMode
       ? formatAdvisorFallbackReply(summaryCount)
       : 'I could not find enough detail in your saved summaries. Try syncing or summarizing more items.');
   if (llmProvider !== 'stub' && !countingMode && !routerDecision && !synthesisPlanReply) {
-    reply = synthesisMode
+    reply = effectiveSynthesisMode
       ? formatSynthesisFallbackReply(summaryCount)
       : effectiveAdvisorMode
       ? formatAdvisorFallbackReply(summaryCount)
@@ -1153,7 +1150,7 @@ ${JSON.stringify(plan)}` },
         { role: 'user' as const, content: `Original context:\n${originalContext}` },
         {
           role: 'user' as const,
-          content: synthesisMode
+          content: effectiveSynthesisMode
             ? 'Use summary and original context to answer in synthesis format. Keep required headings and order. Cite summary sources [1], [2] and original sources as [O1], [O2] when used.'
             : 'Use summary and original context to answer. Cite summary sources [1], [2] and original sources as [O1], [O2] when used.',
         },
@@ -1169,7 +1166,7 @@ ${JSON.stringify(plan)}` },
         });
         reply =
           pass2.text ||
-          (synthesisMode
+          (effectiveSynthesisMode
             ? formatSynthesisFallbackReply(summaryCount)
             : effectiveAdvisorMode
             ? formatAdvisorFallbackReply(summaryCount)
@@ -1219,7 +1216,7 @@ ${JSON.stringify(plan)}` },
         ? countingActions.slice(0, 5)
         : routerDecision?.suggested_actions && routerDecision.suggested_actions.length > 0
         ? uniqueActions(routerDecision.suggested_actions).slice(0, 5)
-        : buildSuggestedActions(message, effectiveAdvisorMode, synthesisMode),
+        : buildSuggestedActions(message, effectiveAdvisorMode, effectiveSynthesisMode),
     provider: { name: llmProvider, model: llmProvider === 'stub' ? 'stub' : model },
     requestId: ctx.requestId,
   };
