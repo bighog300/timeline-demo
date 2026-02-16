@@ -576,6 +576,80 @@ describe('POST /api/chat', () => {
     expect(mockCallLLM).not.toHaveBeenCalled();
   });
 
+
+  it('uses recent context selection for blank messages and preserves source guards', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'openai',
+        model: 'gpt-4o-mini',
+        systemPrompt: '',
+      },
+    } as never);
+    mockBuildContextPack.mockResolvedValue({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM.mockResolvedValue({ text: '[stub: answer]' });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: '   ' }),
+    });
+
+    const response = await POST(request);
+    const payload = (await response.json()) as {
+      reply: string;
+      citations: unknown[];
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).not.toBe('No timeline sources available to analyze.');
+    expect(mockBuildContextPack).toHaveBeenCalledWith(
+      expect.objectContaining({ queryText: 'recent' }),
+    );
+    expect(mockCallLLM).toHaveBeenCalledTimes(1);
+
+    mockBuildContextPack.mockResolvedValueOnce({
+      items: [],
+      debug: { usedIndex: true, totalConsidered: 0 },
+    });
+
+    const noSummaryResponse = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: '   ' }),
+      }),
+    );
+    const noSummaryPayload = (await noSummaryResponse.json()) as { reply: string };
+
+    expect(noSummaryPayload.reply).toBe('No timeline sources available to analyze.');
+
+    mockBuildContextPack.mockResolvedValueOnce({
+      items: [defaultContextItem],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+
+    const synthesisResponse = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: '   ', synthesisMode: true }),
+      }),
+    );
+    const synthesisPayload = (await synthesisResponse.json()) as { reply: string };
+
+    expect(synthesisPayload.reply).toBe('Need at least 2 sources to synthesize a timeline.');
+    expect(mockCallLLM).toHaveBeenCalledTimes(1);
+  });
+
   it('returns no-source guidance in normal mode when context is empty', async () => {
     mockGetGoogleSession.mockResolvedValue({
       driveFolderId: 'folder-1',

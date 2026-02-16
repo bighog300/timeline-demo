@@ -552,7 +552,9 @@ export async function POST(request: Request) {
   logInfo(ctx, 'request_start', { method: request.method });
 
   const body = await request.json().catch(() => ({}));
-  const message = typeof body?.message === 'string' ? body.message.trim() : '';
+  const rawMessage = typeof body?.message === 'string' ? body.message : '';
+  const message = rawMessage.trim();
+  const queryTextForContext = message === '' ? 'recent' : rawMessage;
   const allowOriginals = body?.allowOriginals === true;
   const advisorMode = body?.advisorMode === true;
   const synthesisMode = body?.synthesisMode === true;
@@ -645,7 +647,7 @@ export async function POST(request: Request) {
   let contextPack;
   try {
     contextPack = await buildContextPack({
-      queryText: message,
+      queryText: queryTextForContext,
       drive,
       driveFolderId,
       maxItems: maxContextItems,
