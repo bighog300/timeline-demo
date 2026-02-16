@@ -3,6 +3,9 @@
 A privacy-first Timeline demo that has evolved into a **Timeline product foundation** with
 Drive-backed artifacts, standardized API errors, indexing, and operational hardening.
 
+## Documentation
+- [Deployment docs index](docs/deployment/README.md)
+
 ## Start Here
 - [START_HERE.md](START_HERE.md) — onboarding + quickstart
 - [ARCHITECTURE.md](ARCHITECTURE.md) — system overview and data flow
