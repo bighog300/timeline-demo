@@ -193,6 +193,20 @@ type SynthesisPlan = {
   events: SynthesisEvent[];
 };
 
+type CountingOccurrence = {
+  who: string;
+  action: string;
+  when: string | null;
+  where: string | null;
+  evidence: string;
+  citations: number[];
+};
+
+type CountingExtraction = {
+  occurrences: CountingOccurrence[];
+  notes: string | null;
+};
+
 const SYNTHESIS_PLAN_LIMITS = {
   entities: 25,
   events: 15,
@@ -381,6 +395,53 @@ const formatSynthesisFallbackReply = (sourceCount: number) => {
 };
 
 const uniqueActions = (actions: string[]) => Array.from(new Set(actions));
+
+const isCountingQuestion = (message: string) =>
+  /\b(how many times|how often|number of|count|how many)\b/i.test(message);
+
+const parseCountingExtraction = (value: string, sourceCount: number): CountingExtraction | null => {
+  const parsed = extractJsonObjectFromText(value) as Partial<CountingExtraction> | null;
+  if (!parsed || !Array.isArray(parsed.occurrences)) {
+    return null;
+  }
+
+  const occurrences = parsed.occurrences
+    .map((occurrence) => {
+      if (!occurrence || typeof occurrence !== 'object') {
+        return null;
+      }
+      const typed = occurrence as Partial<CountingOccurrence>;
+      if (
+        typeof typed.who !== 'string' ||
+        typeof typed.action !== 'string' ||
+        typeof typed.evidence !== 'string'
+      ) {
+        return null;
+      }
+      const citations = Array.isArray(typed.citations)
+        ? typed.citations
+            .filter((citation): citation is number => Number.isInteger(citation))
+            .filter((citation) => citation >= 1 && citation <= sourceCount)
+        : [];
+      if (citations.length === 0) {
+        return null;
+      }
+      return {
+        who: typed.who,
+        action: typed.action,
+        when: typeof typed.when === 'string' ? typed.when : null,
+        where: typeof typed.where === 'string' ? typed.where : null,
+        evidence: typed.evidence,
+        citations,
+      };
+    })
+    .filter((occurrence): occurrence is CountingOccurrence => occurrence !== null);
+
+  return {
+    occurrences,
+    notes: typeof parsed.notes === 'string' ? parsed.notes : null,
+  };
+};
 
 const extractKeyword = (message: string) => {
   const normalized = message
@@ -571,6 +632,7 @@ export async function POST(request: Request) {
   const allowOriginals = body?.allowOriginals === true;
   const advisorMode = body?.advisorMode === true;
   const synthesisMode = body?.synthesisMode === true;
+  const countingMode = !synthesisMode && isCountingQuestion(message);
   const effectiveAdvisorMode = advisorMode || synthesisMode;
 
   const session = await getGoogleSession();
@@ -721,7 +783,12 @@ export async function POST(request: Request) {
         ]
       : []),
     { role: 'user' as const, content: message || 'Summarize recent timeline context.' },
-    { role: 'user' as const, content: buildOriginalsRouterPrompt(synthesisMode) },
+    {
+      role: 'user' as const,
+      content: countingMode
+        ? 'Return STRICT JSON only with shape {"occurrences":[{"who":"...","action":"...","when":null,"where":null,"evidence":"...","citations":[1]}],"notes":null}. Extract discrete occurrences needed to answer the counting question using summary sources only. Each occurrence MUST include at least one citation like [1] referencing SOURCE numbers. If evidence is insufficient to count reliably, return an empty occurrences array and explain uncertainty in notes. No prose outside JSON.'
+        : buildOriginalsRouterPrompt(synthesisMode),
+    },
   ];
 
   const llmRequest = {
@@ -874,7 +941,59 @@ export async function POST(request: Request) {
     };
   });
 
-  const routerDecision = llmProvider === 'stub' ? null : parseRouterDecision(llmResponseText);
+  const routerDecision = countingMode || llmProvider === 'stub' ? null : parseRouterDecision(llmResponseText);
+
+  let citations = baseCitations;
+  let countingReply: string | null = null;
+  let countingActions: string[] | null = null;
+
+  if (countingMode) {
+    const extraction = parseCountingExtraction(llmResponseText, summaryCount);
+    const occurrences = extraction?.occurrences ?? [];
+    const citationIndexes = Array.from(new Set(occurrences.flatMap((occurrence) => occurrence.citations))).sort(
+      (a, b) => a - b,
+    );
+
+    if (occurrences.length === 0) {
+      countingReply =
+        'I can’t confirm from summaries alone. Please enable “Allow opening originals” to verify the exact count.';
+      countingActions = uniqueActions([
+        'Enable “Allow opening originals” to verify the exact wording in source documents.',
+        'Summarize additional related documents if more timeline coverage is needed.',
+      ]);
+    } else {
+      const lines = occurrences
+        .slice(0, 5)
+        .map((occurrence, index) => {
+          const whenLabel = occurrence.when ? ` (${occurrence.when})` : '';
+          const cited = occurrence.citations.map((citation) => `[${citation}]`).join(', ');
+          return `${index + 1}. ${occurrence.who} — ${occurrence.action}${whenLabel} ${cited}`;
+        })
+        .join('\n');
+      const notesLine = extraction?.notes ? `\n\nNotes: ${extraction.notes}` : '';
+      countingReply = `Based on the available summaries, I found ${occurrences.length} occurrence${occurrences.length === 1 ? '' : 's'} supported by citations.\n\n${lines}${notesLine}`;
+      countingActions = uniqueActions([
+        'Enable “Allow opening originals” if you want line-by-line verification of each occurrence.',
+      ]);
+    }
+
+    if (citationIndexes.length > 0) {
+      const summaryByIndex = new Map(summaryItems.map((item, index) => [index + 1, item]));
+      const groundedSummaryCitations = citationIndexes
+        .map((citationIndex) => summaryByIndex.get(citationIndex))
+        .filter((item): item is (typeof summaryItems)[number] => item !== undefined)
+        .map((item) => ({
+          artifactId: item.artifactId,
+          title: item.title,
+          dateISO: item.dateISO,
+          kind: 'summary' as const,
+        }));
+
+      if (groundedSummaryCitations.length > 0) {
+        citations = groundedSummaryCitations;
+      }
+    }
+  }
 
   let synthesisPlanReply: string | null = null;
   if (synthesisMode && llmProvider !== 'stub') {
@@ -927,6 +1046,7 @@ ${JSON.stringify(plan)}` },
   }
 
   let reply =
+    countingReply ||
     synthesisPlanReply ||
     routerDecision?.answer ||
     llmResponseText ||
@@ -935,9 +1055,7 @@ ${JSON.stringify(plan)}` },
       : effectiveAdvisorMode
       ? formatAdvisorFallbackReply(summaryCount)
       : 'I could not find enough detail in your saved summaries. Try syncing or summarizing more items.');
-  let citations = baseCitations;
-
-  if (llmProvider !== 'stub' && !routerDecision && !synthesisPlanReply) {
+  if (llmProvider !== 'stub' && !countingMode && !routerDecision && !synthesisPlanReply) {
     reply = synthesisMode
       ? formatSynthesisFallbackReply(summaryCount)
       : effectiveAdvisorMode
@@ -1061,7 +1179,9 @@ ${JSON.stringify(plan)}` },
     reply,
     citations,
     suggested_actions:
-      routerDecision?.suggested_actions && routerDecision.suggested_actions.length > 0
+      countingActions && countingActions.length > 0
+        ? countingActions.slice(0, 5)
+        : routerDecision?.suggested_actions && routerDecision.suggested_actions.length > 0
         ? uniqueActions(routerDecision.suggested_actions).slice(0, 5)
         : buildSuggestedActions(message, effectiveAdvisorMode, synthesisMode),
     provider: { name: llmProvider, model: llmProvider === 'stub' ? 'stub' : model },
