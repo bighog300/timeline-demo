@@ -8,7 +8,7 @@ import { OutsideFolderError, PayloadLimitError } from '../../../../lib/driveSafe
 import { logGoogleError, mapGoogleError } from '../../../../lib/googleRequest';
 import { checkRateLimit, getRateLimitKey } from '../../../../lib/rateLimit';
 import { readSelectionSetFromDrive } from '../../../../lib/readSelectionSetFromDrive';
-import type { SelectionSet, SelectionSetItem } from '../../../../lib/types';
+import { SelectionSetItemSchema, type SelectionSet, type SelectionSetItem } from '@timeline/shared';
 import { writeSelectionSetToDrive } from '../../../../lib/writeSelectionSetToDrive';
 import { hashUserHint, logError, logInfo, safeError, time } from '../../../../lib/logger';
 import { createCtx, withRequestId } from '../../../../lib/requestContext';
@@ -45,29 +45,23 @@ const validatePayload = (
     return { ok: false, error: `Selection set can include up to ${MAX_ITEMS} items.` };
   }
 
+  const normalizedItems: SelectionSetItem[] = [];
+
   for (const item of payload.items) {
-    if (!item || typeof item !== 'object') {
-      return { ok: false, error: 'Items must be objects.' };
+    const parsed = SelectionSetItemSchema.safeParse(item);
+    if (!parsed.success || !parsed.data.id.trim()) {
+      return { ok: false, error: 'Items must include a valid source and id.' };
     }
 
-    if (item.source !== 'gmail' && item.source !== 'drive') {
-      return { ok: false, error: 'Items must include a valid source.' };
-    }
-
-    if (typeof item.id !== 'string' || !item.id.trim()) {
-      return { ok: false, error: 'Items must include an id.' };
-    }
-
-    if (item.title !== undefined && typeof item.title !== 'string') {
-      return { ok: false, error: 'Item titles must be strings.' };
-    }
-
-    if (item.dateISO !== undefined && typeof item.dateISO !== 'string') {
-      return { ok: false, error: 'Item dateISO must be strings.' };
-    }
+    normalizedItems.push({
+      ...parsed.data,
+      id: parsed.data.id.trim(),
+      title: parsed.data.title?.trim() || undefined,
+      dateISO: parsed.data.dateISO?.trim() || undefined,
+    });
   }
 
-  return { ok: true, payload: { ...payload, name, items: payload.items } };
+  return { ok: true, payload: { ...payload, name, items: normalizedItems } };
 };
 
 const buildSelectionSet = (payload: SavePayload, folderId: string, now: string): SelectionSet => ({
