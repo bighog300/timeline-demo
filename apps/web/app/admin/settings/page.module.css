@@ -1,0 +1,95 @@
+.container {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.caption {
+  margin: 0;
+  color: #5a6472;
+}
+
+.notice {
+  color: #6f7b8d;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.field input,
+.field textarea,
+.field select {
+  font-weight: 400;
+  border: 1px solid #d6dbe5;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.helper {
+  margin: 0;
+  color: #5a6472;
+  font-size: 14px;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+}
+
+.actions button {
+  border: none;
+  border-radius: 8px;
+  background: #2f5bff;
+  color: #fff;
+  padding: 10px 16px;
+  font-weight: 600;
+}
+
+.actions button[disabled] {
+  background: #9db1ff;
+}
+
+.error {
+  color: #912626;
+  background: #fff4f4;
+  border: 1px solid #f3b4b4;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.saved {
+  margin: 0;
+  color: #287d3c;
+  font-size: 14px;
+}
+
+.validation {
+  margin: 0;
+  padding-left: 18px;
+  color: #8b4b00;
+  background: #fff8ee;
+  border: 1px solid #f4d6aa;
+  border-radius: 8px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.result {
+  border: 1px solid #d6dbe5;
+  border-radius: 8px;
+  background: #f7f9ff;
+  padding: 12px;
+}
