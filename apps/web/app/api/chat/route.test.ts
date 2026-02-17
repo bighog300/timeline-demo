@@ -30,19 +30,19 @@ vi.mock('../../lib/originals', async () => {
   };
 });
 
-vi.mock('../../lib/chatContext', async () => {
-  const actual = await vi.importActual<typeof import('../../lib/chatContext')>(
-    '../../lib/chatContext',
+vi.mock('../../lib/chatContextLoader', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/chatContextLoader')>(
+    '../../lib/chatContextLoader',
   );
   return {
     ...actual,
-    buildContextPack: vi.fn(),
+    loadChatContext: vi.fn(),
   };
 });
 
 import { readAdminSettingsFromDrive } from '../../lib/adminSettingsDrive';
 import { resolveOrProvisionAppDriveFolder } from '../../lib/appDriveFolder';
-import { buildContextPack } from '../../lib/chatContext';
+import { loadChatContext } from '../../lib/chatContextLoader';
 import { getGoogleAccessToken, getGoogleSession } from '../../lib/googleAuth';
 import { ProviderError } from '../../lib/llm/providerErrors';
 import { callLLM } from '../../lib/llm/index';
@@ -52,7 +52,7 @@ import { POST } from './route';
 const mockGetGoogleSession = vi.mocked(getGoogleSession);
 const mockGetGoogleAccessToken = vi.mocked(getGoogleAccessToken);
 const mockReadAdminSettingsFromDrive = vi.mocked(readAdminSettingsFromDrive);
-const mockBuildContextPack = vi.mocked(buildContextPack);
+const mockLoadChatContext = vi.mocked(loadChatContext);
 const mockResolveOrProvisionAppDriveFolder = vi.mocked(resolveOrProvisionAppDriveFolder);
 const mockCallLLM = vi.mocked(callLLM);
 const mockFetchOriginalTextForArtifact = vi.mocked(fetchOriginalTextForArtifact);
@@ -65,6 +65,7 @@ const defaultContextItem = {
   kind: 'summary' as const,
   source: 'gmail' as const,
   sourceId: 'msg-1',
+  driveWebViewLink: 'https://drive.google.com/file/d/summary-1/view',
 };
 
 const secondContextItem = {
@@ -149,6 +150,60 @@ describe('POST /api/chat', () => {
     });
   });
 
+
+  it('passes context override from request body to loader', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        provider: 'stub',
+        model: 'stub',
+        systemPrompt: '',
+        maxContextItems: 8,
+        temperature: 0.2,
+      },
+    } as never);
+    mockLoadChatContext.mockResolvedValue({
+      items: [defaultContextItem],
+      key: 'Selection Set: Case (All)',
+      indexMissing: false,
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM.mockResolvedValue({ text: '[stub: answer]' });
+
+    const response = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          message: 'Use set',
+          context: {
+            mode: 'selection_set',
+            selectionSetId: 'set-file-1',
+            sourceFilter: 'gmail',
+            recentCount: 20,
+          },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(mockLoadChatContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        selection: expect.objectContaining({
+          mode: 'selection_set',
+          selectionSetId: 'set-file-1',
+          sourceFilter: 'gmail',
+          recentCount: 20,
+        }),
+      }),
+    );
+  });
+
   it('returns citations and provider metadata for stub provider', async () => {
     mockGetGoogleSession.mockResolvedValue({
       driveFolderId: 'folder-1',
@@ -173,9 +228,10 @@ describe('POST /api/chat', () => {
       fileId: undefined,
       webViewLink: undefined,
     });
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
     mockCallLLM.mockResolvedValue({ text: '[stub: answer]' });
 
@@ -201,6 +257,7 @@ describe('POST /api/chat', () => {
         title: 'Launch Plan',
         dateISO: '2024-01-02T00:00:00.000Z',
         kind: 'summary',
+        driveWebViewLink: 'https://drive.google.com/file/d/summary-1/view',
       },
     ]);
     expect(payload.provider).toEqual({ name: 'stub', model: 'stub' });
@@ -232,9 +289,10 @@ describe('POST /api/chat', () => {
       fileId: undefined,
       webViewLink: undefined,
     });
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
     mockCallLLM.mockResolvedValue({
       text: `## Timeline summary
@@ -298,7 +356,7 @@ describe('POST /api/chat', () => {
       fileId: undefined,
       webViewLink: undefined,
     });
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [
         defaultContextItem,
         {
@@ -344,13 +402,10 @@ describe('POST /api/chat', () => {
     const firstCall = mockCallLLM.mock.calls[0]?.[1];
     const contextMessage = firstCall?.messages?.[0]?.content ?? '';
 
-    expect(contextMessage).toContain('(SAVED SEARCH)');
+    expect(contextMessage).toContain('SOURCE 1: Launch Plan');
     expect(response.status).toBe(200);
     expect(payload.citations).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ kind: 'summary', title: 'Launch Plan' }),
-        expect.objectContaining({ kind: 'selection_set', selectionSetId: 'set-1' }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ kind: 'summary', title: 'Launch Plan' })]),
     );
   });
 
@@ -368,7 +423,7 @@ describe('POST /api/chat', () => {
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem, secondContextItem],
       debug: { usedIndex: true, totalConsidered: 2 },
     });
@@ -442,7 +497,7 @@ describe('POST /api/chat', () => {
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [],
       debug: { usedIndex: true, totalConsidered: 0 },
     });
@@ -484,9 +539,10 @@ describe('POST /api/chat', () => {
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
 
     const request = new Request('http://localhost/api/chat', {
@@ -521,7 +577,7 @@ describe('POST /api/chat', () => {
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [selectionSetMetaItem, runMetaItem],
       debug: { usedIndex: true, totalConsidered: 2 },
     });
@@ -558,7 +614,7 @@ describe('POST /api/chat', () => {
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem, selectionSetMetaItem],
       debug: { usedIndex: true, totalConsidered: 2 },
     });
@@ -596,9 +652,10 @@ describe('POST /api/chat', () => {
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
     mockCallLLM.mockResolvedValue({ text: '[stub: answer]' });
 
@@ -616,12 +673,10 @@ describe('POST /api/chat', () => {
 
     expect(response.status).toBe(200);
     expect(payload.reply).not.toBe('No timeline sources available to analyze.');
-    expect(mockBuildContextPack).toHaveBeenCalledWith(
-      expect.objectContaining({ queryText: 'recent' }),
-    );
+    expect(mockLoadChatContext).toHaveBeenCalled();
     expect(mockCallLLM).toHaveBeenCalledTimes(1);
 
-    mockBuildContextPack.mockResolvedValueOnce({
+    mockLoadChatContext.mockResolvedValueOnce({
       items: [],
       debug: { usedIndex: true, totalConsidered: 0 },
     });
@@ -637,9 +692,10 @@ describe('POST /api/chat', () => {
 
     expect(noSummaryPayload.reply).toBe('No timeline sources available to analyze.');
 
-    mockBuildContextPack.mockResolvedValueOnce({
+    mockLoadChatContext.mockResolvedValueOnce({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
 
     const synthesisResponse = await POST(
@@ -669,7 +725,7 @@ describe('POST /api/chat', () => {
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [],
       debug: { usedIndex: true, totalConsidered: 0 },
     });
@@ -706,7 +762,7 @@ describe('POST /api/chat', () => {
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem, secondContextItem],
       debug: { usedIndex: true, totalConsidered: 2 },
     });
@@ -780,7 +836,7 @@ describe('POST /api/chat', () => {
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem, secondContextItem],
       debug: { usedIndex: true, totalConsidered: 2 },
     });
@@ -876,7 +932,7 @@ Thanks`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem, secondContextItem],
       debug: { usedIndex: true, totalConsidered: 2 },
     });
@@ -952,7 +1008,7 @@ Thanks`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem, secondContextItem],
       debug: { usedIndex: true, totalConsidered: 2 },
     });
@@ -1036,9 +1092,10 @@ Thanks`,
       fileId: undefined,
       webViewLink: undefined,
     });
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
     mockCallLLM
       .mockRejectedValueOnce(new ProviderError({ code: 'not_configured', status: 400, provider: 'openai', message: 'Provider not configured.' }))
@@ -1078,9 +1135,10 @@ Thanks`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
     mockCallLLM.mockRejectedValueOnce(
       new ProviderError({
@@ -1130,9 +1188,10 @@ Thanks`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
 
     mockCallLLM.mockRejectedValueOnce(
@@ -1202,9 +1261,10 @@ Thanks`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
     mockCallLLM.mockResolvedValue({ text: 'not json' });
 
@@ -1236,9 +1296,10 @@ Thanks`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
     mockCallLLM.mockResolvedValue({
       text: JSON.stringify({
@@ -1287,9 +1348,10 @@ Thanks`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
     mockCallLLM.mockResolvedValue({
       text: JSON.stringify({
@@ -1335,9 +1397,10 @@ Thanks`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
     mockCallLLM.mockResolvedValue({
       text: `I reviewed the summaries.
@@ -1372,9 +1435,10 @@ Thanks`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
     mockCallLLM.mockResolvedValue({
       text: `
@@ -1412,7 +1476,7 @@ Some trailing explanation.`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [
         { ...defaultContextItem, snippet: 'Yvette called the police after the argument.' },
         { ...secondContextItem, snippet: 'Yvette called the police again the next day.' },
@@ -1480,7 +1544,7 @@ Some trailing explanation.`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem, secondContextItem],
       debug: { usedIndex: true, totalConsidered: 2 },
     });
@@ -1548,7 +1612,7 @@ Some trailing explanation.`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem, secondContextItem],
       debug: { usedIndex: true, totalConsidered: 2 },
     });
@@ -1607,9 +1671,10 @@ Some trailing explanation.`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
     mockCallLLM.mockResolvedValue({ text: JSON.stringify({ occurrences: [], notes: 'Insufficient detail.' }) });
 
@@ -1641,7 +1706,7 @@ Some trailing explanation.`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [selectionSetMetaItem, runMetaItem],
       debug: { usedIndex: true, totalConsidered: 2 },
     });
@@ -1674,9 +1739,10 @@ Some trailing explanation.`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [defaultContextItem],
-      debug: { usedIndex: true, totalConsidered: 1 },
+      key: 'Recent 8 (All)',
+      indexMissing: false,
     });
     mockCallLLM.mockResolvedValue({
       text: JSON.stringify({
@@ -1714,7 +1780,7 @@ Some trailing explanation.`,
         systemPrompt: '',
       },
     } as never);
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [
         defaultContextItem,
         { ...defaultContextItem, artifactId: 'summary-2', sourceId: 'msg-2' },
@@ -1786,7 +1852,7 @@ Some trailing explanation.`,
       fileId: undefined,
       webViewLink: undefined,
     });
-    mockBuildContextPack.mockResolvedValue({
+    mockLoadChatContext.mockResolvedValue({
       items: [],
       debug: { usedIndex: true, totalConsidered: 0 },
     });
@@ -1827,8 +1893,8 @@ Some trailing explanation.`,
       fileId: undefined,
       webViewLink: undefined,
     });
-    mockBuildContextPack.mockResolvedValue({
-      items: [{ ...defaultContextItem, source: 'drive', sourceId: 'drive-file-123' }],
+    mockLoadChatContext.mockResolvedValue({
+      items: [{ ...defaultContextItem, source: 'drive', sourceId: 'drive-file-123', driveWebViewLink: 'https://drive.google.com/file/d/drive-file-123/view' }],
       debug: { usedIndex: true, totalConsidered: 1 },
     });
     mockCallLLM.mockResolvedValue({ text: '[stub: answer]' });

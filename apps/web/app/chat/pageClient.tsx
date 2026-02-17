@@ -2,12 +2,15 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import RebuildIndexButton from '../calendar/RebuildIndexButton';
 import Skeleton from '../components/ui/Skeleton';
+import { type ChatContextSelection } from '../lib/chatContextLoader';
+import { loadChatContextPrefs, saveChatContextPrefs } from '../lib/chatContextPrefs';
 import styles from './page.module.css';
 
 type ChatMessage = {
@@ -112,18 +115,27 @@ const createMessage = (role: ChatMessage['role'], content: string): ChatMessage 
 type ChatContextArtifact = {
   artifactId: string;
   title: string;
+  source: 'gmail' | 'drive';
   driveWebViewLink?: string;
 };
+
+type SelectionSetOption = { driveFileId: string; title: string };
 
 export default function ChatPageClient({
   isAdmin = false,
   contextArtifacts = [],
   indexMissing = false,
+  contextKey = 'Recent 8 (All)',
+  initialContext = { mode: 'recent', recentCount: 8, sourceFilter: 'all' },
 }: {
   isAdmin?: boolean;
   contextArtifacts?: ChatContextArtifact[];
   indexMissing?: boolean;
+  contextKey?: string;
+  initialContext?: ChatContextSelection;
 }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -134,6 +146,66 @@ export default function ChatPageClient({
   const [allowOriginals, setAllowOriginals] = useState(false);
   const [advisorMode, setAdvisorMode] = useState(true);
   const [synthesisMode, setSynthesisMode] = useState(false);
+  const [contextPrefs, setContextPrefs] = useState<ChatContextSelection>(initialContext);
+  const [selectionSets, setSelectionSets] = useState<SelectionSetOption[]>([]);
+  const [hasHydratedContext, setHasHydratedContext] = useState(false);
+
+  useEffect(() => {
+    if (contextPrefs.mode !== 'selection_set') {
+      return;
+    }
+
+    const loadSelectionSets = async () => {
+      try {
+        const response = await fetch('/api/selection-sets');
+        if (!response.ok) {
+          return;
+        }
+        const data = (await response.json()) as {
+          sets?: Array<{ driveFileId?: string; title?: string }>;
+        };
+        const next = (data.sets ?? [])
+          .filter((set): set is { driveFileId: string; title: string } =>
+            typeof set.driveFileId === 'string' && typeof set.title === 'string',
+          )
+          .map((set) => ({ driveFileId: set.driveFileId, title: set.title }));
+        setSelectionSets(next);
+      } catch {
+        setSelectionSets([]);
+      }
+    };
+
+    void loadSelectionSets();
+  }, [contextPrefs.mode]);
+
+  useEffect(() => {
+    if (!searchParams) {
+      return;
+    }
+
+    const hasQuery = searchParams.has('mode') || searchParams.has('n') || searchParams.has('source') || searchParams.has('id');
+    if (hasQuery || hasHydratedContext) {
+      setHasHydratedContext(true);
+      return;
+    }
+
+    const stored = loadChatContextPrefs();
+    setContextPrefs(stored);
+    const next = new URLSearchParams(searchParams?.toString() ?? '');
+    next.set('mode', stored.mode);
+    next.set('source', stored.sourceFilter);
+    if (stored.mode === 'recent') {
+      next.set('n', String(stored.recentCount));
+      next.delete('id');
+    } else {
+      next.delete('n');
+      if (stored.selectionSetId) {
+        next.set('id', stored.selectionSetId);
+      }
+    }
+    router.replace(`/chat?${next.toString()}`);
+    setHasHydratedContext(true);
+  }, [hasHydratedContext, router, searchParams]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -231,6 +303,7 @@ export default function ChatPageClient({
             allowOriginals,
             advisorMode,
             synthesisMode,
+            context: contextPrefs,
           }),
         });
 
@@ -290,8 +363,26 @@ export default function ChatPageClient({
         setLoading(false);
       }
     },
-    [advisorMode, allowOriginals, setMessages, synthesisMode],
+    [advisorMode, allowOriginals, contextPrefs, setMessages, synthesisMode],
   );
+
+  const applyContext = () => {
+    saveChatContextPrefs(contextPrefs);
+    const next = new URLSearchParams(searchParams?.toString() ?? '');
+    next.set('mode', contextPrefs.mode);
+    next.set('source', contextPrefs.sourceFilter);
+    if (contextPrefs.mode === 'recent') {
+      next.set('n', String(contextPrefs.recentCount));
+      next.delete('id');
+    } else {
+      next.delete('n');
+      if (contextPrefs.selectionSetId) {
+        next.set('id', contextPrefs.selectionSetId);
+      }
+    }
+    router.push(`/chat?${next.toString()}`);
+    router.refresh();
+  };
 
   const handleAllowOriginalsChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const next = event.target.checked;
@@ -363,6 +454,7 @@ export default function ChatPageClient({
 
       <Card>
         <h2>Artifacts in context</h2>
+        <p className={styles.emptyMeta}>Using: {contextKey}</p>
         {contextArtifacts.length === 0 ? (
           <p className={styles.emptyMeta}>No saved artifacts found. Create summaries first in Timeline.</p>
         ) : (
@@ -375,6 +467,7 @@ export default function ChatPageClient({
                   rel={artifact.driveWebViewLink ? 'noreferrer' : undefined}
                 >
                   {artifact.title}
+                  {' '}· {artifact.source}
                 </a>
               </li>
             ))}
@@ -462,6 +555,76 @@ export default function ChatPageClient({
           ) : null}
 
           <form className={styles.form} onSubmit={handleSubmit}>
+            <div className={styles.toggleGroup}>
+              <div className={styles.toggleRow}>
+                <label>
+                  Mode
+                  <select
+                    value={contextPrefs.mode}
+                    onChange={(event) =>
+                      setContextPrefs((prev) => ({ ...prev, mode: event.target.value as ChatContextSelection['mode'] }))
+                    }
+                  >
+                    <option value="recent">Recent</option>
+                    <option value="selection_set">Selection Set</option>
+                  </select>
+                </label>
+                {contextPrefs.mode === 'recent' ? (
+                  <label>
+                    Count
+                    <select
+                      value={contextPrefs.recentCount}
+                      onChange={(event) =>
+                        setContextPrefs((prev) => ({
+                          ...prev,
+                          recentCount: Number(event.target.value) as ChatContextSelection['recentCount'],
+                        }))
+                      }
+                    >
+                      <option value={8}>8</option>
+                      <option value={20}>20</option>
+                      <option value={50}>50</option>
+                    </select>
+                  </label>
+                ) : (
+                  <label>
+                    Selection set
+                    <select
+                      value={contextPrefs.selectionSetId ?? ''}
+                      onChange={(event) =>
+                        setContextPrefs((prev) => ({ ...prev, selectionSetId: event.target.value || undefined }))
+                      }
+                    >
+                      <option value="">Choose a selection set</option>
+                      {selectionSets.map((set) => (
+                        <option key={set.driveFileId} value={set.driveFileId}>
+                          {set.title}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+                <label>
+                  Source
+                  <select
+                    value={contextPrefs.sourceFilter}
+                    onChange={(event) =>
+                      setContextPrefs((prev) => ({
+                        ...prev,
+                        sourceFilter: event.target.value as ChatContextSelection['sourceFilter'],
+                      }))
+                    }
+                  >
+                    <option value="all">All</option>
+                    <option value="gmail">Gmail</option>
+                    <option value="drive">Drive</option>
+                  </select>
+                </label>
+                <Button type="button" variant="secondary" onClick={applyContext}>
+                  Apply
+                </Button>
+              </div>
+            </div>
             <label className="sr-only" htmlFor="chat-input">
               Ask the assistant
             </label>
