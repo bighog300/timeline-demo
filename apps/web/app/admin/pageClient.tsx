@@ -27,7 +27,7 @@ export default function AdminPageClient() {
     setRequestId(null);
 
     try {
-      const response = await fetch('/api/admin/settings/get');
+      const response = await fetch('/api/admin/settings');
       if (response.status === 401) {
         setStatus('reconnect');
         return;
@@ -66,8 +66,8 @@ export default function AdminPageClient() {
     setErrorMessage(null);
     setRequestId(null);
     try {
-      const response = await fetch('/api/admin/settings/set', {
-        method: 'POST',
+      const response = await fetch('/api/admin/settings', {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: settings.provider,
