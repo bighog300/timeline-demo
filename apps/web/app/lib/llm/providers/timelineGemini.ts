@@ -1,4 +1,5 @@
 import type { AdminSettings } from '../../adminSettings';
+import { renderTemplate } from '../promptTemplate';
 import { ProviderError, normalizeProviderHttpError } from '../providerErrors';
 import { parseTimelineProviderOutput } from '../providerOutput';
 import type { TimelineProvider } from './types';
@@ -6,16 +7,30 @@ import type { TimelineProvider } from './types';
 const jsonOnlyInstruction =
   'Return ONLY valid JSON with keys summary and highlights (array of strings). No prose.';
 
-const buildUserPrompt = (title: string, text: string, settings: AdminSettings) => {
-  const summaryPrompt = settings.summaryPromptTemplate?.trim() || 'Create a concise summary of the source.';
-  const highlightsPrompt =
-    settings.highlightsPromptTemplate?.trim() || 'Extract key highlights as short bullet-friendly phrases.';
+const defaultSummaryPrompt = 'Create a concise summary of the source.';
+const defaultHighlightsPrompt = 'Extract key highlights as short bullet-friendly phrases.';
+
+const buildUserPrompt = (
+  title: string,
+  text: string,
+  source: string,
+  metadata: string,
+  settings: AdminSettings,
+) => {
+  const summaryPrompt = settings.summaryPromptTemplate?.trim()
+    ? renderTemplate(settings.summaryPromptTemplate, { title, text, source, metadata })
+    : `${settings.systemPrompt}\n${defaultSummaryPrompt}`.trim();
+  const highlightsPrompt = settings.highlightsPromptTemplate?.trim()
+    ? renderTemplate(settings.highlightsPromptTemplate, { title, text, source, metadata })
+    : `${settings.systemPrompt}\n${defaultHighlightsPrompt}`.trim();
 
   return [
     `${summaryPrompt}`,
     `${highlightsPrompt}`,
     '',
     `Title: ${title}`,
+    `Source: ${source}`,
+    `Metadata:\n${metadata}`,
     `Text:\n${text}`,
   ].join('\n');
 };
@@ -40,6 +55,9 @@ export const geminiTimelineProvider: TimelineProvider = {
       });
     }
 
+    const source = input.source ?? '';
+    const metadata = input.sourceMetadata ? JSON.stringify(input.sourceMetadata) : '';
+
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.model)}:generateContent?key=${apiKey}`,
       {
@@ -51,7 +69,7 @@ export const geminiTimelineProvider: TimelineProvider = {
           systemInstruction: {
             parts: [{ text: `${settings.systemPrompt}\n${jsonOnlyInstruction}`.trim() }],
           },
-          contents: [{ parts: [{ text: buildUserPrompt(input.title, input.text, settings) }] }],
+          contents: [{ parts: [{ text: buildUserPrompt(input.title, input.text, source, metadata, settings) }] }],
           generationConfig: {
             temperature: settings.temperature,
             ...(settings.maxOutputTokens ? { maxOutputTokens: settings.maxOutputTokens } : {}),

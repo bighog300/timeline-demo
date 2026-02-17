@@ -3,6 +3,7 @@ import type { AdminSettings } from '../../adminSettings';
 export type SummarizeInput = {
   title: string;
   text: string;
+  source?: string;
   sourceMetadata?: unknown;
 };
 
