@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  AdminSettingsSchema,
   SelectionSetSchema,
   SourceType,
   SummaryArtifactSchema,
@@ -28,6 +29,41 @@ describe('shared schemas', () => {
     });
 
     expect(result.success).toBe(false);
+  });
+
+
+
+  it('accepts admin settings without optional prompt fields', () => {
+    const result = AdminSettingsSchema.safeParse({
+      type: 'admin_settings',
+      version: 1,
+      provider: 'stub',
+      model: 'gpt-4o-mini',
+      systemPrompt: '',
+      maxContextItems: 8,
+      temperature: 0.2,
+      updatedAtISO: '2026-01-01T12:34:56Z',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts admin settings with optional prompt fields', () => {
+    const result = AdminSettingsSchema.safeParse({
+      type: 'admin_settings',
+      version: 1,
+      provider: 'openai',
+      model: 'gpt-4.1-mini',
+      systemPrompt: 'System instruction',
+      summaryPromptTemplate: 'Summarize {{title}}',
+      highlightsPromptTemplate: 'Highlights for {{title}}',
+      maxOutputTokens: 256,
+      maxContextItems: 8,
+      temperature: 0.1,
+      updatedAtISO: '2026-01-01T12:34:56Z',
+    });
+
+    expect(result.success).toBe(true);
   });
 
   it('accepts valid ISO strings for selection set timestamps', () => {

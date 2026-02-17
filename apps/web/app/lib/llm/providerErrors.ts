@@ -7,18 +7,20 @@ export type ProviderErrorCode =
   | 'forbidden'
   | 'rate_limited'
   | 'upstream_timeout'
-  | 'upstream_error';
+  | 'upstream_error'
+  | 'bad_output';
 
 type ProviderErrorDetails = {
   providerStatus?: number;
   providerCode?: string;
   providerMessage?: string;
+  [key: string]: unknown;
 };
 
 type ProviderErrorOptions = {
   code: ProviderErrorCode;
   status: number;
-  provider: LLMProviderName;
+  provider: LLMProviderName | 'timeline';
   message: string;
   retryAfterSec?: number;
   details?: ProviderErrorDetails;
@@ -28,7 +30,7 @@ export class ProviderError extends Error {
   name = 'ProviderError';
   code: ProviderErrorCode;
   status: number;
-  provider: LLMProviderName;
+  provider: LLMProviderName | 'timeline';
   retryAfterSec?: number;
   details?: ProviderErrorDetails;
 

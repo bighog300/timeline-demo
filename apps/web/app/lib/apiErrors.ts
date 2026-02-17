@@ -9,7 +9,9 @@ export type ApiErrorCode =
   | 'upstream_timeout'
   | 'upstream_error'
   | 'invalid_request'
-  | 'too_many_items';
+  | 'too_many_items'
+  | 'provider_not_configured'
+  | 'provider_bad_output';
 
 export type ApiErrorPayload = {
   error: {
