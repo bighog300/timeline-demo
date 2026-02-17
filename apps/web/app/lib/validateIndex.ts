@@ -1,5 +1,5 @@
 import {
-  TimelineIndexSchema,
+  DriveTimelineIndexJsonSchema,
   TimelineIndexSelectionSetSchema,
   TimelineIndexSummarySchema,
   type TimelineIndex,
@@ -59,7 +59,7 @@ const coerceTimelineIndex = (value: unknown): TimelineIndex | null => {
         .map((result) => normalizeSelectionSet(result.data))
     : [];
 
-  const parsed = TimelineIndexSchema.safeParse({
+  const parsed = DriveTimelineIndexJsonSchema.safeParse({
     ...value,
     version: typeof value.version === 'number' && value.version > 0 ? value.version : 1,
     updatedAtISO: typeof value.updatedAtISO === 'string' && value.updatedAtISO.trim() ? value.updatedAtISO.trim() : new Date().toISOString(),
@@ -101,7 +101,7 @@ export const isTimelineIndex = (value: unknown): value is TimelineIndex => {
     (Array.isArray(value.selectionSets) &&
       value.selectionSets.every((entry) => TimelineIndexSelectionSetSchema.safeParse(entry).success));
 
-  return canParseSummaries && canParseSelectionSets;
+  return canParseSummaries && canParseSelectionSets && coerceTimelineIndex(value) !== null;
 };
 
 export const normalizeTimelineIndex = (

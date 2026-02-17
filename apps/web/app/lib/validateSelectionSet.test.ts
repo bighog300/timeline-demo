@@ -52,6 +52,36 @@ describe('validateSelectionSet', () => {
     expect(normalized.version).toBe(1);
   });
 
+
+  it('accepts unknown top-level fields in drive selection files', () => {
+    expect(
+      isSelectionSet({
+        ...baseSet,
+        futureField: { nested: true },
+      }),
+    ).toBe(true);
+  });
+
+  it('validates optional envelope fields when present', () => {
+    expect(
+      isSelectionSet({
+        ...baseSet,
+        type: 'selection_set',
+        status: 'complete',
+        meta: {
+          driveFileId: 'file-99',
+          extraContext: 'ok',
+        },
+      }),
+    ).toBe(true);
+
+    expect(
+      isSelectionSet({
+        ...baseSet,
+        type: 123,
+      }),
+    ).toBe(false);
+  });
   it('accepts sets missing optional fields', () => {
     const legacy = {
       ...baseSet,
