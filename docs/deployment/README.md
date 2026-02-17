@@ -1,10 +1,13 @@
-# Timeline Documentation (Deployment)
+# Timeline Docs Bundle
 
-This folder contains the key product and technical reference docs for Timeline.
+Drop these files into your repo at `docs/` (or `docs/specs/`).
 
-## Contents
-
-- [USER_GUIDE.md](./USER_GUIDE.md) — End‑to‑end user walkthrough
-- [API_REFERENCE.md](./API_REFERENCE.md) — Primary server API endpoints
-- [ARTIFACTS.md](./ARTIFACTS.md) — Drive artifact data model
-- [PRIVACY_MODEL.md](./PRIVACY_MODEL.md) — Data handling and storage rules
+Suggested structure:
+- `docs/01-PRD.md`
+- `docs/02-Technical-Architecture.md`
+- `docs/03-API-Spec.md`
+- `docs/04-Deployment-CI.md`
+- `docs/05-Admin-AI-Provider-Spec.md`
+- `docs/06-Ops-Runbook.md`
+- `docs/07-Data-Model-Artifact-Schema-Strict.md`
+- `docs/08-Shared-Zod-Schemas.md`
