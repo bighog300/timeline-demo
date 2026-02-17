@@ -11,7 +11,10 @@ export type ApiErrorCode =
   | 'invalid_request'
   | 'too_many_items'
   | 'provider_not_configured'
-  | 'provider_bad_output';
+  | 'provider_bad_output'
+  | 'forbidden'
+  | 'bad_request'
+  | 'internal_error';
 
 export type ApiErrorPayload = {
   error: {
