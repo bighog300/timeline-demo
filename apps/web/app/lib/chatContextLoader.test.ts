@@ -67,7 +67,7 @@ describe('chatContextLoader', () => {
             { source: 'drive', id: 'd1', title: 'Missing one', dateISO: '2024-01-05T00:00:00.000Z' },
           ],
           version: 1,
-          driveFolderId: 'f',
+          driveFolderId: 'folder-1',
           driveFileId: 'set-file',
         },
       })
@@ -104,7 +104,7 @@ describe('chatContextLoader', () => {
           { source: 'drive', id: 'd1', title: 'Drive missing' },
         ],
         version: 1,
-        driveFolderId: 'f',
+        driveFolderId: 'folder-1',
         driveFileId: 'set-file',
       },
     });
@@ -118,6 +118,36 @@ describe('chatContextLoader', () => {
     expect(result.stats).toEqual({ selectionTotal: 1, summarizedCount: 0, missingCount: 1 });
     expect(result.missing).toEqual([{ source: 'gmail', id: 'g1', title: 'Gmail missing' }]);
   });
+
+  it('selection_set mode returns empty context with guidance when driveFolderId mismatches', async () => {
+    const drive = makeDrive();
+    mockFindIndexFile.mockResolvedValue({ id: 'index-1' } as never);
+    mockReadIndexFile.mockResolvedValue({ summaries: [] } as never);
+    (drive.files.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      data: {
+        id: 'set-file',
+        name: 'Case set',
+        createdAtISO: '2024-01-01T00:00:00.000Z',
+        updatedAtISO: '2024-01-01T00:00:00.000Z',
+        items: [{ source: 'gmail', id: 'g1', title: 'Gmail missing' }],
+        version: 1,
+        driveFolderId: 'other-folder',
+        driveFileId: 'set-file',
+      },
+    });
+
+    const result = await loadChatContext({
+      drive: drive as never,
+      driveFolderId: 'folder-1',
+      selection: { mode: 'selection_set', recentCount: 8, sourceFilter: 'all', selectionSetId: 'set-file' },
+    });
+
+    expect(result.items).toEqual([]);
+    expect(result.stats).toBeUndefined();
+    expect(result.missing).toBeUndefined();
+    expect(result.key).toContain('Selection set unavailable');
+  });
+
 
   it('invalid selection set JSON is handled gracefully via schema validation', async () => {
     const drive = makeDrive();
