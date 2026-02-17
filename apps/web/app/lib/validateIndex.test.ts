@@ -41,6 +41,36 @@ describe('validateIndex', () => {
     ).toBe(false);
   });
 
+
+  it('accepts unknown top-level fields in drive index files', () => {
+    expect(
+      isTimelineIndex({
+        ...baseIndex,
+        futureField: 'kept-for-forward-compat',
+      }),
+    ).toBe(true);
+  });
+
+  it('validates optional envelope fields when present', () => {
+    expect(
+      isTimelineIndex({
+        ...baseIndex,
+        type: 'timeline_index',
+        status: 'complete',
+        meta: {
+          driveFileId: 'index-1',
+          experimental: 'ok',
+        },
+      }),
+    ).toBe(true);
+
+    expect(
+      isTimelineIndex({
+        ...baseIndex,
+        meta: 'invalid-meta',
+      }),
+    ).toBe(false);
+  });
   it('normalizes missing optional fields', () => {
     const legacy = {
       summaries: [

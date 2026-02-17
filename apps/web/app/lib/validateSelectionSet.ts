@@ -1,6 +1,6 @@
 import {
+  DriveSelectionSetJsonSchema,
   SelectionSetItemSchema,
-  SelectionSetSchema,
   type SelectionSet,
   type SelectionSetItem,
 } from '@timeline/shared';
@@ -35,7 +35,8 @@ const coerceSelectionSet = (value: unknown): SelectionSet | null => {
         .map((result) => normalizeItem(result.data))
     : [];
 
-  const parsed = SelectionSetSchema.safeParse({
+  const parsed = DriveSelectionSetJsonSchema.safeParse({
+    ...value,
     id: value.id,
     name: typeof value.name === 'string' ? value.name.trim() || 'Untitled Selection' : 'Untitled Selection',
     createdAtISO: value.createdAtISO,

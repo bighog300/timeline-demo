@@ -59,6 +59,19 @@ export const DriveSummaryEnvelopeSchema = z
 
 export const DriveSummaryJsonSchema = SummaryArtifactSchema.merge(DriveSummaryEnvelopeSchema);
 
+const DriveFileOptionalMetaSchema = z
+  .object({
+    mimeType: z.string().optional(),
+    driveFileId: z.string().optional(),
+    driveWebViewLink: z.string().optional(),
+    driveFolderId: z.string().optional(),
+    source: SourceType.optional(),
+    sourceId: z.string().optional(),
+    model: z.string().optional(),
+    version: z.number().optional(),
+  })
+  .passthrough();
+
 export const SelectionSetItemSchema = z
   .object({
     source: SourceType,
@@ -122,6 +135,19 @@ export const TimelineIndexSchema = z
     stats: TimelineIndexStatsSchema.optional(),
   })
   .strict();
+
+export const DriveTimelineIndexJsonSchema = TimelineIndexSchema.extend({
+  type: z.string().optional(),
+  status: z.string().optional(),
+  id: z.string().optional(),
+  meta: DriveFileOptionalMetaSchema.optional(),
+}).passthrough();
+
+export const DriveSelectionSetJsonSchema = SelectionSetSchema.extend({
+  type: z.string().optional(),
+  status: z.string().optional(),
+  meta: DriveFileOptionalMetaSchema.optional(),
+}).passthrough();
 
 export const AdminSettingsSchema = z
   .object({
@@ -188,6 +214,8 @@ export type TimelineIndexSummary = z.infer<typeof TimelineIndexSummarySchema>;
 export type TimelineIndexSelectionSet = z.infer<typeof TimelineIndexSelectionSetSchema>;
 export type TimelineIndexStats = z.infer<typeof TimelineIndexStatsSchema>;
 export type TimelineIndex = z.infer<typeof TimelineIndexSchema>;
+export type DriveTimelineIndexJson = z.infer<typeof DriveTimelineIndexJsonSchema>;
+export type DriveSelectionSetJson = z.infer<typeof DriveSelectionSetJsonSchema>;
 export type AdminSettings = z.infer<typeof AdminSettingsSchema>;
 export type SummarizeRequest = z.infer<typeof SummarizeRequestSchema>;
 export type SummarizeResponse = z.infer<typeof SummarizeResponseSchema>;
