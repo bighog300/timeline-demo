@@ -13,7 +13,8 @@
     "googleapis": "^143.0.0",
     "next-auth": "^4.24.11",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "@timeline/shared": "workspace:*"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",
