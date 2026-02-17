@@ -7,7 +7,11 @@ import {
   AppDriveFolderResolveError,
   resolveOrProvisionAppDriveFolder,
 } from '../../lib/appDriveFolder';
-import { buildContextPack, buildContextString } from '../../lib/chatContext';
+import {
+  buildChatContextString,
+  loadChatContext,
+  parseChatContextSelection,
+} from '../../lib/chatContextLoader';
 import { getGoogleAccessToken, getGoogleSession } from '../../lib/googleAuth';
 import { createDriveClient } from '../../lib/googleDrive';
 import { createGmailClient } from '../../lib/googleGmail';
@@ -563,6 +567,7 @@ const buildNoSourceGuidanceResponse = ({
 const jsonChatError = (status: number, payload: ChatErrorResponse) =>
   NextResponse.json(payload, { status });
 
+
 const MAX_REQUESTED_ORIGINALS = 3;
 
 const buildOriginalsRouterPrompt = (synthesisMode: boolean) => [
@@ -658,10 +663,9 @@ export async function POST(request: Request) {
 
   logInfo(ctx, 'request_start', { method: request.method });
 
-  const body = await request.json().catch(() => ({}));
+  const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
   const rawMessage = typeof body?.message === 'string' ? body.message : '';
   const message = rawMessage.trim();
-  const queryTextForContext = message === '' ? 'recent' : rawMessage;
   const allowOriginals = body?.allowOriginals === true;
   const advisorMode = body?.advisorMode === true;
   const synthesisMode = body?.synthesisMode === true;
@@ -755,13 +759,31 @@ export async function POST(request: Request) {
   const maxContextItems = adminSettings?.maxContextItems;
   let contextPack;
   try {
-    contextPack = await buildContextPack({
-      queryText: queryTextForContext,
+    const contextBody =
+      body.context && typeof body.context === 'object'
+        ? (body.context as {
+            mode?: string;
+            recentCount?: number;
+            sourceFilter?: string;
+            selectionSetId?: string;
+          })
+        : undefined;
+    const contextSelection = parseChatContextSelection({
+      mode: contextBody?.mode,
+      n: String(contextBody?.recentCount ?? maxContextItems ?? 8),
+      source: contextBody?.sourceFilter,
+      id: contextBody?.selectionSetId,
+    });
+    contextPack = await loadChatContext({
       drive,
       driveFolderId,
-      maxItems: maxContextItems,
-      ctx,
-      synthesisMode: effectiveSynthesisMode,
+      selection: {
+        ...contextSelection,
+        recentCount:
+          contextBody?.recentCount === 8 || contextBody?.recentCount === 20 || contextBody?.recentCount === 50
+            ? contextBody.recentCount
+            : (maxContextItems === 20 || maxContextItems === 50 ? maxContextItems : 8),
+      },
     });
   } catch (error) {
     logGoogleError(error, 'drive.files.get', ctx);
@@ -780,13 +802,13 @@ export async function POST(request: Request) {
     );
   }
 
-  const artifactFirstItems = contextPack.items.filter(
-    (item) => item.kind === 'summary' || item.kind === 'selection_set',
+  const summaryItems = contextPack.items.filter((item): item is (typeof contextPack.items)[number] =>
+    typeof item.artifactId === 'string' &&
+    typeof item.source === 'string' &&
+    typeof item.sourceId === 'string' &&
+    typeof item.snippet === 'string',
   );
-  const { context, items } = buildContextString(artifactFirstItems);
-  const summaryItems = items.filter(
-    (item): item is Extract<(typeof items)[number], { kind: 'summary' }> => item.kind === 'summary',
-  );
+  const { context, items } = buildChatContextString(summaryItems);
   const summaryCount = summaryItems.length;
   const systemPrompt = buildChatSystemPrompt(
     adminSettings?.systemPrompt ?? '',
@@ -957,33 +979,13 @@ export async function POST(request: Request) {
     }
   }
 
-  const baseCitations: ChatCitation[] = items.map((item) => {
-    if (item.kind === 'summary') {
-      return {
-        artifactId: item.artifactId,
-        title: item.title,
-        dateISO: item.dateISO,
-        kind: item.kind,
-        driveWebViewLink: item.source === 'drive' ? `https://drive.google.com/file/d/${item.sourceId}/view` : undefined,
-      };
-    }
-
-    if (item.kind === 'selection_set') {
-      return {
-        artifactId: item.id,
-        title: item.title,
-        kind: 'selection_set',
-        selectionSetId: item.id,
-      };
-    }
-
-    return {
-      artifactId: item.id,
-      title: item.selectionSetTitle ? `Run ${item.id} (${item.selectionSetTitle})` : `Run ${item.id}`,
-      kind: 'run',
-      runId: item.id,
-    };
-  });
+  const baseCitations: ChatCitation[] = items.map((item) => ({
+    artifactId: item.artifactId,
+    title: item.title,
+    dateISO: item.dateISO,
+    kind: 'summary',
+    driveWebViewLink: item.driveWebViewLink,
+  }));
 
   const routerDecision = countingMode || llmProvider === 'stub' ? null : parseRouterDecision(llmResponseText);
 
@@ -1114,7 +1116,6 @@ ${JSON.stringify(plan)}` },
   if (allowOriginals && routerDecision?.needsOriginals) {
     const requestedSet = new Set(routerDecision.requestedArtifactIds.slice(0, MAX_REQUESTED_ORIGINALS));
     const candidates = items
-      .filter((item): item is Extract<(typeof items)[number], { kind: 'summary' }> => item.kind === 'summary')
       .filter((item) => requestedSet.has(item.artifactId))
       .slice(0, MAX_REQUESTED_ORIGINALS);
     const gmail = createGmailClient(accessToken);

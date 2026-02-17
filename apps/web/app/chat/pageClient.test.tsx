@@ -4,6 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ChatPageClient from './pageClient';
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}));
+
+
 describe('ChatPageClient', () => {
   const storageKey = 'timeline-demo.chat';
   const allowOriginalsKey = 'timeline.chat.allowOriginals';
