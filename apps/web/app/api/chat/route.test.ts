@@ -345,13 +345,11 @@ describe('POST /api/chat', () => {
     const contextMessage = firstCall?.messages?.[0]?.content ?? '';
 
     expect(contextMessage).toContain('(SAVED SEARCH)');
-    expect(contextMessage).toContain('(RUN)');
     expect(response.status).toBe(200);
     expect(payload.citations).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ kind: 'summary', title: 'Launch Plan' }),
         expect.objectContaining({ kind: 'selection_set', selectionSetId: 'set-1' }),
-        expect.objectContaining({ kind: 'run', runId: 'run-1' }),
       ]),
     );
   });
@@ -1764,5 +1762,89 @@ Some trailing explanation.`,
     expect(result.truncated).toBe(true);
     expect(result.text.endsWith('...[truncated]')).toBe(true);
     expect(result.text.length).toBeLessThanOrEqual(150_000);
+  });
+
+
+  it('returns guidance and skips LLM call when no artifacts exist', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1', name: 'Timeline Demo' });
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        type: 'admin_settings',
+        version: 1,
+        provider: 'stub',
+        model: 'stub',
+        systemPrompt: '',
+        maxContextItems: 8,
+        temperature: 0.2,
+        updatedAtISO: '2024-01-01T00:00:00.000Z',
+      },
+      fileId: undefined,
+      webViewLink: undefined,
+    });
+    mockBuildContextPack.mockResolvedValue({
+      items: [],
+      debug: { usedIndex: true, totalConsidered: 0 },
+    });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'What happened?' }),
+    });
+
+    const response = await POST(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.reply).toContain('No timeline sources available to analyze.');
+    expect(payload.citations).toEqual([]);
+    expect(mockCallLLM).not.toHaveBeenCalled();
+  });
+
+  it('includes driveWebViewLink in citations for drive artifacts', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1', name: 'Timeline Demo' });
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        type: 'admin_settings',
+        version: 1,
+        provider: 'stub',
+        model: 'stub',
+        systemPrompt: '',
+        maxContextItems: 8,
+        temperature: 0.2,
+        updatedAtISO: '2024-01-01T00:00:00.000Z',
+      },
+      fileId: undefined,
+      webViewLink: undefined,
+    });
+    mockBuildContextPack.mockResolvedValue({
+      items: [{ ...defaultContextItem, source: 'drive', sourceId: 'drive-file-123' }],
+      debug: { usedIndex: true, totalConsidered: 1 },
+    });
+    mockCallLLM.mockResolvedValue({ text: '[stub: answer]' });
+
+    const request = new Request('http://localhost/api/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'What happened?' }),
+    });
+
+    const response = await POST(request);
+    const payload = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(payload.citations[0].driveWebViewLink).toBe(
+      'https://drive.google.com/file/d/drive-file-123/view',
+    );
   });
 });

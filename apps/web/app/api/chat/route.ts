@@ -28,6 +28,7 @@ type ChatCitation =
       artifactId: string;
       title: string;
       dateISO?: string;
+      driveWebViewLink?: string;
       kind: 'summary' | 'index' | 'original';
     }
   | {
@@ -779,7 +780,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const { context, items } = buildContextString(contextPack.items);
+  const artifactFirstItems = contextPack.items.filter(
+    (item) => item.kind === 'summary' || item.kind === 'selection_set',
+  );
+  const { context, items } = buildContextString(artifactFirstItems);
   const summaryItems = items.filter(
     (item): item is Extract<(typeof items)[number], { kind: 'summary' }> => item.kind === 'summary',
   );
@@ -960,6 +964,7 @@ export async function POST(request: Request) {
         title: item.title,
         dateISO: item.dateISO,
         kind: item.kind,
+        driveWebViewLink: item.source === 'drive' ? `https://drive.google.com/file/d/${item.sourceId}/view` : undefined,
       };
     }
 
@@ -1187,6 +1192,7 @@ ${JSON.stringify(plan)}` },
           artifactId: item.artifactId,
           title: `${item.title} (original)`,
           kind: 'original' as const,
+          driveWebViewLink: item.source === 'drive' ? `https://drive.google.com/file/d/${item.sourceId}/view` : undefined,
         })),
       ];
 
