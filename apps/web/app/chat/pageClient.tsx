@@ -21,6 +21,7 @@ type ChatCitation =
       artifactId: string;
       title: string;
       dateISO?: string;
+      driveWebViewLink?: string;
       kind: 'summary' | 'index' | 'original';
     }
   | {
@@ -107,7 +108,21 @@ const createMessage = (role: ChatMessage['role'], content: string): ChatMessage 
   content,
 });
 
-export default function ChatPageClient({ isAdmin = false }: { isAdmin?: boolean }) {
+type ChatContextArtifact = {
+  artifactId: string;
+  title: string;
+  driveWebViewLink?: string;
+};
+
+export default function ChatPageClient({
+  isAdmin = false,
+  contextArtifacts = [],
+  indexMissing = false,
+}: {
+  isAdmin?: boolean;
+  contextArtifacts?: ChatContextArtifact[];
+  indexMissing?: boolean;
+}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -337,13 +352,42 @@ export default function ChatPageClient({ isAdmin = false }: { isAdmin?: boolean 
       <div className={styles.header}>
         <div>
           <p className={styles.eyebrow}>Chat</p>
-          <h1>Timeline assistant</h1>
-          <p>Ask questions and get suggestions powered by the mock chat API.</p>
+          <h1>Chat over your saved summaries</h1>
+          <p>Ask questions using only your Drive-saved summary artifacts.</p>
         </div>
       </div>
 
       <div className={styles.layout}>
-        <Card className={styles.chatPanel}>
+        
+
+      <Card>
+        <h2>Artifacts in context</h2>
+        {contextArtifacts.length === 0 ? (
+          <p className={styles.emptyMeta}>No saved artifacts found. Create summaries first in Timeline.</p>
+        ) : (
+          <ul className={styles.relatedList}>
+            {contextArtifacts.map((artifact) => (
+              <li key={artifact.artifactId}>
+                <a
+                  href={artifact.driveWebViewLink ?? `/timeline?artifactId=${encodeURIComponent(artifact.artifactId)}`}
+                  target={artifact.driveWebViewLink ? '_blank' : undefined}
+                  rel={artifact.driveWebViewLink ? 'noreferrer' : undefined}
+                >
+                  {artifact.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+        {indexMissing ? (
+          <form action="/api/timeline/index/rebuild" method="post">
+            <Button type="submit" variant="secondary">
+              Rebuild index
+            </Button>
+          </form>
+        ) : null}
+      </Card>
+<Card className={styles.chatPanel}>
           <div className={styles.chatHeader}>
             <h2>Conversation</h2>
             <div className={styles.chatHeaderActions}>
@@ -382,7 +426,7 @@ export default function ChatPageClient({ isAdmin = false }: { isAdmin?: boolean 
                         {message.citations.map((citation, index) => {
                           const href =
                             citation.kind === 'summary' || citation.kind === 'index' || citation.kind === 'original'
-                              ? `/timeline?artifactId=${encodeURIComponent(citation.artifactId)}`
+                              ? citation.driveWebViewLink ?? `/timeline?artifactId=${encodeURIComponent(citation.artifactId)}`
                               : '/selection-sets';
 
                           return (

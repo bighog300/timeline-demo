@@ -1,7 +1,10 @@
 'use client';
 
+import React from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+
+import { enableDemoTabs } from '../lib/featureFlags';
 
 type NavItem = {
   href: string;
@@ -49,10 +52,13 @@ const navItems: NavItem[] = [
 
 export default function AppNav() {
   const pathname = usePathname() ?? '/';
+  const visibleItems = enableDemoTabs()
+    ? navItems
+    : navItems.filter((item) => item.href !== '/calendar' && item.href !== '/chat');
 
   return (
     <nav className="app-nav" aria-label="Primary">
-      {navItems.map((item) => {
+      {visibleItems.map((item) => {
         const isActive = item.match ? item.match(pathname) : pathname === item.href;
         return (
           <Link key={item.href} href={item.href} data-active={isActive}>
