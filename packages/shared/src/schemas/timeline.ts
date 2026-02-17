@@ -2,17 +2,21 @@ import { z } from 'zod';
 
 export const SourceType = z.enum(['gmail', 'drive']);
 
+const isoDateString = z
+  .string()
+  .refine((s) => !Number.isNaN(Date.parse(s)), 'Invalid ISO date string');
+
 export const SourceMetadataSchema = z
   .object({
     from: z.string().optional(),
     to: z.string().optional(),
     subject: z.string().optional(),
-    dateISO: z.string().optional(),
+    dateISO: isoDateString.optional(),
     threadId: z.string().optional(),
     labels: z.array(z.string()).optional(),
     mimeType: z.string().optional(),
     driveName: z.string().optional(),
-    driveModifiedTime: z.string().optional(),
+    driveModifiedTime: isoDateString.optional(),
     driveWebViewLink: z.string().optional(),
   })
   .strict();
@@ -23,7 +27,7 @@ export const SummaryArtifactSchema = z
     source: SourceType,
     sourceId: z.string(),
     title: z.string(),
-    createdAtISO: z.string(),
+    createdAtISO: isoDateString,
     summary: z.string(),
     highlights: z.array(z.string()),
     sourceMetadata: SourceMetadataSchema.optional(),
@@ -41,7 +45,7 @@ export const DriveSummaryEnvelopeSchema = z
     type: z.literal('summary'),
     status: z.literal('complete'),
     id: z.string(),
-    updatedAtISO: z.string(),
+    updatedAtISO: isoDateString,
     meta: z
       .object({
         mimeType: z.string().optional(),
@@ -77,7 +81,7 @@ export const SelectionSetItemSchema = z
     source: SourceType,
     id: z.string(),
     title: z.string().optional(),
-    dateISO: z.string().optional(),
+    dateISO: isoDateString.optional(),
   })
   .strict();
 
@@ -85,8 +89,8 @@ export const SelectionSetSchema = z
   .object({
     id: z.string(),
     name: z.string(),
-    createdAtISO: z.string(),
-    updatedAtISO: z.string(),
+    createdAtISO: isoDateString,
+    updatedAtISO: isoDateString,
     items: z.array(SelectionSetItemSchema),
     notes: z.string().optional(),
     version: z.number(),
@@ -102,8 +106,8 @@ export const TimelineIndexSummarySchema = z
     title: z.string(),
     source: SourceType,
     sourceId: z.string().min(1),
-    createdAtISO: z.string().optional(),
-    updatedAtISO: z.string().optional(),
+    createdAtISO: isoDateString.optional(),
+    updatedAtISO: isoDateString.optional(),
     webViewLink: z.string().optional(),
   })
   .strict();
@@ -112,7 +116,7 @@ export const TimelineIndexSelectionSetSchema = z
   .object({
     driveFileId: z.string().min(1),
     name: z.string(),
-    updatedAtISO: z.string().optional(),
+    updatedAtISO: isoDateString.optional(),
     webViewLink: z.string().optional(),
   })
   .strict();
@@ -127,7 +131,7 @@ export const TimelineIndexStatsSchema = z
 export const TimelineIndexSchema = z
   .object({
     version: z.number(),
-    updatedAtISO: z.string(),
+    updatedAtISO: isoDateString,
     driveFolderId: z.string(),
     indexFileId: z.string(),
     summaries: z.array(TimelineIndexSummarySchema),
@@ -158,7 +162,7 @@ export const AdminSettingsSchema = z
     systemPrompt: z.string(),
     maxContextItems: z.number(),
     temperature: z.number(),
-    updatedAtISO: z.string(),
+    updatedAtISO: isoDateString,
   })
   .strict();
 

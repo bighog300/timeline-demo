@@ -39,7 +39,7 @@ describe('validateSelectionSet', () => {
       name: '  ',
       notes: '  ',
       items: [
-        { source: 'gmail', id: 'msg-2', title: '  Weekly update  ', dateISO: '  ' },
+        { source: 'gmail', id: 'msg-2', title: '  Weekly update  ', dateISO: '2024-03-03T00:00:00Z' },
         { source: 'drive', id: 'file-2' },
       ],
       version: 0,
@@ -48,7 +48,7 @@ describe('validateSelectionSet', () => {
     expect(normalized.name).toBe('Untitled Selection');
     expect(normalized.notes).toBeUndefined();
     expect(normalized.items[0].title).toBe('Weekly update');
-    expect(normalized.items[0].dateISO).toBeUndefined();
+    expect(normalized.items[0].dateISO).toBe('2024-03-03T00:00:00Z');
     expect(normalized.version).toBe(1);
   });
 
