@@ -12,11 +12,12 @@ import { createDriveClient } from '../../../lib/googleDrive';
 import { createGmailClient } from '../../../lib/googleGmail';
 import { fetchDriveFileText, fetchGmailMessageText } from '../../../lib/fetchSourceText';
 import { checkRateLimit, getRateLimitKey } from '../../../lib/rateLimit';
-import { summarizeDeterministic } from '../../../lib/summarize';
 import { PayloadLimitError } from '../../../lib/driveSafety';
 import { writeArtifactToDrive } from '../../../lib/writeArtifactToDrive';
 import { hashUserHint, logError, logInfo, safeError, time } from '../../../lib/logger';
 import { createCtx, withRequestId } from '../../../lib/requestContext';
+import { ProviderError } from '../../../lib/llm/providerErrors';
+import { getTimelineProviderFromDrive } from '../../../lib/llm/providerRouter';
 
 const MAX_ITEMS = 10;
 const PREVIEW_CHARS = 600;
@@ -83,6 +84,22 @@ export const POST = async (request: NextRequest) => {
   const gmail = createGmailClient(accessToken);
   const drive = createDriveClient(accessToken);
 
+  let timelineProvider: Awaited<ReturnType<typeof getTimelineProviderFromDrive>>['provider'];
+  let settings: Awaited<ReturnType<typeof getTimelineProviderFromDrive>>['settings'];
+
+  try {
+    const providerResult = await getTimelineProviderFromDrive(drive, driveFolderId, ctx);
+    timelineProvider = providerResult.provider;
+    settings = providerResult.settings;
+  } catch (error) {
+    if (error instanceof ProviderError && error.code === 'not_configured') {
+      return respond(
+        jsonError(500, 'provider_not_configured', 'Selected provider is not configured.'),
+      );
+    }
+    throw error;
+  }
+
   const artifacts: SummaryArtifact[] = [];
   const failed: Array<{ source: 'gmail' | 'drive'; id: string; error: string }> = [];
 
@@ -93,11 +110,15 @@ export const POST = async (request: NextRequest) => {
           ? await fetchGmailMessageText(gmail, item.id, ctx)
           : await fetchDriveFileText(drive, item.id, driveFolderId, ctx);
 
-      const { summary, highlights } = await time(ctx, 'summarize', async () =>
-        summarizeDeterministic({
-          title: content.title,
-          text: content.text,
-        }),
+      const { summary, highlights, model } = await time(ctx, 'summarize', async () =>
+        timelineProvider.summarize(
+          {
+            title: content.title,
+            text: content.text,
+            sourceMetadata: content.metadata,
+          },
+          settings,
+        ),
       );
 
       const createdAtISO = new Date().toISOString();
@@ -118,7 +139,7 @@ export const POST = async (request: NextRequest) => {
         driveFolderId,
         driveFileId: '',
         driveWebViewLink: undefined,
-        model: 'stub',
+        model,
         version: 1,
       };
 
@@ -130,6 +151,18 @@ export const POST = async (request: NextRequest) => {
         driveWebViewLink: driveResult.jsonWebViewLink,
       });
     } catch (error) {
+      if (error instanceof ProviderError) {
+        if (error.code === 'bad_output') {
+          return respond(jsonError(502, 'provider_bad_output', 'Provider returned invalid output.'));
+        }
+
+        if (error.code === 'not_configured') {
+          return respond(
+            jsonError(500, 'provider_not_configured', 'Selected provider is not configured.'),
+          );
+        }
+      }
+
       if (error instanceof PayloadLimitError) {
         return respond(
           jsonError(

@@ -1,20 +1,16 @@
+import { AdminSettingsSchema, type AdminSettings } from '@timeline/shared';
+
 import type { LLMProviderName } from './llm/types';
 
-export type AdminSettings = {
-  type: 'admin_settings';
-  version: 1;
-  provider: LLMProviderName;
-  model: string;
-  systemPrompt: string;
-  maxContextItems: number;
-  temperature: number;
-  updatedAtISO: string;
-};
+export type { AdminSettings };
 
 export type AdminSettingsInput = {
   provider?: LLMProviderName;
   model?: string;
   systemPrompt?: string;
+  summaryPromptTemplate?: string;
+  highlightsPromptTemplate?: string;
+  maxOutputTokens?: number;
   maxContextItems?: number;
   temperature?: number;
 };
@@ -25,6 +21,9 @@ export const DEFAULT_ADMIN_SETTINGS: Omit<AdminSettings, 'updatedAtISO'> = {
   provider: 'stub',
   model: 'gpt-4o-mini',
   systemPrompt: '',
+  summaryPromptTemplate: '',
+  highlightsPromptTemplate: '',
+  maxOutputTokens: 256,
   maxContextItems: 8,
   temperature: 0.2,
 };
@@ -57,6 +56,17 @@ export const normalizeAdminSettings = (
   const model = typeof record.model === 'string' ? record.model : DEFAULT_ADMIN_SETTINGS.model;
   const systemPrompt =
     typeof record.systemPrompt === 'string' ? record.systemPrompt : DEFAULT_ADMIN_SETTINGS.systemPrompt;
+  const summaryPromptTemplate =
+    typeof record.summaryPromptTemplate === 'string'
+      ? record.summaryPromptTemplate
+      : DEFAULT_ADMIN_SETTINGS.summaryPromptTemplate;
+  const highlightsPromptTemplate =
+    typeof record.highlightsPromptTemplate === 'string'
+      ? record.highlightsPromptTemplate
+      : DEFAULT_ADMIN_SETTINGS.highlightsPromptTemplate;
+  const maxOutputTokens = isNumber(record.maxOutputTokens)
+    ? record.maxOutputTokens
+    : DEFAULT_ADMIN_SETTINGS.maxOutputTokens;
   const maxContextItems = isNumber(record.maxContextItems)
     ? record.maxContextItems
     : DEFAULT_ADMIN_SETTINGS.maxContextItems;
@@ -64,20 +74,21 @@ export const normalizeAdminSettings = (
     ? record.temperature
     : DEFAULT_ADMIN_SETTINGS.temperature;
   const updatedAtISO =
-    typeof record.updatedAtISO === 'string' && record.updatedAtISO.trim()
-      ? record.updatedAtISO
-      : nowISO;
+    typeof record.updatedAtISO === 'string' && record.updatedAtISO.trim() ? record.updatedAtISO : nowISO;
 
-  return {
+  return AdminSettingsSchema.parse({
     type: 'admin_settings',
     version: 1,
     provider,
     model,
     systemPrompt,
+    summaryPromptTemplate,
+    highlightsPromptTemplate,
+    maxOutputTokens,
     maxContextItems,
     temperature,
     updatedAtISO,
-  };
+  });
 };
 
 export const validateAdminSettingsInput = (
@@ -101,6 +112,27 @@ export const validateAdminSettingsInput = (
     return { error: 'System prompt must be a string.' };
   }
 
+  if (record.summaryPromptTemplate !== undefined && typeof record.summaryPromptTemplate !== 'string') {
+    return { error: 'summaryPromptTemplate must be a string.' };
+  }
+
+  if (
+    record.highlightsPromptTemplate !== undefined &&
+    typeof record.highlightsPromptTemplate !== 'string'
+  ) {
+    return { error: 'highlightsPromptTemplate must be a string.' };
+  }
+
+  const maxOutputTokens =
+    record.maxOutputTokens === undefined
+      ? DEFAULT_ADMIN_SETTINGS.maxOutputTokens
+      : isNumber(record.maxOutputTokens)
+        ? record.maxOutputTokens
+        : null;
+  if (maxOutputTokens === null) {
+    return { error: 'maxOutputTokens must be a number.' };
+  }
+
   const maxContextItems =
     record.maxContextItems === undefined
       ? DEFAULT_ADMIN_SETTINGS.maxContextItems
@@ -121,16 +153,29 @@ export const validateAdminSettingsInput = (
     return { error: 'temperature must be a number.' };
   }
 
-  return {
-    settings: {
-      type: 'admin_settings',
-      version: 1,
-      provider: record.provider,
-      model: record.model,
-      systemPrompt: record.systemPrompt,
-      maxContextItems,
-      temperature,
-      updatedAtISO: nowISO,
-    },
-  };
+  const parsed = AdminSettingsSchema.safeParse({
+    type: 'admin_settings',
+    version: 1,
+    provider: record.provider,
+    model: record.model,
+    systemPrompt: record.systemPrompt,
+    summaryPromptTemplate:
+      typeof record.summaryPromptTemplate === 'string'
+        ? record.summaryPromptTemplate
+        : DEFAULT_ADMIN_SETTINGS.summaryPromptTemplate,
+    highlightsPromptTemplate:
+      typeof record.highlightsPromptTemplate === 'string'
+        ? record.highlightsPromptTemplate
+        : DEFAULT_ADMIN_SETTINGS.highlightsPromptTemplate,
+    maxOutputTokens,
+    maxContextItems,
+    temperature,
+    updatedAtISO: nowISO,
+  });
+
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid settings payload.' };
+  }
+
+  return { settings: parsed.data };
 };

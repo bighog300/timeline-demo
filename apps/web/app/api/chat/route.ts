@@ -911,6 +911,12 @@ export async function POST(request: Request) {
             code: 'upstream_error',
             message: 'Chat provider error. Please retry.',
           },
+
+          bad_output: {
+            status: 502,
+            code: 'upstream_error',
+            message: 'Chat provider returned invalid output.',
+          },
         };
 
         const mapped = payloadByCode[error.code];
