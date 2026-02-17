@@ -115,6 +115,7 @@ export const POST = async (request: NextRequest) => {
           {
             title: content.title,
             text: content.text,
+            source: item.source,
             sourceMetadata: content.metadata,
           },
           settings,
