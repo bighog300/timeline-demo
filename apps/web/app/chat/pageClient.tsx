@@ -6,6 +6,7 @@ import Link from 'next/link';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
+import RebuildIndexButton from '../calendar/RebuildIndexButton';
 import Skeleton from '../components/ui/Skeleton';
 import styles from './page.module.css';
 
@@ -379,13 +380,7 @@ export default function ChatPageClient({
             ))}
           </ul>
         )}
-        {indexMissing ? (
-          <form action="/api/timeline/index/rebuild" method="post">
-            <Button type="submit" variant="secondary">
-              Rebuild index
-            </Button>
-          </form>
-        ) : null}
+        {indexMissing ? <RebuildIndexButton /> : null}
       </Card>
 <Card className={styles.chatPanel}>
           <div className={styles.chatHeader}>

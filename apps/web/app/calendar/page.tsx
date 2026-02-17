@@ -10,6 +10,7 @@ import { findIndexFile, readIndexFile } from '../lib/indexDrive';
 import type { SummaryArtifact } from '../lib/types';
 import { groupArtifactsByDay } from '../lib/groupArtifactsByDay';
 import styles from './page.module.css';
+import RebuildIndexButton from './RebuildIndexButton';
 
 const SUMMARY_SUFFIX = ' - Summary.json';
 const FALLBACK_READ_CAP = 200;
@@ -143,9 +144,7 @@ export default async function CalendarPage({
       {indexMissing ? (
         <Card>
           <p>Index missing: showing up to {FALLBACK_READ_CAP} artifacts. Rebuild index for faster load.</p>
-          <form action="/api/timeline/index/rebuild" method="post">
-            <button type="submit">Rebuild index</button>
-          </form>
+          <RebuildIndexButton />
         </Card>
       ) : null}
 
