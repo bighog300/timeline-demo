@@ -1,93 +1,14 @@
-import type {
-  TimelineIndex,
-  TimelineIndexSelectionSet,
-  TimelineIndexSummary,
-} from './indexTypes';
+import {
+  TimelineIndexSchema,
+  TimelineIndexSelectionSetSchema,
+  TimelineIndexSummarySchema,
+  type TimelineIndex,
+  type TimelineIndexSelectionSet,
+  type TimelineIndexSummary,
+} from '@timeline/shared';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object';
-
-const isNonEmptyString = (value: unknown): value is string =>
-  typeof value === 'string' && value.trim().length > 0;
-
-const isOptionalString = (value: unknown): value is string | undefined =>
-  value === undefined || typeof value === 'string';
-
-const isString = (value: unknown): value is string => typeof value === 'string';
-
-const isSummary = (value: unknown): value is TimelineIndexSummary => {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const source = value.source;
-  if (source !== undefined && source !== 'gmail' && source !== 'drive') {
-    return false;
-  }
-
-  if (!isNonEmptyString(value.driveFileId) || !isString(value.title)) {
-    return false;
-  }
-
-  if (value.sourceId !== undefined && !isNonEmptyString(value.sourceId)) {
-    return false;
-  }
-
-  return (
-    isOptionalString(value.createdAtISO) &&
-    isOptionalString(value.updatedAtISO) &&
-    isOptionalString(value.webViewLink)
-  );
-};
-
-const isSelectionSet = (value: unknown): value is TimelineIndexSelectionSet => {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  if (!isNonEmptyString(value.driveFileId) || !isString(value.name)) {
-    return false;
-  }
-
-  return isOptionalString(value.updatedAtISO) && isOptionalString(value.webViewLink);
-};
-
-export const isTimelineIndex = (value: unknown): value is TimelineIndex => {
-  if (!isRecord(value)) {
-    return false;
-  }
-
-  const version = value.version;
-  if (version !== undefined && typeof version !== 'number') {
-    return false;
-  }
-
-  if (value.updatedAtISO !== undefined && !isNonEmptyString(value.updatedAtISO)) {
-    return false;
-  }
-
-  if (value.driveFolderId !== undefined && !isNonEmptyString(value.driveFolderId)) {
-    return false;
-  }
-
-  if (value.indexFileId !== undefined && !isNonEmptyString(value.indexFileId)) {
-    return false;
-  }
-
-  if (value.summaries !== undefined) {
-    if (!Array.isArray(value.summaries) || !value.summaries.every(isSummary)) {
-      return false;
-    }
-  }
-
-  if (value.selectionSets !== undefined) {
-    if (!Array.isArray(value.selectionSets) || !value.selectionSets.every(isSelectionSet)) {
-      return false;
-    }
-  }
-
-  return true;
-};
 
 const normalizeSummary = (value: TimelineIndexSummary): TimelineIndexSummary => ({
   driveFileId: value.driveFileId,
@@ -108,29 +29,95 @@ const normalizeSelectionSet = (
   webViewLink: value.webViewLink?.trim() || undefined,
 });
 
-export const normalizeTimelineIndex = (
-  value: TimelineIndex,
-  folderId: string,
-  fileId: string,
-): TimelineIndex => {
-  const summaries = Array.isArray(value.summaries) ? value.summaries.map(normalizeSummary) : [];
-  const selectionSets = Array.isArray(value.selectionSets)
-    ? value.selectionSets.map(normalizeSelectionSet)
+const coerceTimelineIndex = (value: unknown): TimelineIndex | null => {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const summaries = Array.isArray(value.summaries)
+    ? value.summaries
+        .map((entry) =>
+          TimelineIndexSummarySchema.safeParse({
+            ...entry,
+            source: isRecord(entry) && entry.source === undefined ? 'drive' : isRecord(entry) ? entry.source : undefined,
+            sourceId:
+              isRecord(entry) && entry.sourceId === undefined && typeof entry.driveFileId === 'string'
+                ? entry.driveFileId
+                : isRecord(entry)
+                  ? entry.sourceId
+                  : undefined,
+          }),
+        )
+        .filter((result): result is { success: true; data: TimelineIndexSummary } => result.success)
+        .map((result) => normalizeSummary(result.data))
     : [];
 
-  return {
+  const selectionSets = Array.isArray(value.selectionSets)
+    ? value.selectionSets
+        .map((entry) => TimelineIndexSelectionSetSchema.safeParse(entry))
+        .filter((result): result is { success: true; data: TimelineIndexSelectionSet } => result.success)
+        .map((result) => normalizeSelectionSet(result.data))
+    : [];
+
+  const parsed = TimelineIndexSchema.safeParse({
+    ...value,
     version: typeof value.version === 'number' && value.version > 0 ? value.version : 1,
-    updatedAtISO:
-      typeof value.updatedAtISO === 'string' && value.updatedAtISO.trim()
-        ? value.updatedAtISO.trim()
-        : new Date().toISOString(),
-    driveFolderId: folderId,
-    indexFileId: fileId,
+    updatedAtISO: typeof value.updatedAtISO === 'string' && value.updatedAtISO.trim() ? value.updatedAtISO.trim() : new Date().toISOString(),
+    driveFolderId: typeof value.driveFolderId === 'string' ? value.driveFolderId : '',
+    indexFileId: typeof value.indexFileId === 'string' ? value.indexFileId : '',
     summaries,
     selectionSets,
     stats: {
       totalSummaries: summaries.length,
       totalSelectionSets: selectionSets.length,
     },
-  };
+  });
+
+  return parsed.success ? parsed.data : null;
 };
+
+export const isTimelineIndex = (value: unknown): value is TimelineIndex => {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const canParseSummaries =
+    value.summaries === undefined ||
+    (Array.isArray(value.summaries) &&
+      value.summaries.every((entry) => {
+        if (!isRecord(entry)) {
+          return false;
+        }
+
+        return TimelineIndexSummarySchema.safeParse({
+          ...entry,
+          source: entry.source ?? 'drive',
+          sourceId: typeof entry.sourceId === 'string' ? entry.sourceId : entry.driveFileId,
+        }).success;
+      }));
+
+  const canParseSelectionSets =
+    value.selectionSets === undefined ||
+    (Array.isArray(value.selectionSets) &&
+      value.selectionSets.every((entry) => TimelineIndexSelectionSetSchema.safeParse(entry).success));
+
+  return canParseSummaries && canParseSelectionSets;
+};
+
+export const normalizeTimelineIndex = (
+  value: TimelineIndex,
+  folderId: string,
+  fileId: string,
+): TimelineIndex =>
+  coerceTimelineIndex({ ...value, driveFolderId: folderId, indexFileId: fileId }) ?? {
+    version: 1,
+    updatedAtISO: new Date().toISOString(),
+    driveFolderId: folderId,
+    indexFileId: fileId,
+    summaries: [],
+    selectionSets: [],
+    stats: {
+      totalSummaries: 0,
+      totalSelectionSets: 0,
+    },
+  };

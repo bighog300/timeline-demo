@@ -1,4 +1,10 @@
 import { NextResponse, type NextRequest } from 'next/server';
+import {
+  SummarizeRequestSchema,
+  SummarizeResponseSchema,
+  type SummarizeRequest,
+  type SummaryArtifact,
+} from '@timeline/shared';
 
 import { jsonError } from '../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../lib/googleAuth';
@@ -7,33 +13,13 @@ import { createGmailClient } from '../../../lib/googleGmail';
 import { fetchDriveFileText, fetchGmailMessageText } from '../../../lib/fetchSourceText';
 import { checkRateLimit, getRateLimitKey } from '../../../lib/rateLimit';
 import { summarizeDeterministic } from '../../../lib/summarize';
-import type { SummaryArtifact } from '../../../lib/types';
 import { PayloadLimitError } from '../../../lib/driveSafety';
 import { writeArtifactToDrive } from '../../../lib/writeArtifactToDrive';
 import { hashUserHint, logError, logInfo, safeError, time } from '../../../lib/logger';
 import { createCtx, withRequestId } from '../../../lib/requestContext';
 
-type SummarizeRequest = {
-  items: Array<{ source: 'gmail' | 'drive'; id: string }>;
-};
-
-type FailedItem = {
-  source: 'gmail' | 'drive';
-  id: string;
-  error: string;
-};
-
 const MAX_ITEMS = 10;
 const PREVIEW_CHARS = 600;
-
-const isValidItem = (value: unknown): value is { source: 'gmail' | 'drive'; id: string } => {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const item = value as { source?: string; id?: string };
-  return (item.source === 'gmail' || item.source === 'drive') && typeof item.id === 'string';
-};
 
 export const POST = async (request: NextRequest) => {
   const ctx = createCtx(request, '/api/timeline/summarize');
@@ -72,12 +58,17 @@ export const POST = async (request: NextRequest) => {
 
   let body: SummarizeRequest | null = null;
   try {
-    body = (await request.json()) as SummarizeRequest;
+    const parsed = SummarizeRequestSchema.safeParse(await request.json());
+    body = parsed.success ? parsed.data : null;
   } catch {
     return respond(jsonError(400, 'invalid_request', 'Invalid request payload.'));
   }
 
-  const items = Array.isArray(body?.items) ? body.items.filter(isValidItem) : [];
+  if (!body) {
+    return respond(jsonError(400, 'invalid_request', 'Invalid request payload.'));
+  }
+
+  const items = body.items;
 
   if (items.length > MAX_ITEMS) {
     return respond(
@@ -93,7 +84,7 @@ export const POST = async (request: NextRequest) => {
   const drive = createDriveClient(accessToken);
 
   const artifacts: SummaryArtifact[] = [];
-  const failed: FailedItem[] = [];
+  const failed: Array<{ source: 'gmail' | 'drive'; id: string; error: string }> = [];
 
   for (const item of items) {
     try {
@@ -160,5 +151,6 @@ export const POST = async (request: NextRequest) => {
     }
   }
 
-  return respond(NextResponse.json({ artifacts, failed }));
+  const responsePayload = SummarizeResponseSchema.parse({ artifacts, failed });
+  return respond(NextResponse.json(responsePayload));
 };

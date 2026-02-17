@@ -1,10 +1,7 @@
-import type { SummaryArtifact } from './types';
+import { SourceMetadataSchema, SummaryArtifactSchema, type SummaryArtifact } from '@timeline/shared';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-
-const isStringArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every((item) => typeof item === 'string');
 
 const normalizeString = (value: unknown) => (typeof value === 'string' ? value : undefined);
 
@@ -29,45 +26,51 @@ const normalizeSourceMetadata = (value: unknown) => {
     driveWebViewLink: normalizeString(value.driveWebViewLink),
   };
 
-  return Object.values(metadata).some((entry) => entry !== undefined) ? metadata : undefined;
+  const parsed = SourceMetadataSchema.safeParse(metadata);
+  return parsed.success ? parsed.data : undefined;
 };
 
-export const isSummaryArtifact = (value: unknown): value is SummaryArtifact => {
+const coerceArtifact = (value: unknown): SummaryArtifact | null => {
   if (!isRecord(value)) {
-    return false;
+    return null;
   }
 
-  const source = value.source;
-  if (source !== 'gmail' && source !== 'drive') {
-    return false;
-  }
+  const parsed = SummaryArtifactSchema.safeParse({
+    artifactId: value.artifactId,
+    source: value.source,
+    sourceId: value.sourceId,
+    title: value.title,
+    createdAtISO: value.createdAtISO,
+    summary: value.summary,
+    highlights: Array.isArray(value.highlights)
+      ? value.highlights.filter((item) => typeof item === 'string')
+      : [],
+    sourceMetadata: normalizeSourceMetadata(value.sourceMetadata),
+    sourcePreview: normalizeString(value.sourcePreview),
+    driveFolderId: typeof value.driveFolderId === 'string' ? value.driveFolderId : '',
+    driveFileId: typeof value.driveFileId === 'string' ? value.driveFileId : '',
+    driveWebViewLink: normalizeString(value.driveWebViewLink),
+    model: typeof value.model === 'string' && value.model ? value.model : 'unknown',
+    version: typeof value.version === 'number' && value.version > 0 ? value.version : 1,
+  });
 
-  return (
-    typeof value.artifactId === 'string' &&
-    typeof value.sourceId === 'string' &&
-    typeof value.title === 'string' &&
-    typeof value.createdAtISO === 'string' &&
-    typeof value.summary === 'string' &&
-    (value.highlights === undefined || isStringArray(value.highlights)) &&
-    (value.sourceMetadata === undefined || isRecord(value.sourceMetadata)) &&
-    (value.sourcePreview === undefined || typeof value.sourcePreview === 'string') &&
-    (value.driveFolderId === undefined || typeof value.driveFolderId === 'string') &&
-    (value.driveFileId === undefined || typeof value.driveFileId === 'string') &&
-    (value.driveWebViewLink === undefined || typeof value.driveWebViewLink === 'string') &&
-    (value.model === undefined || typeof value.model === 'string') &&
-    (value.version === undefined || typeof value.version === 'number')
-  );
+  return parsed.success ? parsed.data : null;
 };
 
-export const normalizeArtifact = (artifact: SummaryArtifact): SummaryArtifact => ({
-  ...artifact,
-  highlights: Array.isArray(artifact.highlights)
-    ? artifact.highlights.filter((item) => typeof item === 'string')
-    : [],
-  sourceMetadata: normalizeSourceMetadata(artifact.sourceMetadata),
-  sourcePreview: normalizeString(artifact.sourcePreview),
-  model: artifact.model || 'unknown',
-  version: Number.isFinite(artifact.version) && artifact.version > 0 ? artifact.version : 1,
-  driveFolderId: artifact.driveFolderId || '',
-  driveFileId: artifact.driveFileId || '',
-});
+export const isSummaryArtifact = (value: unknown): value is SummaryArtifact => coerceArtifact(value) !== null;
+
+export const normalizeArtifact = (artifact: SummaryArtifact): SummaryArtifact => {
+  const normalized = coerceArtifact(artifact);
+  if (normalized) {
+    return { ...artifact, ...normalized };
+  }
+
+  return {
+    ...artifact,
+    highlights: [],
+    model: 'unknown',
+    version: 1,
+    driveFolderId: '',
+    driveFileId: '',
+  };
+};
