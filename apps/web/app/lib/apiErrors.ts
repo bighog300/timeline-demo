@@ -14,6 +14,7 @@ export type ApiErrorCode =
   | 'provider_bad_output'
   | 'forbidden'
   | 'bad_request'
+  | 'not_found'
   | 'internal_error';
 
 export type ApiErrorPayload = {
