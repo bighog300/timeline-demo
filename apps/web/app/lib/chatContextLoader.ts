@@ -29,8 +29,16 @@ export type LoadedChatContext = {
   key: string;
   indexMissing: boolean;
   selectionSetName?: string;
+  stats?: {
+    selectionTotal: number;
+    summarizedCount: number;
+    missingCount: number;
+  };
+  missing?: Array<{ source: 'gmail' | 'drive'; id: string; title?: string; dateISO?: string }>;
   debug: { usedIndex: boolean; totalConsidered: number };
 };
+
+export type ChatContextLoadResult = LoadedChatContext;
 
 const SUMMARY_SUFFIX = ' - Summary.json';
 const FALLBACK_LIST_CAP = 200;
@@ -83,6 +91,60 @@ const parseSelectionSet = async (drive: drive_v3.Drive, fileId: string) => {
   const response = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'json' });
   const parsed = DriveSelectionSetJsonSchema.safeParse(response.data);
   return parsed.success ? parsed.data : null;
+};
+
+const buildSelectionCoverage = ({
+  selectionItems,
+  sourceFilter,
+  index,
+  fallbackSummaries,
+}: {
+  selectionItems: Array<{ source: 'gmail' | 'drive'; id: string; title?: string; dateISO?: string }>;
+  sourceFilter: ChatSourceFilter;
+  index: Awaited<ReturnType<typeof readIndexFile>>;
+  fallbackSummaries: ChatContextItem[] | null;
+}) => {
+  const indexMap = new Map<string, string>();
+  if (index) {
+    for (const summary of index.summaries) {
+      indexMap.set(`${summary.source}:${summary.sourceId}`, summary.driveFileId);
+    }
+  }
+
+  const matchedIds = new Set<string>();
+  const missing: Array<{ source: 'gmail' | 'drive'; id: string; title?: string; dateISO?: string }> = [];
+  let selectionTotal = 0;
+
+  for (const item of selectionItems) {
+    if (!sourceAllowed(item.source, sourceFilter)) continue;
+    selectionTotal += 1;
+
+    const key = `${item.source}:${item.id}`;
+    const matchedId = indexMap.get(key);
+    if (matchedId) {
+      matchedIds.add(matchedId);
+      continue;
+    }
+
+    if (fallbackSummaries) {
+      const found = fallbackSummaries.find(
+        (summary) => summary.source === item.source && summary.sourceId === item.id,
+      );
+      if (found) {
+        matchedIds.add(found.artifactId);
+        continue;
+      }
+    }
+
+    missing.push(item);
+  }
+
+  return {
+    matchedIds,
+    missing,
+    selectionTotal,
+    summarizedCount: matchedIds.size,
+  };
 };
 
 export const parseChatContextSelection = (params: {
@@ -143,13 +205,6 @@ export const loadChatContext = async ({
       return { items: [], key: buildContextKey(contextSelection), indexMissing, debug: { usedIndex: Boolean(index), totalConsidered: 0 } };
     }
 
-    const indexMap = new Map<string, string>();
-    if (index) {
-      for (const summary of index.summaries) {
-        indexMap.set(`${summary.source}:${summary.sourceId}`, summary.driveFileId);
-      }
-    }
-
     let fallbackSummaries: ChatContextItem[] | null = null;
     if (!index) {
       const ids = await listRecentSummaryIds(drive, driveFolderId, FALLBACK_LIST_CAP);
@@ -158,29 +213,15 @@ export const loadChatContext = async ({
       ).filter((item): item is ChatContextItem => item !== null);
     }
 
-    const matchedIds = new Set<string>();
-    for (const item of set.items) {
-      if (!sourceAllowed(item.source, contextSelection.sourceFilter)) continue;
-
-      const key = `${item.source}:${item.id}`;
-      const matchedId = indexMap.get(key);
-      if (matchedId) {
-        matchedIds.add(matchedId);
-        continue;
-      }
-
-      if (fallbackSummaries) {
-        const found = fallbackSummaries.find(
-          (summary) => summary.source === item.source && summary.sourceId === item.id,
-        );
-        if (found) {
-          matchedIds.add(found.artifactId);
-        }
-      }
-    }
+    const coverage = buildSelectionCoverage({
+      selectionItems: set.items,
+      sourceFilter: contextSelection.sourceFilter,
+      index,
+      fallbackSummaries,
+    });
 
     const items = (
-      await Promise.all(Array.from(matchedIds).map((fileId) => readSummary(drive, fileId)))
+      await Promise.all(Array.from(coverage.matchedIds).map((fileId) => readSummary(drive, fileId)))
     ).filter((item): item is ChatContextItem => item !== null);
 
     return {
@@ -188,6 +229,12 @@ export const loadChatContext = async ({
       key: buildContextKey(contextSelection, set.name),
       indexMissing,
       selectionSetName: set.name,
+      stats: {
+        selectionTotal: coverage.selectionTotal,
+        summarizedCount: coverage.summarizedCount,
+        missingCount: coverage.missing.length,
+      },
+      missing: coverage.missing,
       debug: { usedIndex: Boolean(index), totalConsidered: items.length },
     };
   }

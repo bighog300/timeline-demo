@@ -4,8 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ChatPageClient from './pageClient';
 
+const mockRouterRefresh = vi.fn();
+
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: mockRouterRefresh }),
   useSearchParams: () => new URLSearchParams(),
 }));
 
@@ -24,6 +26,7 @@ describe('ChatPageClient', () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    mockRouterRefresh.mockReset();
     vi.unstubAllGlobals();
   });
 
@@ -296,5 +299,89 @@ describe('ChatPageClient', () => {
 
     expect(await screen.findByText('Contact your administrator.')).toBeInTheDocument();
     expect(screen.queryByText('Check /admin provider settings.')).not.toBeInTheDocument();
+  });
+
+  it('renders selection coverage text in selection_set mode', () => {
+    localStorage.setItem('timeline.chat.contextPrefs', JSON.stringify({ mode: 'selection_set', recentCount: 8, sourceFilter: 'all', selectionSetId: 'set-1' }));
+    render(
+      <ChatPageClient
+        initialContext={{ mode: 'selection_set', recentCount: 8, sourceFilter: 'all', selectionSetId: 'set-1' }}
+        contextStats={{ selectionTotal: 20, summarizedCount: 12, missingCount: 8 }}
+      />,
+    );
+
+    expect(screen.getByText(/Selection: 20 items · Summarized: 12 · Missing: 8/i)).toBeInTheDocument();
+  });
+
+  it('summarize missing posts to API and refreshes on success', async () => {
+    localStorage.setItem('timeline.chat.contextPrefs', JSON.stringify({ mode: 'selection_set', recentCount: 8, sourceFilter: 'gmail', selectionSetId: 'set-1' }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ sets: [{ driveFileId: 'set-1', title: 'Set One' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ selectionSetId: 'set-1', summarized: 5 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    vi.stubGlobal('fetch', fetchMock);
+    render(
+      <ChatPageClient
+        initialContext={{ mode: 'selection_set', recentCount: 8, sourceFilter: 'gmail', selectionSetId: 'set-1' }}
+        contextStats={{ selectionTotal: 9, summarizedCount: 4, missingCount: 5 }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /summarize missing \(up to 5\)/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/timeline/summarize-missing', expect.objectContaining({
+        method: 'POST',
+      }));
+    });
+
+    const call = fetchMock.mock.calls[1];
+    const body = JSON.parse(String(call?.[1]?.body)) as { selectionSetId: string; limit: number; sourceFilter: string };
+    expect(body).toEqual({ selectionSetId: 'set-1', limit: 5, sourceFilter: 'gmail' });
+    await waitFor(() => {
+      expect(mockRouterRefresh).toHaveBeenCalled();
+    });
+  });
+
+  it('shows summarize missing error message on failure', async () => {
+    localStorage.setItem('timeline.chat.contextPrefs', JSON.stringify({ mode: 'selection_set', recentCount: 8, sourceFilter: 'all', selectionSetId: 'set-1' }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ sets: [{ driveFileId: 'set-1', title: 'Set One' }] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: { message: 'Selection set missing.' } }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+
+    vi.stubGlobal('fetch', fetchMock);
+    render(
+      <ChatPageClient
+        initialContext={{ mode: 'selection_set', recentCount: 8, sourceFilter: 'all', selectionSetId: 'set-1' }}
+        contextStats={{ selectionTotal: 2, summarizedCount: 1, missingCount: 1 }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /summarize missing \(up to 5\)/i }));
+
+    expect(await screen.findByText(/Selection set missing\./i)).toBeInTheDocument();
+    expect(mockRouterRefresh).not.toHaveBeenCalled();
   });
 });

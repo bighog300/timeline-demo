@@ -227,3 +227,21 @@
     grid-template-columns: 1fr;
   }
 }
+
+.coverageActions {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.successMeta {
+  margin: 0;
+  color: #0b7a35;
+  font-size: 0.9rem;
+}
+
+.errorInline {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.9rem;
+}

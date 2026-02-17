@@ -119,6 +119,19 @@ type ChatContextArtifact = {
   driveWebViewLink?: string;
 };
 
+type ContextCoverageStats = {
+  selectionTotal: number;
+  summarizedCount: number;
+  missingCount: number;
+};
+
+type MissingContextItem = {
+  source: 'gmail' | 'drive';
+  id: string;
+  title?: string;
+  dateISO?: string;
+};
+
 type SelectionSetOption = { driveFileId: string; title: string };
 
 export default function ChatPageClient({
@@ -127,12 +140,16 @@ export default function ChatPageClient({
   indexMissing = false,
   contextKey = 'Recent 8 (All)',
   initialContext = { mode: 'recent', recentCount: 8, sourceFilter: 'all' },
+  contextStats,
+  missingItems,
 }: {
   isAdmin?: boolean;
   contextArtifacts?: ChatContextArtifact[];
   indexMissing?: boolean;
   contextKey?: string;
   initialContext?: ChatContextSelection;
+  contextStats?: ContextCoverageStats;
+  missingItems?: MissingContextItem[];
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -149,6 +166,9 @@ export default function ChatPageClient({
   const [contextPrefs, setContextPrefs] = useState<ChatContextSelection>(initialContext);
   const [selectionSets, setSelectionSets] = useState<SelectionSetOption[]>([]);
   const [hasHydratedContext, setHasHydratedContext] = useState(false);
+  const [summarizeMissingLoading, setSummarizeMissingLoading] = useState(false);
+  const [summarizeMissingError, setSummarizeMissingError] = useState<string | null>(null);
+  const [summarizeMissingSuccess, setSummarizeMissingSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (contextPrefs.mode !== 'selection_set') {
@@ -435,6 +455,47 @@ export default function ChatPageClient({
     }
   };
 
+
+  const handleSummarizeMissing = useCallback(async () => {
+    if (!contextPrefs.selectionSetId || contextPrefs.mode !== 'selection_set') {
+      return;
+    }
+
+    setSummarizeMissingLoading(true);
+    setSummarizeMissingError(null);
+    setSummarizeMissingSuccess(null);
+
+    try {
+      const response = await fetch('/api/timeline/summarize-missing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          selectionSetId: contextPrefs.selectionSetId,
+          limit: 5,
+          sourceFilter: contextPrefs.sourceFilter,
+        }),
+      });
+
+      const payload = (await response.json()) as {
+        error?: { message?: string };
+        summarized?: number;
+      };
+
+      if (!response.ok) {
+        setSummarizeMissingError(payload.error?.message ?? `Failed to summarize missing items (${response.status}).`);
+        return;
+      }
+
+      setSummarizeMissingSuccess(`Summarized ${payload.summarized ?? 0} items.`);
+      router.refresh();
+    } catch {
+      setSummarizeMissingError('Failed to summarize missing items.');
+    } finally {
+      setSummarizeMissingLoading(false);
+    }
+  }, [contextPrefs.mode, contextPrefs.selectionSetId, contextPrefs.sourceFilter, router]);
+
+  const effectiveMissingCount = contextStats?.missingCount ?? missingItems?.length ?? 0;
   const hasHistory = messages.length > 0;
   const suggestionList = useMemo(() => suggestions.slice(0, 5), [suggestions]);
   const canClearChat = hasHistory || suggestions.length > 0;
@@ -455,6 +516,25 @@ export default function ChatPageClient({
       <Card>
         <h2>Artifacts in context</h2>
         <p className={styles.emptyMeta}>Using: {contextKey}</p>
+        {contextPrefs.mode === 'selection_set' && contextStats ? (
+          <p className={styles.emptyMeta}>
+            Selection: {contextStats.selectionTotal} items · Summarized: {contextStats.summarizedCount} · Missing: {effectiveMissingCount}
+          </p>
+        ) : null}
+        {contextPrefs.mode === 'selection_set' && contextStats && effectiveMissingCount > 0 ? (
+          <div className={styles.coverageActions}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={handleSummarizeMissing}
+              disabled={summarizeMissingLoading || !contextPrefs.selectionSetId}
+            >
+              {summarizeMissingLoading ? 'Summarizing...' : 'Summarize missing (up to 5)'}
+            </Button>
+            {summarizeMissingSuccess ? <p className={styles.successMeta}>{summarizeMissingSuccess}</p> : null}
+            {summarizeMissingError ? <p className={styles.errorInline}>{summarizeMissingError}</p> : null}
+          </div>
+        ) : null}
         {contextArtifacts.length === 0 ? (
           <p className={styles.emptyMeta}>No saved artifacts found. Create summaries first in Timeline.</p>
         ) : (

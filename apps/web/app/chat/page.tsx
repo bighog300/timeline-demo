@@ -53,6 +53,8 @@ export default async function ChatPage({
       indexMissing={context.indexMissing}
       contextKey={context.key}
       initialContext={selection}
+      contextStats={context.stats}
+      missingItems={context.missing}
     />
   );
 }
