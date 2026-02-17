@@ -164,6 +164,40 @@ describe('POST /api/timeline/summarize-missing', () => {
     expect(mockWriteArtifactToDrive).toHaveBeenCalledTimes(1);
   });
 
+  it('returns forbidden when selection set driveFolderId does not match session folder', async () => {
+    const drive = makeDrive();
+    mockGetGoogleSession.mockResolvedValue({ driveFolderId: 'folder-1' } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockCreateDriveClient.mockReturnValue(drive as never);
+    mockCreateGmailClient.mockReturnValue({} as never);
+    (drive.files.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: {
+        id: 'set-1',
+        name: 'Set',
+        createdAtISO: '2024-01-01T00:00:00.000Z',
+        updatedAtISO: '2024-01-01T00:00:00.000Z',
+        items: [{ source: 'gmail', id: 'id-1' }],
+        version: 1,
+        driveFolderId: 'folder-2',
+        driveFileId: 'set-1',
+      },
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/timeline/summarize-missing', {
+        method: 'POST',
+        body: JSON.stringify({ selectionSetId: 'set-1' }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: 'forbidden', message: 'Selection set is not in the app folder.' },
+      error_code: 'forbidden',
+    });
+  });
+
+
   it('returns ApiError-shaped 404 when selection set is missing', async () => {
     const drive = makeDrive();
     mockGetGoogleSession.mockResolvedValue({ driveFolderId: 'folder-1' } as never);

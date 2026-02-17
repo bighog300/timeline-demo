@@ -201,8 +201,13 @@ export const loadChatContext = async ({
     }
 
     const set = await parseSelectionSet(drive, contextSelection.selectionSetId);
-    if (!set) {
-      return { items: [], key: buildContextKey(contextSelection), indexMissing, debug: { usedIndex: Boolean(index), totalConsidered: 0 } };
+    if (!set || set.driveFolderId !== driveFolderId) {
+      return {
+        items: [],
+        key: `${buildContextKey(contextSelection)} — Selection set unavailable. Choose a saved search from this app folder.`,
+        indexMissing,
+        debug: { usedIndex: Boolean(index), totalConsidered: 0 },
+      };
     }
 
     let fallbackSummaries: ChatContextItem[] | null = null;

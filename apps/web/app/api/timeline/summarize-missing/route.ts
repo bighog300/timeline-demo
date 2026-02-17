@@ -110,6 +110,9 @@ export const POST = async (request: NextRequest) => {
       return respond(jsonError(400, 'invalid_request', 'Selection set payload is invalid.'));
     }
     selection = selectionParsed.data;
+    if (selection.driveFolderId !== driveFolderId) {
+      return respond(jsonError(403, 'forbidden', 'Selection set is not in the app folder.'));
+    }
   } catch (error) {
     const status = (error as { code?: number }).code;
     if (status === 404) {
