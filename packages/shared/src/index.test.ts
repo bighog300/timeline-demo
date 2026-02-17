@@ -1,10 +1,10 @@
-import { describe, expectTypeOf, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import type { EchoResponse, HealthResponse } from './index.js';
+import { SourceType, SummaryArtifactSchema } from './index.js';
 
-describe('shared types', () => {
-  it('exposes the expected response shapes', () => {
-    expectTypeOf<HealthResponse>().toEqualTypeOf<{ ok: boolean }>();
-    expectTypeOf<EchoResponse>().toEqualTypeOf<{ query: unknown; body: unknown }>();
+describe('shared schemas', () => {
+  it('exposes timeline zod schemas', () => {
+    expect(SourceType.options).toEqual(['gmail', 'drive']);
+    expect(SummaryArtifactSchema.shape.title).toBeDefined();
   });
 });

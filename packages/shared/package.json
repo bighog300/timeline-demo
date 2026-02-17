@@ -12,5 +12,15 @@
   "devDependencies": {
     "typescript": "^5.7.2",
     "vitest": "^4.0.18"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "zod": "^3.24.1"
   }
 }
