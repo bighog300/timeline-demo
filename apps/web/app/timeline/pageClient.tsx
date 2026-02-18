@@ -1255,7 +1255,7 @@ export default function TimelinePageClient() {
 
   const handleSaveSelectionSet = async () => {
     if (!saveName.trim()) {
-      setSaveError('Enter a name for this selection set.');
+      setSaveError('Enter a name for this saved selection.');
       setSelectionRequestId(null);
       return;
     }
@@ -1312,7 +1312,7 @@ export default function TimelinePageClient() {
           setSaveError(apiError.message);
           return;
         }
-        setSaveError('Unable to save selection set.');
+        setSaveError('Unable to save selection.');
         return;
       }
 
@@ -1327,7 +1327,7 @@ export default function TimelinePageClient() {
         await fetchSelectionSets();
       }
     } catch {
-      setSaveError('Unable to save selection set.');
+      setSaveError('Unable to save selection.');
       setSelectionRequestId(null);
     } finally {
       setIsSaving(false);
@@ -1414,7 +1414,7 @@ export default function TimelinePageClient() {
 
   const selectionReconnectNotice = (requestId?: string | null) => (
     <div className={styles.notice}>
-      Selection sets need a reconnect. Please <Link href="/connect">connect your Google account</Link>
+      Saved selections need a reconnect. Please <Link href="/connect">connect your Google account</Link>
       .
       <RequestIdNote requestId={requestId} />
     </div>
@@ -1422,7 +1422,7 @@ export default function TimelinePageClient() {
 
   const selectionProvisionNotice = (requestId?: string | null) => (
     <div className={styles.notice}>
-      Provision a Drive folder to store selection sets. Visit <Link href="/connect">/connect</Link>.
+      Provision a Drive folder to store saved selections. Visit <Link href="/connect">/connect</Link>.
       <RequestIdNote requestId={requestId} />
     </div>
   );
@@ -1481,7 +1481,7 @@ export default function TimelinePageClient() {
         <Card className={styles.noticeCard}>
           <h2>Provision your Drive folder</h2>
           <p className={styles.muted}>
-            Timeline needs a Drive folder to store summaries, selection sets, and the index.
+            Timeline needs a Drive folder to store summaries, saved selections, and the index.
           </p>
           <Button variant="secondary" onClick={() => (window.location.href = '/connect')}>
             Provision in /connect
@@ -1554,7 +1554,7 @@ export default function TimelinePageClient() {
       <Card className={styles.searchPanel}>
         <div className={styles.searchHeader}>
           <div>
-            <h2>Search summaries &amp; selection sets</h2>
+            <h2>Search summaries &amp; saved selections</h2>
             <p className={styles.muted}>
               Searches Summary.json and Selection.json artifacts stored inside your app-managed
               Drive folder.
@@ -1568,7 +1568,7 @@ export default function TimelinePageClient() {
               type="text"
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search summaries or selection sets"
+              placeholder="Search summaries or saved selections"
             />
           </label>
           <div className={styles.searchRow}>
@@ -1581,7 +1581,7 @@ export default function TimelinePageClient() {
               >
                 <option value="all">All</option>
                 <option value="summary">Summaries</option>
-                <option value="selection">Selection sets</option>
+                <option value="selection">Saved selections</option>
               </select>
             </label>
             <div className={styles.searchButtons}>
@@ -1655,7 +1655,7 @@ export default function TimelinePageClient() {
               <div key={`${result.kind}-${result.driveFileId}`} className={styles.searchResult}>
                 <div className={styles.searchResultHeader}>
                   <Badge tone={result.kind === 'summary' ? 'accent' : 'neutral'}>
-                    {result.kind === 'summary' ? 'Summary' : 'Selection Set'}
+                    {result.kind === 'summary' ? 'Summary' : 'Saved Selections'}
                   </Badge>
                   <div>
                     <strong>{result.title}</strong>
@@ -1741,7 +1741,7 @@ export default function TimelinePageClient() {
             <strong>{indexCounts.summaries}</strong>
           </div>
           <div>
-            <p className={styles.muted}>Selection sets</p>
+            <p className={styles.muted}>Saved Selections</p>
             <strong>{indexCounts.selections}</strong>
           </div>
         </div>
@@ -1845,14 +1845,14 @@ export default function TimelinePageClient() {
       <Card className={styles.selectionPanel}>
         <div className={styles.selectionHeader}>
           <div>
-            <h2>Selection sets</h2>
+            <h2>Saved Selections</h2>
             <p className={styles.muted}>
               Save the current selection to Drive, or load a saved set from another device.
             </p>
           </div>
           <div className={styles.selectionActions}>
             <Button variant="secondary" onClick={toggleSaveOpen}>
-              {saveOpen ? 'Close save form' : 'Save selection set'}
+              {saveOpen ? 'Close save form' : 'Save selection'}
             </Button>
             <Button variant="ghost" onClick={fetchSelectionSets} disabled={isLoadingSets}>
               {isLoadingSets ? 'Refreshing...' : 'Refresh list'}
@@ -1886,7 +1886,7 @@ export default function TimelinePageClient() {
         ) : null}
         {selectionError === 'generic' ? (
           <div className={styles.notice}>
-            Unable to load selection sets. Please try again.
+            Unable to load saved selections. Please try again.
             <RequestIdNote requestId={selectionRequestId} />
           </div>
         ) : null}
@@ -1895,7 +1895,7 @@ export default function TimelinePageClient() {
         {saveOpen ? (
           <div className={styles.selectionForm}>
             <label className={styles.field}>
-              <span>Set name</span>
+              <span>Selection name</span>
               <input
                 type="text"
                 value={saveName}
@@ -1942,9 +1942,9 @@ export default function TimelinePageClient() {
         ) : null}
 
         <div className={styles.selectionList}>
-          {isLoadingSets ? <p className={styles.muted}>Loading selection sets...</p> : null}
+          {isLoadingSets ? <p className={styles.muted}>Loading saved selections...</p> : null}
           {!isLoadingSets && selectionSets.length === 0 ? (
-            <p className={styles.muted}>No saved selection sets yet.</p>
+            <p className={styles.muted}>No saved selections yet.</p>
           ) : null}
           {selectionSets.map((set) => (
             <div key={set.driveFileId} className={styles.selectionRow}>
@@ -2014,7 +2014,7 @@ export default function TimelinePageClient() {
         ) : null}
         {previewError === 'generic' ? (
           <div className={styles.notice}>
-            Unable to load that selection set.
+            Unable to load that saved selection.
             <RequestIdNote requestId={previewRequestId} />
           </div>
         ) : null}

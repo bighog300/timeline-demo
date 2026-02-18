@@ -139,7 +139,7 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
 
   const loadSavedSelectionSets = async () => {
     setSavedSetsLoading(true);
-    const response = await fetch('/api/selection-sets');
+    const response = await fetch('/api/saved-searches');
     if (response.status === 401) {
       setSearchError('reconnect_required');
       setSavedSetsLoading(false);
@@ -338,7 +338,7 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
     setSavedSearchRetryTarget(null);
 
     try {
-      const setResponse = await fetch(`/api/selection-sets/${id}`);
+      const setResponse = await fetch(`/api/saved-searches/${id}`);
       if (!setResponse.ok) {
         const apiError = await parseApiError(setResponse);
         setSavedSearchRequestId(apiError?.requestId ?? null);
@@ -509,7 +509,7 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
 
   const saveSelectionSet = async () => {
     const defaultTitle = nameContains ? `Drive: ${nameContains}` : 'Drive search';
-    const rawTitle = window.prompt('Save search as selection set', defaultTitle);
+    const rawTitle = window.prompt('Create saved search', defaultTitle);
     if (!rawTitle) {
       return;
     }
@@ -519,7 +519,7 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
       return;
     }
 
-    const response = await fetch('/api/selection-sets', {
+    const response = await fetch('/api/saved-searches', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -538,7 +538,7 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
     });
 
     if (!response.ok) {
-      setNotice('Unable to save selection set. Please try again.');
+      setNotice('Unable to save saved search. Please try again.');
       return;
     }
 
@@ -547,15 +547,15 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
   };
 
   const applySavedSet = async (id: string) => {
-    const response = await fetch(`/api/selection-sets/${id}`);
+    const response = await fetch(`/api/saved-searches/${id}`);
     if (!response.ok) {
-      setNotice('Unable to load selection set.');
+      setNotice('Unable to load saved search.');
       return;
     }
 
     const payload = (await response.json()) as { set?: DriveSelectionSet };
     if (!payload.set || payload.set.kind !== 'drive_selection_set') {
-      setNotice('Unable to load selection set.');
+      setNotice('Unable to load saved search.');
       return;
     }
 
@@ -580,16 +580,16 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
   };
 
   const runSavedSet = async (id: string, title: string) => {
-    const response = await fetch(`/api/selection-sets/${id}`);
+    const response = await fetch(`/api/saved-searches/${id}`);
     if (!response.ok) {
-      setNotice('Unable to load selection set.');
+      setNotice('Unable to load saved search.');
       return;
     }
 
     const payload = (await response.json()) as { set?: DriveSelectionSet };
     const q = payload.set?.query?.q?.trim();
     if (!q) {
-      setNotice('Unable to load selection set.');
+      setNotice('Unable to load saved search.');
       return;
     }
 
@@ -636,7 +636,7 @@ export default function DriveSelectClient({ isConfigured }: DriveSelectClientPro
               Search
             </Button>
             <Button onClick={() => void saveSelectionSet()} variant="ghost" disabled={isAnySummarizing}>
-              Save search as selection set
+              Create saved search
             </Button>
           </div>
         </div>

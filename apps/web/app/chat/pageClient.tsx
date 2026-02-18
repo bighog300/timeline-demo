@@ -177,7 +177,7 @@ export default function ChatPageClient({
 
     const loadSelectionSets = async () => {
       try {
-        const response = await fetch('/api/selection-sets');
+        const response = await fetch('/api/saved-searches');
         if (!response.ok) {
           return;
         }
@@ -595,7 +595,7 @@ export default function ChatPageClient({
                           const href =
                             citation.kind === 'summary' || citation.kind === 'index' || citation.kind === 'original'
                               ? citation.driveWebViewLink ?? `/timeline?artifactId=${encodeURIComponent(citation.artifactId)}`
-                              : '/selection-sets';
+                              : '/saved-searches';
 
                           return (
                             <li key={`${citation.artifactId}-${index}`}>
@@ -646,7 +646,7 @@ export default function ChatPageClient({
                     }
                   >
                     <option value="recent">Recent</option>
-                    <option value="selection_set">Selection Set</option>
+                    <option value="selection_set">Saved Selections</option>
                   </select>
                 </label>
                 {contextPrefs.mode === 'recent' ? (
@@ -668,14 +668,14 @@ export default function ChatPageClient({
                   </label>
                 ) : (
                   <label>
-                    Selection set
+                    Saved Selections
                     <select
                       value={contextPrefs.selectionSetId ?? ''}
                       onChange={(event) =>
                         setContextPrefs((prev) => ({ ...prev, selectionSetId: event.target.value || undefined }))
                       }
                     >
-                      <option value="">Choose a selection set</option>
+                      <option value="">Choose a saved selection</option>
                       {selectionSets.map((set) => (
                         <option key={set.driveFileId} value={set.driveFileId}>
                           {set.title}

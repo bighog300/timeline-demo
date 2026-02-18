@@ -6,9 +6,9 @@ import Link from 'next/link';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import { parseApiError } from '../lib/apiErrors';
-import styles from './selectionSets.module.css';
+import styles from './savedSearches.module.css';
 
-type SelectionSetMetadata = {
+type SavedSearchMetadata = {
   id: string;
   title: string;
   updatedAt: string;
@@ -16,7 +16,7 @@ type SelectionSetMetadata = {
   source: 'gmail' | 'drive';
 };
 
-type SelectionSet = SelectionSetMetadata & {
+type SavedSearch = SavedSearchMetadata & {
   version: 1;
   createdAt: string;
   query: { q: string };
@@ -26,7 +26,7 @@ type RunSummary = {
   id: string;
   action: 'run' | 'summarize';
   status: 'success' | 'partial_success' | 'failed';
-  selectionSet: { id: string; title: string; source: 'gmail' | 'drive'; kind: SelectionSet['kind']; query: { q: string } };
+  selectionSet: { id: string; title: string; source: 'gmail' | 'drive'; kind: SavedSearch['kind']; query: { q: string } };
   startedAt: string;
   finishedAt: string | null;
   counts: {
@@ -91,22 +91,22 @@ const parseStored = (key: string): Array<Record<string, unknown>> => {
   }
 };
 
-export default function SelectionSetsPageClient({ isConfigured }: { isConfigured: boolean }) {
-  const [sets, setSets] = React.useState<SelectionSetMetadata[]>([]);
+export default function SavedSearchesPageClient({ isConfigured }: { isConfigured: boolean }) {
+  const [sets, setSets] = React.useState<SavedSearchMetadata[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [sort, setSort] = useState<'updated_desc' | 'title_asc'>('updated_desc');
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const [resultsSet, setResultsSet] = useState<SelectionSetMetadata | null>(null);
+  const [resultsSet, setResultsSet] = useState<SavedSearchMetadata | null>(null);
   const [results, setResults] = useState<Array<GmailResult | DriveResult>>([]);
   const [nextPageToken, setNextPageToken] = useState<string | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [currentQuery, setCurrentQuery] = useState<string | null>(null);
 
-  const [confirmSummarize, setConfirmSummarize] = useState<SelectionSetMetadata | null>(null);
+  const [confirmSummarize, setConfirmSummarize] = useState<SavedSearchMetadata | null>(null);
   const [summarizeStatus, setSummarizeStatus] = useState<string | null>(null);
   const [summarizeError, setSummarizeError] = useState<string | null>(null);
   const [summarizeDone, setSummarizeDone] = useState<{ total: number; failed: number } | null>(null);
@@ -132,8 +132,8 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
   const loadSets = React.useCallback(async () => {
     setLoading(true);
     setError(null);
-    const response = await fetch('/api/selection-sets');
-    const payload = (await response.json()) as { sets?: SelectionSetMetadata[]; error?: { code?: string; message?: string } };
+    const response = await fetch('/api/saved-searches');
+    const payload = (await response.json()) as { sets?: SavedSearchMetadata[]; error?: { code?: string; message?: string } };
 
     if (!response.ok) {
       setLoading(false);
@@ -159,7 +159,7 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
     action,
     caps,
   }: {
-    set: SelectionSet;
+    set: SavedSearch;
     action: 'run' | 'summarize';
     caps: { maxPages: number; maxItems: number; pageSize: number; batchSize: number };
   }) => {
@@ -203,19 +203,19 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
     [visibleSets],
   );
 
-  const loadSetById = async (id: string): Promise<SelectionSet | null> => {
-    const response = await fetch(`/api/selection-sets/${id}`);
-    const payload = (await response.json()) as { set?: SelectionSet; error?: { code?: string; message?: string } };
+  const loadSetById = async (id: string): Promise<SavedSearch | null> => {
+    const response = await fetch(`/api/saved-searches/${id}`);
+    const payload = (await response.json()) as { set?: SavedSearch; error?: { code?: string; message?: string } };
 
     if (!response.ok || !payload.set) {
-      setRunError(payload.error?.code === 'reconnect_required' ? 'Reconnect required.' : payload.error?.message ?? 'Failed to load selection set.');
+      setRunError(payload.error?.code === 'reconnect_required' ? 'Reconnect required.' : payload.error?.message ?? 'Failed to load saved search.');
       return null;
     }
 
     return payload.set;
   };
 
-  const runSearch = async ({ set, pageToken }: { set: SelectionSetMetadata; pageToken: string | null }) => {
+  const runSearch = async ({ set, pageToken }: { set: SavedSearchMetadata; pageToken: string | null }) => {
     setBusyId(set.id);
     setRunError(null);
     const fullSet = await loadSetById(set.id);
@@ -328,7 +328,7 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
     window.localStorage.setItem(key, JSON.stringify(Array.from(merged.values()).slice(0, MAX_SELECTION_ITEMS)));
   };
 
-  const summarize = async (set: SelectionSetMetadata) => {
+  const summarize = async (set: SavedSearchMetadata) => {
     setBusyId(set.id);
     setSummarizeStatus('Collecting items (page 1)...');
     setSummarizeError(null);
@@ -481,7 +481,7 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
 
   const saveRename = async (id: string) => {
     setBusyId(id);
-    const response = await fetch(`/api/selection-sets/${id}`, {
+    const response = await fetch(`/api/saved-searches/${id}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ title: renameTitle }),
@@ -502,7 +502,7 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
 
   const confirmDelete = async (id: string) => {
     setBusyId(id);
-    const response = await fetch(`/api/selection-sets/${id}`, { method: 'DELETE' });
+    const response = await fetch(`/api/saved-searches/${id}`, { method: 'DELETE' });
     if (!response.ok) {
       setError('Delete failed.');
       setBusyId(null);
@@ -515,11 +515,11 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
     setBusyId(null);
   };
 
-  const renderGroup = (title: string, items: SelectionSetMetadata[]) => (
+  const renderGroup = (title: string, items: SavedSearchMetadata[]) => (
     <section className={styles.group}>
       <h2>{title}</h2>
       {items.length === 0 ? (
-        <p className={styles.empty}>No selection sets.</p>
+        <p className={styles.empty}>No saved searches.</p>
       ) : (
         <ul className={styles.list}>
           {items.map((set) => (
@@ -551,7 +551,7 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
 
               {deleteId === set.id ? (
                 <div className={styles.confirmBox}>
-                  <p>Type DELETE to remove this selection set artifact.</p>
+                  <p>Type DELETE to remove this saved search artifact.</p>
                   <input value={deleteConfirm} onChange={(event) => setDeleteConfirm(event.target.value)} aria-label={`Confirm delete ${set.title}`} />
                   <div className={styles.actions}>
                     <Button onClick={() => void confirmDelete(set.id)} disabled={deleteConfirm !== 'DELETE' || busyId === set.id}>Confirm delete</Button>
@@ -569,12 +569,12 @@ export default function SelectionSetsPageClient({ isConfigured }: { isConfigured
   return (
     <div className={styles.page}>
       <header className={styles.header}>
-        <h1>Selection Sets Dashboard</h1>
+        <h1>Saved Searches Dashboard</h1>
         <p className={styles.muted}>Drive-backed saved searches for Gmail and Drive.</p>
       </header>
 
       {!isConfigured ? <p className={styles.error}>Google auth is not configured.</p> : null}
-      {loading ? <p>Loading selection sets…</p> : null}
+      {loading ? <p>Loading saved searches…</p> : null}
       {error ? <p className={styles.error}>{error}</p> : null}
 
       <section className={styles.controls}>

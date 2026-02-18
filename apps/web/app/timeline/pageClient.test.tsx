@@ -198,7 +198,7 @@ describe('TimelinePageClient', () => {
       expect(screen.getByText('Index')).toBeInTheDocument();
       expect(screen.getByText('Present')).toBeInTheDocument();
       expect(screen.getAllByText('Summaries').length).toBeGreaterThan(0);
-      expect(screen.getAllByText('Selection sets').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Saved Selections').length).toBeGreaterThan(0);
     });
   });
 
@@ -624,14 +624,14 @@ describe('TimelinePageClient', () => {
 
     render(<TimelinePageClient />);
 
-    fireEvent.change(screen.getByPlaceholderText(/search summaries or selection sets/i), {
+    fireEvent.change(screen.getByPlaceholderText(/search summaries or saved selections/i), {
       target: { value: 'roadmap' },
     });
     fireEvent.click(screen.getByRole('button', { name: /search/i }));
 
     await waitFor(() => {
       expect(screen.getByText(/roadmap set/i)).toBeInTheDocument();
-      expect(screen.getAllByText(/selection set/i).length).toBeGreaterThan(0);
+      expect(screen.getAllByText(/saved selection/i).length).toBeGreaterThan(0);
       expect(screen.getByRole('link', { name: /open in drive/i })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /load set/i })).toBeInTheDocument();
     });
@@ -647,7 +647,7 @@ describe('TimelinePageClient', () => {
 
     render(<TimelinePageClient />);
 
-    fireEvent.change(screen.getByPlaceholderText(/search summaries or selection sets/i), {
+    fireEvent.change(screen.getByPlaceholderText(/search summaries or saved selections/i), {
       target: { value: 'a' },
     });
     fireEvent.click(screen.getByRole('button', { name: /search/i }));
@@ -670,7 +670,7 @@ describe('TimelinePageClient', () => {
 
     render(<TimelinePageClient />);
 
-    fireEvent.change(screen.getByPlaceholderText(/search summaries or selection sets/i), {
+    fireEvent.change(screen.getByPlaceholderText(/search summaries or saved selections/i), {
       target: { value: 'plan' },
     });
     fireEvent.click(screen.getByRole('button', { name: /search/i }));
@@ -694,7 +694,7 @@ describe('TimelinePageClient', () => {
 
     render(<TimelinePageClient />);
 
-    fireEvent.change(screen.getByPlaceholderText(/search summaries or selection sets/i), {
+    fireEvent.change(screen.getByPlaceholderText(/search summaries or saved selections/i), {
       target: { value: 'plan' },
     });
     fireEvent.click(screen.getByRole('button', { name: /search/i }));
@@ -784,7 +784,7 @@ describe('TimelinePageClient', () => {
     });
   });
 
-  it('saves a selection set and shows a success banner', async () => {
+  it('saves a selection and shows a success banner', async () => {
     setSelections();
     mockFetch(withIndexGet((url, init) => {
       if (url === '/api/timeline/selection/list') {
@@ -798,7 +798,7 @@ describe('TimelinePageClient', () => {
 
     render(<TimelinePageClient />);
 
-    fireEvent.click(screen.getByRole('button', { name: /save selection set/i }));
+    fireEvent.click(screen.getByRole('button', { name: /save selection/i }));
     fireEvent.change(screen.getByPlaceholderText(/q2 launch research/i), {
       target: { value: 'Sprint 1' },
     });
@@ -839,7 +839,7 @@ describe('TimelinePageClient', () => {
     });
   });
 
-  it('merges a loaded selection set into local storage', async () => {
+  it('merges a loaded selection into local storage', async () => {
     setSelections();
     window.localStorage.setItem(
       'timeline.driveSelections',
@@ -1082,7 +1082,7 @@ describe('TimelinePageClient', () => {
       expect(screen.getByRole('heading', { name: 'Hello' })).toBeInTheDocument();
     });
 
-    fireEvent.change(screen.getByPlaceholderText(/search summaries or selection sets/i), {
+    fireEvent.change(screen.getByPlaceholderText(/search summaries or saved selections/i), {
       target: { value: 'hello' },
     });
     fireEvent.click(screen.getByRole('button', { name: /search/i }));

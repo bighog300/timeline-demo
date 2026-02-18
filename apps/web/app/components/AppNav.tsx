@@ -29,9 +29,9 @@ const navItems: NavItem[] = [
     match: (pathname) => pathname.startsWith('/select/drive'),
   },
   {
-    href: '/selection-sets',
-    label: 'Selection Sets',
-    match: (pathname) => pathname.startsWith('/selection-sets'),
+    href: '/saved-searches',
+    label: 'Saved Searches',
+    match: (pathname) => pathname.startsWith('/saved-searches'),
   },
   {
     href: '/timeline',

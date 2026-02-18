@@ -59,7 +59,7 @@ describe('GmailSelectClient', () => {
     await screen.findByText(/Saved search: Invoices · Query:/i);
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/selection-sets/set-1');
+      expect(fetchMock).toHaveBeenCalledWith('/api/saved-searches/set-1');
     });
 
     expect(fetchMock).toHaveBeenCalledWith('/api/google/gmail/search', {

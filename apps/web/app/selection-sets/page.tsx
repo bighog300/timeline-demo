@@ -1,6 +1,5 @@
-import { isAuthConfigured } from '../lib/googleAuth';
-import SelectionSetsPageClient from './pageClient';
+import { redirect } from 'next/navigation';
 
-export default function SelectionSetsPage() {
-  return <SelectionSetsPageClient isConfigured={isAuthConfigured()} />;
+export default function LegacySelectionSetsPage() {
+  redirect('/saved-searches');
 }

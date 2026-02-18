@@ -2,9 +2,9 @@ import React from 'react';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import SelectionSetsPageClient from './pageClient';
+import SavedSearchesPageClient from './pageClient';
 
-describe('SelectionSetsPageClient', () => {
+describe('SavedSearchesPageClient', () => {
   afterEach(() => {
     cleanup();
     vi.restoreAllMocks();
@@ -13,7 +13,7 @@ describe('SelectionSetsPageClient', () => {
   it('loads and renders both gmail and drive sets', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === '/api/selection-sets') {
+      if (url === '/api/saved-searches') {
         return {
           ok: true,
           status: 200,
@@ -39,7 +39,7 @@ describe('SelectionSetsPageClient', () => {
 
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<SelectionSetsPageClient isConfigured />);
+    render(<SavedSearchesPageClient isConfigured />);
 
     await screen.findByText('Gmail invoices');
     await screen.findByText('Drive PDFs');
@@ -53,7 +53,7 @@ describe('SelectionSetsPageClient', () => {
       .fn()
       .mockImplementation(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url === '/api/selection-sets') {
+        if (url === '/api/saved-searches') {
           return {
             ok: true,
             status: 200,
@@ -67,7 +67,7 @@ describe('SelectionSetsPageClient', () => {
           return { ok: true, status: 200, json: async () => ({ runs: [] }) } as Response;
         }
 
-        if (url === '/api/selection-sets/g-1') {
+        if (url === '/api/saved-searches/g-1') {
           return {
             ok: true,
             status: 200,
@@ -80,7 +80,7 @@ describe('SelectionSetsPageClient', () => {
 
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<SelectionSetsPageClient isConfigured />);
+    render(<SavedSearchesPageClient isConfigured />);
     await screen.findByText('Old title');
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Rename' })[0]);
@@ -89,7 +89,7 @@ describe('SelectionSetsPageClient', () => {
 
     await screen.findByText('New title');
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/selection-sets/g-1', {
+      expect(fetchMock).toHaveBeenCalledWith('/api/saved-searches/g-1', {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ title: 'New title' }),
@@ -102,7 +102,7 @@ describe('SelectionSetsPageClient', () => {
       .fn()
       .mockImplementation(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url === '/api/selection-sets') {
+        if (url === '/api/saved-searches') {
           return {
             ok: true,
             status: 200,
@@ -116,7 +116,7 @@ describe('SelectionSetsPageClient', () => {
           return { ok: true, status: 200, json: async () => ({ runs: [] }) } as Response;
         }
 
-        if (url === '/api/selection-sets/d-1') {
+        if (url === '/api/saved-searches/d-1') {
           return { ok: true, status: 200, json: async () => ({ ok: true }) } as Response;
         }
 
@@ -125,7 +125,7 @@ describe('SelectionSetsPageClient', () => {
 
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<SelectionSetsPageClient isConfigured />);
+    render(<SavedSearchesPageClient isConfigured />);
     await screen.findByText('Drive PDFs');
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
@@ -137,7 +137,7 @@ describe('SelectionSetsPageClient', () => {
     fireEvent.click(confirmButton);
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/selection-sets/d-1', { method: 'DELETE' });
+      expect(fetchMock).toHaveBeenCalledWith('/api/saved-searches/d-1', { method: 'DELETE' });
     });
     await waitFor(() => {
       expect(screen.queryByText('Drive PDFs')).not.toBeInTheDocument();
@@ -147,7 +147,7 @@ describe('SelectionSetsPageClient', () => {
   it('renders recent runs list from /api/runs', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url === '/api/selection-sets') {
+      if (url === '/api/saved-searches') {
         return { ok: true, status: 200, json: async () => ({ sets: [] }) } as Response;
       }
 
@@ -184,7 +184,7 @@ describe('SelectionSetsPageClient', () => {
 
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<SelectionSetsPageClient isConfigured />);
+    render(<SavedSearchesPageClient isConfigured />);
 
     await screen.findByText('Invoices');
     expect(screen.getByText('partial_success')).toBeInTheDocument();
