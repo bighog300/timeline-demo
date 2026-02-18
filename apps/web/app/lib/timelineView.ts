@@ -44,6 +44,8 @@ export type TimelineFilters = {
   kind: 'all' | TimelineEntryKind;
   tag: 'all' | string;
   text: string;
+  dateFromISO?: string;
+  dateToISO?: string;
 };
 
 export type TimelineGroup = {
@@ -171,6 +173,23 @@ export const filterEntries = (entries: TimelineEntry[], filters: TimelineFilters
     }
     if (tag && !entry.tags.includes(tag)) {
       return false;
+    }
+    if (filters.dateFromISO || filters.dateToISO) {
+      const date = toValidDate(entry.dateISO);
+      if (date) {
+        if (filters.dateFromISO) {
+          const from = toValidDate(filters.dateFromISO);
+          if (from && date.getTime() < from.getTime()) {
+            return false;
+          }
+        }
+        if (filters.dateToISO) {
+          const to = toValidDate(filters.dateToISO);
+          if (to && date.getTime() > to.getTime()) {
+            return false;
+          }
+        }
+      }
     }
     if (query) {
       const haystack = `${entry.title} ${entry.previewText}`.toLowerCase();

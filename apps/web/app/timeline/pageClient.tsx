@@ -113,6 +113,8 @@ const DEFAULT_FILTERS: TimelineFilters = {
   kind: 'all',
   tag: 'all',
   text: '',
+  dateFromISO: '',
+  dateToISO: '',
 };
 
 const RequestIdNote = ({ requestId }: { requestId?: string | null }) =>
@@ -183,6 +185,8 @@ const parseStoredFilters = (): TimelineFilters => {
       ...DEFAULT_FILTERS,
       ...parsed,
       text: typeof parsed?.text === 'string' ? parsed.text : '',
+      dateFromISO: typeof parsed?.dateFromISO === 'string' ? parsed.dateFromISO : '',
+      dateToISO: typeof parsed?.dateToISO === 'string' ? parsed.dateToISO : '',
     };
   } catch {
     return DEFAULT_FILTERS;
@@ -489,7 +493,9 @@ export default function TimelinePageClient() {
     filters.status !== 'all' ||
     filters.kind !== 'all' ||
     filters.tag !== 'all' ||
-    filters.text.trim().length > 0;
+    filters.text.trim().length > 0 ||
+    Boolean(filters.dateFromISO) ||
+    Boolean(filters.dateToISO);
 
   useEffect(() => {
     if (filters.tag !== 'all' && !tagOptions.includes(filters.tag)) {
@@ -2158,6 +2164,34 @@ export default function TimelinePageClient() {
                     value={filters.text}
                     onChange={(event) => updateFilters({ text: event.target.value })}
                     placeholder="Filter by title or preview"
+                  />
+                </label>
+                <label className={styles.field}>
+                  <span>Date from</span>
+                  <input
+                    type="date"
+                    value={(filters.dateFromISO ?? '').slice(0, 10)}
+                    onChange={(event) =>
+                      updateFilters({
+                        dateFromISO: event.target.value
+                          ? new Date(`${event.target.value}T00:00:00.000Z`).toISOString()
+                          : '',
+                      })
+                    }
+                  />
+                </label>
+                <label className={styles.field}>
+                  <span>Date to</span>
+                  <input
+                    type="date"
+                    value={(filters.dateToISO ?? '').slice(0, 10)}
+                    onChange={(event) =>
+                      updateFilters({
+                        dateToISO: event.target.value
+                          ? new Date(`${event.target.value}T23:59:59.999Z`).toISOString()
+                          : '',
+                      })
+                    }
                   />
                 </label>
               </div>

@@ -70,6 +70,50 @@ describe('shared schemas', () => {
     expect(result.success).toBe(false);
   });
 
+  it('accepts optional evidence and valid dateConfidence', () => {
+    const result = SummaryArtifactSchema.safeParse({
+      artifactId: 'artifact-1',
+      source: 'gmail',
+      sourceId: 'source-1',
+      title: 'A title',
+      createdAtISO: '2026-01-01T12:00:00Z',
+      summary: 'Summary text',
+      highlights: ['One'],
+      evidence: [
+        {
+          sourceId: 'source-1',
+          excerpt: 'Relevant quoted evidence',
+        },
+      ],
+      dateConfidence: 0.8,
+      driveFolderId: 'folder-1',
+      driveFileId: 'file-1',
+      model: 'test-model',
+      version: 1,
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects dateConfidence outside 0..1', () => {
+    const result = SummaryArtifactSchema.safeParse({
+      artifactId: 'artifact-1',
+      source: 'gmail',
+      sourceId: 'source-1',
+      title: 'A title',
+      createdAtISO: '2026-01-01T12:00:00Z',
+      summary: 'Summary text',
+      highlights: ['One'],
+      dateConfidence: 1.2,
+      driveFolderId: 'folder-1',
+      driveFileId: 'file-1',
+      model: 'test-model',
+      version: 1,
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it('accepts admin settings without optional prompt fields', () => {
     const result = AdminSettingsSchema.safeParse({
       type: 'admin_settings',

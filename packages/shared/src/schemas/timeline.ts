@@ -31,6 +31,17 @@ export const SummaryArtifactSchema = z
     contentDateISO: isoDateString.optional(),
     summary: z.string(),
     highlights: z.array(z.string()),
+    evidence: z
+      .array(
+        z
+          .object({
+            sourceId: z.string().optional(),
+            excerpt: z.string(),
+          })
+          .strict(),
+      )
+      .optional(),
+    dateConfidence: z.number().min(0).max(1).optional(),
     sourceMetadata: SourceMetadataSchema.optional(),
     sourcePreview: z.string().optional(),
     driveFolderId: z.string(),
@@ -198,6 +209,26 @@ export const SummarizeResponseSchema = z
   })
   .strict();
 
+export const ArtifactIndexEntrySchema = z
+  .object({
+    id: z.string().min(1),
+    driveFileId: z.string().min(1),
+    title: z.string().optional(),
+    contentDateISO: isoDateString.optional(),
+    tags: z.array(z.string()).optional(),
+    participants: z.array(z.string()).optional(),
+    updatedAtISO: isoDateString.optional(),
+  })
+  .strict();
+
+export const ArtifactIndexSchema = z
+  .object({
+    version: z.literal(1),
+    updatedAtISO: isoDateString,
+    artifacts: z.array(ArtifactIndexEntrySchema),
+  })
+  .strict();
+
 export const ApiErrorSchema = z
   .object({
     error: z
@@ -228,3 +259,5 @@ export type AdminSettings = z.infer<typeof AdminSettingsSchema>;
 export type SummarizeRequest = z.infer<typeof SummarizeRequestSchema>;
 export type SummarizeResponse = z.infer<typeof SummarizeResponseSchema>;
 export type ApiError = z.infer<typeof ApiErrorSchema>;
+export type ArtifactIndexEntry = z.infer<typeof ArtifactIndexEntrySchema>;
+export type ArtifactIndex = z.infer<typeof ArtifactIndexSchema>;

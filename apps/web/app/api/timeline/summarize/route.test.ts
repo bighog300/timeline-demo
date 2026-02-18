@@ -26,6 +26,10 @@ vi.mock('../../../lib/writeArtifactToDrive', () => ({
   writeArtifactToDrive: vi.fn(),
 }));
 
+vi.mock('../../../lib/timeline/artifactIndex', () => ({
+  upsertArtifactIndex: vi.fn(),
+}));
+
 import { getGoogleAccessToken, getGoogleSession } from '../../../lib/googleAuth';
 import { createDriveClient } from '../../../lib/googleDrive';
 import { createGmailClient } from '../../../lib/googleGmail';
