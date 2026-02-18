@@ -239,6 +239,99 @@ describe('shared schemas', () => {
     expect(withNull.success).toBe(true);
   });
 
+  it('accepts suggested action calendarEvent metadata when valid', () => {
+    const result = SummaryArtifactSchema.safeParse({
+      artifactId: 'artifact-1',
+      source: 'gmail',
+      sourceId: 'source-1',
+      title: 'A title',
+      createdAtISO: '2026-01-01T12:00:00Z',
+      summary: 'Summary text',
+      highlights: ['One'],
+      suggestedActions: [
+        {
+          id: 'act-calendar',
+          type: 'calendar',
+          text: 'Schedule planning session',
+          dueDateISO: '2026-01-04T10:00:00Z',
+          status: 'accepted',
+          calendarEvent: {
+            id: 'event-1',
+            htmlLink: 'https://calendar.google.com/calendar/event?eid=abc',
+            startISO: '2026-01-04T10:00:00Z',
+            endISO: '2026-01-04T11:00:00Z',
+            createdAtISO: '2026-01-01T12:01:00Z',
+          },
+        },
+      ],
+      driveFolderId: 'folder-1',
+      driveFileId: 'file-1',
+      model: 'test-model',
+      version: 1,
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects malformed suggested action calendarEvent metadata', () => {
+    const result = SummaryArtifactSchema.safeParse({
+      artifactId: 'artifact-1',
+      source: 'gmail',
+      sourceId: 'source-1',
+      title: 'A title',
+      createdAtISO: '2026-01-01T12:00:00Z',
+      summary: 'Summary text',
+      highlights: ['One'],
+      suggestedActions: [
+        {
+          id: 'act-calendar',
+          type: 'calendar',
+          text: 'Schedule planning session',
+          status: 'accepted',
+          calendarEvent: {
+            id: '',
+            htmlLink: 'not-a-link',
+            startISO: 'invalid-date',
+            endISO: '2026-01-04T11:00:00Z',
+            createdAtISO: '2026-01-01T12:01:00Z',
+          },
+        },
+      ],
+      driveFolderId: 'folder-1',
+      driveFileId: 'file-1',
+      model: 'test-model',
+      version: 1,
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('remains backward compatible when calendarEvent is omitted', () => {
+    const result = SummaryArtifactSchema.safeParse({
+      artifactId: 'artifact-1',
+      source: 'gmail',
+      sourceId: 'source-1',
+      title: 'A title',
+      createdAtISO: '2026-01-01T12:00:00Z',
+      summary: 'Summary text',
+      highlights: ['One'],
+      suggestedActions: [
+        {
+          id: 'act-task',
+          type: 'task',
+          text: 'Prepare next steps',
+          status: 'proposed',
+        },
+      ],
+      driveFolderId: 'folder-1',
+      driveFileId: 'file-1',
+      model: 'test-model',
+      version: 1,
+    });
+
+    expect(result.success).toBe(true);
+  });
+
   it('accepts admin settings without optional prompt fields', () => {
     const result = AdminSettingsSchema.safeParse({
       type: 'admin_settings',

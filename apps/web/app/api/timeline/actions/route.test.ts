@@ -10,13 +10,35 @@ vi.mock('../../../lib/googleDrive', () => ({
 }));
 
 vi.mock('../../../lib/timeline/artifactIndex', () => ({
-  loadArtifactIndex: vi.fn().mockResolvedValue({ index: { version: 1, updatedAtISO: '2024-01-01T00:00:00Z', artifacts: [] }, fileId: 'index-1' }),
+  loadArtifactIndex: vi.fn().mockResolvedValue({
+    index: {
+      version: 1,
+      updatedAtISO: '2024-01-01T00:00:00Z',
+      artifacts: [{ id: 'artifact-file-1', driveFileId: 'artifact-file-1', updatedAtISO: '2024-01-01T00:00:00Z' }],
+    },
+    fileId: 'index-1',
+  }),
   saveArtifactIndex: vi.fn(),
   upsertArtifactIndexEntry: vi.fn((index, entry) => ({ ...index, artifacts: [entry] })),
 }));
 
+vi.mock('../../../lib/googleCalendar', () => ({
+  createCalendarEvent: vi.fn(),
+  GoogleCalendarApiError: class GoogleCalendarApiError extends Error {
+    constructor(
+      public status: number,
+      public code: string,
+      message: string,
+      public details?: unknown,
+    ) {
+      super(message);
+    }
+  },
+}));
+
 import { getGoogleAccessToken, getGoogleSession } from '../../../lib/googleAuth';
 import { createDriveClient } from '../../../lib/googleDrive';
+import { saveArtifactIndex, upsertArtifactIndexEntry } from '../../../lib/timeline/artifactIndex';
 import { POST } from './route';
 
 const mockGetGoogleSession = vi.mocked(getGoogleSession);
@@ -76,6 +98,13 @@ describe('POST /api/timeline/actions', () => {
     expect(update).toHaveBeenCalled();
     const body = JSON.parse(update.mock.calls[0][0].media.body as string);
     expect(body.suggestedActions[0].status).toBe('accepted');
+    expect(body.suggestedActions[0].updatedAtISO).toBeDefined();
+    expect(body.updatedAtISO).toBeDefined();
+    expect(upsertArtifactIndexEntry).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ updatedAtISO: expect.any(String) }),
+    );
+    expect(saveArtifactIndex).toHaveBeenCalled();
   });
 
   it('dismiss action updates status and persists', async () => {

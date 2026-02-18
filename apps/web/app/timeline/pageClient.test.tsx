@@ -1141,4 +1141,78 @@ describe('TimelinePageClient', () => {
     });
   });
 
+  it('renders calendar event link after accepting calendar action and shows inline error on failure', async () => {
+    setSelections();
+    const artifactWithCalendarAction = {
+      ...artifactWithMetadata,
+      suggestedActions: [
+        { id: 'act-calendar', type: 'calendar', text: 'Schedule planning', status: 'proposed', dueDateISO: '2024-02-10T09:00:00Z' },
+      ],
+    };
+
+    let attempt = 0;
+    mockFetch(withIndexGet((url, init) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url === '/api/timeline/summarize') {
+        return new Response(JSON.stringify({ artifacts: [artifactWithCalendarAction], failed: [] }), { status: 200 });
+      }
+      if (url === '/api/timeline/actions' && init?.method === 'POST') {
+        attempt += 1;
+        if (attempt === 1) {
+          return new Response(JSON.stringify({ error: 'calendar_event_failed' }), { status: 502 });
+        }
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            artifactId: 'file-1',
+            actionId: 'act-calendar',
+            status: 'accepted',
+            calendarEvent: {
+              id: 'evt-1',
+              htmlLink: 'https://calendar.google.com/calendar/event?eid=abc',
+              startISO: '2024-02-10T09:00:00Z',
+              endISO: '2024-02-10T10:00:00Z',
+              createdAtISO: '2024-02-01T00:00:00Z',
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /generate summaries/i })).toBeEnabled();
+    });
+    fireEvent.click(screen.getByRole('button', { name: /generate summaries/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/schedule planning/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Accept$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/could not create google calendar event/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Accept$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Accepted / dismissed')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByText('Accepted / dismissed'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('link', { name: /view event/i })).toHaveAttribute(
+        'href',
+        'https://calendar.google.com/calendar/event?eid=abc',
+      );
+    });
+  });
+
 });
