@@ -99,6 +99,21 @@ type SearchError =
 
 type IndexError = ApiSurfaceError;
 type ActionDecisionError = string | null;
+type ActionCalendarEvent = {
+  id: string;
+  htmlLink: string;
+  startISO: string;
+  endISO: string;
+  createdAtISO: string;
+};
+
+type ActionDecisionResponse = {
+  ok: true;
+  artifactId: string;
+  actionId: string;
+  status: 'accepted' | 'dismissed';
+  calendarEvent?: ActionCalendarEvent;
+};
 
 const GMAIL_KEY = 'timeline.gmailSelections';
 const DRIVE_KEY = 'timeline.driveSelections';
@@ -366,6 +381,7 @@ export default function TimelinePageClient() {
   const [isIndexRefreshing, setIsIndexRefreshing] = useState(false);
   const [indexError, setIndexError] = useState<IndexError>(null);
   const [actionError, setActionError] = useState<ActionDecisionError>(null);
+  const [actionErrorsByKey, setActionErrorsByKey] = useState<Record<string, string>>({});
   const [pendingActionKeys, setPendingActionKeys] = useState<Set<string>>(new Set());
   const [indexRequestId, setIndexRequestId] = useState<string | null>(null);
   const [indexMessage, setIndexMessage] = useState<string | null>(null);
@@ -1251,7 +1267,12 @@ export default function TimelinePageClient() {
 
 
   const updateArtifactActionsLocal = useCallback(
-    (entryKey: string, actionId: string, status: 'accepted' | 'dismissed') => {
+    (
+      entryKey: string,
+      actionId: string,
+      status: 'accepted' | 'dismissed',
+      options?: { calendarEvent?: ActionCalendarEvent },
+    ) => {
       const artifact = artifacts[entryKey];
       if (!artifact?.suggestedActions?.length) {
         return artifacts;
@@ -1264,6 +1285,7 @@ export default function TimelinePageClient() {
             ? {
                 ...action,
                 status,
+                ...(options?.calendarEvent ? { calendarEvent: options.calendarEvent } : {}),
                 updatedAtISO: new Date().toISOString(),
               }
             : action,
@@ -1283,6 +1305,11 @@ export default function TimelinePageClient() {
       setActionError(null);
       const pendingKey = `${entryKey}:${actionId}`;
       const prevArtifacts = artifacts;
+      setActionErrorsByKey((prev) => {
+        const next = { ...prev };
+        delete next[pendingKey];
+        return next;
+      });
 
       setPendingActionKeys((prev) => new Set(prev).add(pendingKey));
       setArtifacts(updateArtifactActionsLocal(entryKey, actionId, optimisticStatus));
@@ -1298,7 +1325,19 @@ export default function TimelinePageClient() {
           setArtifacts(prevArtifacts);
           window.localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(prevArtifacts));
           const apiError = await parseApiError(response);
+          if (apiError?.code === 'calendar_event_failed') {
+            setActionErrorsByKey((prev) => ({
+              ...prev,
+              [pendingKey]: 'Could not create Google Calendar event. Please try again.',
+            }));
+          }
           setActionError(apiError?.message ?? 'Unable to update action status.');
+          return;
+        }
+
+        const payload = (await response.json()) as ActionDecisionResponse;
+        if (payload.calendarEvent) {
+          setArtifacts(updateArtifactActionsLocal(entryKey, actionId, payload.status, { calendarEvent: payload.calendarEvent }));
         }
       } catch {
         setArtifacts(prevArtifacts);
@@ -2398,6 +2437,9 @@ export default function TimelinePageClient() {
                                               <li key={key} className={styles.actionItem}>
                                                 <div>
                                                   <strong>{action.type}</strong>: {action.text}
+                                                  {actionErrorsByKey[key] ? (
+                                                    <p className={styles.actionInlineError}>{actionErrorsByKey[key]}</p>
+                                                  ) : null}
                                                 </div>
                                                 <div className={styles.actionButtons}>
                                                   <Button
@@ -2435,6 +2477,16 @@ export default function TimelinePageClient() {
                                                 <li key={`${entry.key}:${action.id ?? action.text}`} className={styles.actionItemMuted}>
                                                   <span>
                                                     <strong>{action.type}</strong>: {action.text}
+                                                    {action.calendarEvent ? (
+                                                      <span className={styles.calendarEventMeta}>
+                                                        <a href={action.calendarEvent.htmlLink} target="_blank" rel="noreferrer">
+                                                          View event
+                                                        </a>
+                                                        <span>
+                                                          {action.calendarEvent.startISO} → {action.calendarEvent.endISO}
+                                                        </span>
+                                                      </span>
+                                                    ) : null}
                                                   </span>
                                                   <span>{action.status}</span>
                                                 </li>

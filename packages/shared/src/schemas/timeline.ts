@@ -56,6 +56,17 @@ export const SummaryArtifactSchema = z
             status: z.enum(['proposed', 'accepted', 'dismissed']).optional(),
             createdAtISO: isoDateString.optional(),
             updatedAtISO: isoDateString.optional(),
+            calendarEvent: z
+              .object({
+                id: z.string().min(1),
+                htmlLink: z.string().url(),
+                startISO: isoDateString,
+                endISO: isoDateString,
+                createdAtISO: isoDateString,
+              })
+              .strict()
+              .nullable()
+              .optional(),
           })
           .strict(),
       )

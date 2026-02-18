@@ -3,6 +3,7 @@ import { DriveSummaryJsonSchema } from '@timeline/shared';
 import { z } from 'zod';
 
 import { jsonError } from '../../../lib/apiErrors';
+import { createCalendarEvent, GoogleCalendarApiError } from '../../../lib/googleCalendar';
 import { getGoogleAccessToken, getGoogleSession } from '../../../lib/googleAuth';
 import { createDriveClient } from '../../../lib/googleDrive';
 import {
@@ -26,6 +27,26 @@ const DecisionRequestSchema = z
   .strict();
 
 const ACTIONS_LOG_FILE = 'actions_log.jsonl';
+
+const CalendarEventSchema = z
+  .object({
+    id: z.string().min(1),
+    htmlLink: z.string().url(),
+    startISO: z.string().min(1),
+    endISO: z.string().min(1),
+    createdAtISO: z.string().min(1),
+  })
+  .strict();
+
+const ActionDecisionResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    artifactId: z.string().min(1),
+    actionId: z.string().min(1),
+    status: z.enum(['accepted', 'dismissed']),
+    calendarEvent: CalendarEventSchema.optional(),
+  })
+  .strict();
 
 const parseDriveJson = (data: unknown): unknown => {
   if (typeof data === 'string') {
@@ -200,19 +221,91 @@ export const POST = async (request: NextRequest) => {
   const status = body.decision === 'accept' ? 'accepted' : 'dismissed';
   const nowISO = new Date().toISOString();
   const existingActions = artifact.suggestedActions ?? [];
-  const nextActions = existingActions.map((action) =>
-    action.id === body.actionId
-      ? {
-          ...action,
-          status,
-          updatedAtISO: nowISO,
-        }
-      : action,
-  );
+  const targetAction = existingActions.find((action) => action.id === body.actionId);
 
-  if (!existingActions.some((a) => a.id === body.actionId)) {
+  if (!targetAction) {
     return respond(jsonError(404, 'not_found', 'Action not found.'));
   }
+
+  if (
+    body.decision === 'accept' &&
+    targetAction.type === 'calendar' &&
+    (targetAction.status ?? 'proposed') === 'accepted' &&
+    targetAction.calendarEvent
+  ) {
+    const idempotentResponse = ActionDecisionResponseSchema.parse({
+      ok: true,
+      artifactId: body.artifactId,
+      actionId: body.actionId,
+      status: 'accepted',
+      calendarEvent: targetAction.calendarEvent,
+    });
+    return respond(NextResponse.json(idempotentResponse));
+  }
+
+  let nextCalendarEvent: z.infer<typeof CalendarEventSchema> | undefined;
+
+  if (body.decision === 'accept' && targetAction.type === 'calendar') {
+    if (!targetAction.dueDateISO) {
+      return respond(jsonError(400, 'invalid_request', 'Calendar actions require dueDateISO before acceptance.'));
+    }
+
+    try {
+      const createdEvent = await createCalendarEvent({
+        accessToken,
+        summary: targetAction.text,
+        description: artifact.title,
+        startISO: targetAction.dueDateISO,
+      });
+      nextCalendarEvent = CalendarEventSchema.parse({
+        ...createdEvent,
+        createdAtISO: nowISO,
+      });
+    } catch (error) {
+      if (error instanceof GoogleCalendarApiError) {
+        return respond(
+          NextResponse.json(
+            {
+              error: 'calendar_event_failed',
+              message: error.message,
+            },
+            { status: 502 },
+          ),
+        );
+      }
+
+      return respond(
+        NextResponse.json(
+          {
+            error: 'calendar_event_failed',
+            message: 'Unable to create calendar event.',
+          },
+          { status: 502 },
+        ),
+      );
+    }
+  }
+
+  const nextActions = existingActions.map((action) => {
+    if (action.id !== body.actionId) {
+      return action;
+    }
+
+    if (nextCalendarEvent) {
+      return {
+        ...action,
+        status,
+        calendarEvent: nextCalendarEvent,
+        updatedAtISO: nowISO,
+      };
+    }
+
+    return {
+      ...action,
+      status,
+      updatedAtISO: nowISO,
+    };
+  });
 
   const nextArtifact = {
     ...artifact,
@@ -261,12 +354,13 @@ export const POST = async (request: NextRequest) => {
     decision: body.decision,
   });
 
-  return respond(
-    NextResponse.json({
-      ok: true,
-      artifactId: body.artifactId,
-      actionId: body.actionId,
-      status,
-    }),
-  );
+  const successResponse = ActionDecisionResponseSchema.parse({
+    ok: true,
+    artifactId: body.artifactId,
+    actionId: body.actionId,
+    status,
+    ...(nextCalendarEvent ? { calendarEvent: nextCalendarEvent } : {}),
+  });
+
+  return respond(NextResponse.json(successResponse));
 };
