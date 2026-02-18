@@ -16,7 +16,7 @@ describe('TimelineDashboardPageClient', () => {
         ok: true,
         json: async () => ({
           ok: true,
-          summary: { totalArtifacts: 2, totalSyntheses: 1, proposedActions: 1 },
+          summary: { totalArtifacts: 2, totalSyntheses: 1, proposedActions: 1, openLoopsOpenCount: 1, highRisksCount: 0, decisionsRecentCount: 0 },
           syntheses: [{ artifactId: 'syn-1', title: 'S1' }],
           actionQueue: [
             {
@@ -48,7 +48,7 @@ describe('TimelineDashboardPageClient', () => {
         ok: true,
         json: async () => ({
           ok: true,
-          summary: { totalArtifacts: 1, totalSyntheses: 0, proposedActions: 1 },
+          summary: { totalArtifacts: 1, totalSyntheses: 0, proposedActions: 1, openLoopsOpenCount: 1, highRisksCount: 0, decisionsRecentCount: 0 },
           syntheses: [],
           actionQueue: [
             {
@@ -70,4 +70,22 @@ describe('TimelineDashboardPageClient', () => {
 
     expect(await screen.findByText('Could not create Google Calendar event. Please try again.')).toBeInTheDocument();
   });
+
+  it('links top entity drilldown to timeline filter URL', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        summary: { totalArtifacts: 1, totalSyntheses: 0, proposedActions: 0, openLoopsOpenCount: 0, highRisksCount: 0, decisionsRecentCount: 0 },
+        topEntities: [{ name: 'acme', count: 2 }],
+        syntheses: [],
+        actionQueue: [],
+      }),
+    }) as unknown as typeof fetch);
+
+    render(<TimelineDashboardPageClient />);
+    const link = await screen.findByRole('link', { name: 'acme' });
+    expect(link).toHaveAttribute('href', '/timeline?entity=acme');
+  });
+
 });

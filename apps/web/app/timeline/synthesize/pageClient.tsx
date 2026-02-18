@@ -13,7 +13,7 @@ type Citation = {
 };
 
 type StructuredDecision = { text: string; dateISO?: string | null; owner?: string | null; confidence?: number | null };
-type StructuredOpenLoop = { text: string; owner?: string | null; dueDateISO?: string | null; status?: 'open' | 'closed'; confidence?: number | null };
+type StructuredOpenLoop = { text: string; owner?: string | null; dueDateISO?: string | null; status?: 'open' | 'closed'; closedAtISO?: string | null; closedReason?: string | null; sourceActionId?: string | null; confidence?: number | null };
 type StructuredRisk = { text: string; severity?: 'low' | 'medium' | 'high'; likelihood?: 'low' | 'medium' | 'high'; owner?: string | null; mitigation?: string | null; confidence?: number | null };
 
 type SynthesisResponse = {
@@ -47,6 +47,8 @@ export default function TimelineSynthesizePageClient() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SynthesisResponse | null>(null);
+  const [loopErrors, setLoopErrors] = useState<Record<string, string>>({});
+  const [loopPending, setLoopPending] = useState<Record<string, boolean>>({});
 
   const generate = async () => {
     setLoading(true);
@@ -83,6 +85,63 @@ export default function TimelineSynthesizePageClient() {
       setError('Unable to generate synthesis.');
     } finally {
       setLoading(false);
+    }
+  };
+
+
+  const toggleOpenLoop = async (openLoopIndex: number, action: 'close' | 'reopen') => {
+    if (!result?.savedArtifactId) return;
+    const key = `${result.savedArtifactId}:${openLoopIndex}`;
+    setLoopErrors((prev) => ({ ...prev, [key]: '' }));
+    setLoopPending((prev) => ({ ...prev, [key]: true }));
+
+    const prev = result;
+    setResult({
+      ...result,
+      synthesis: {
+        ...result.synthesis,
+        openLoops: (result.synthesis.openLoops ?? []).map((loop, idx) => {
+          if (idx !== openLoopIndex) return loop;
+          if (action === 'close') return { ...loop, status: 'closed' as const, closedAtISO: new Date().toISOString() } as never;
+          return { ...loop, status: 'open' as const, closedAtISO: null, closedReason: null } as never;
+        }),
+      },
+    });
+
+    try {
+      const response = await fetch('/api/timeline/open-loops', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ artifactId: result.savedArtifactId, openLoopIndex, action }),
+      });
+
+      if (!response.ok) {
+        const payload = (await response.json()) as { error?: { message?: string } };
+        setResult(prev);
+        setLoopErrors((state) => ({ ...state, [key]: payload.error?.message ?? 'Unable to update open loop.' }));
+        return;
+      }
+
+      const payload = (await response.json()) as { updatedOpenLoops?: StructuredOpenLoop[] };
+      if (payload.updatedOpenLoops) {
+        setResult((current) =>
+          current
+            ? {
+                ...current,
+                synthesis: { ...current.synthesis, openLoops: payload.updatedOpenLoops },
+              }
+            : current,
+        );
+      }
+    } catch {
+      setResult(prev);
+      setLoopErrors((state) => ({ ...state, [key]: 'Unable to update open loop.' }));
+    } finally {
+      setLoopPending((prevState) => {
+        const next = { ...prevState };
+        delete next[key];
+        return next;
+      });
     }
   };
 
@@ -182,7 +241,23 @@ export default function TimelineSynthesizePageClient() {
           {result.synthesis.openLoops?.length ? (
             <>
               <h3>Open loops</h3>
-              <ul>{result.synthesis.openLoops.map((item, idx) => <li key={`loop-${idx}`}>{item.text}</li>)}</ul>
+              <ul>
+                {result.synthesis.openLoops.map((item, idx) => {
+                  const key = `${result.savedArtifactId ?? 'unsaved'}:${idx}`;
+                  const isClosed = (item.status ?? 'open') === 'closed';
+                  return (
+                    <li key={`loop-${idx}`}>
+                      {item.text} <em>({isClosed ? 'closed' : 'open'})</em>{' '}
+                      {result.savedArtifactId ? (
+                        <button disabled={Boolean(loopPending[key])} onClick={() => void toggleOpenLoop(idx, isClosed ? 'reopen' : 'close')}>
+                          {isClosed ? 'Reopen' : 'Mark closed'}
+                        </button>
+                      ) : null}
+                      {loopErrors[key] ? <span style={{ color: '#b00020' }}> {loopErrors[key]}</span> : null}
+                    </li>
+                  );
+                })}
+              </ul>
             </>
           ) : null}
 

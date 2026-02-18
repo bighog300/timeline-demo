@@ -92,6 +92,9 @@ export const OpenLoopSchema = z
     owner: structuredOwner,
     dueDateISO: z.union([isoDateString, z.null()]).optional(),
     status: z.enum(['open', 'closed']).default('open').optional(),
+    closedAtISO: z.union([isoDateString, z.null()]).optional(),
+    closedReason: z.string().trim().max(240).nullable().optional(),
+    sourceActionId: z.string().min(1).nullable().optional(),
     confidence: structuredConfidence,
   })
   .strict();

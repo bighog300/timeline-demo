@@ -118,6 +118,77 @@ describe('shared schemas', () => {
   });
 
 
+
+  it('accepts open loops with lifecycle fields', () => {
+    const result = SummaryArtifactSchema.safeParse({
+      artifactId: 'artifact-1',
+      source: 'gmail',
+      sourceId: 'source-1',
+      title: 'A title',
+      createdAtISO: '2026-01-01T12:00:00Z',
+      summary: 'Summary text',
+      highlights: ['One'],
+      openLoops: [
+        {
+          text: 'Confirm owner',
+          status: 'closed',
+          closedAtISO: '2026-01-03T00:00:00Z',
+          closedReason: 'Completed by legal',
+          sourceActionId: 'act-1',
+        },
+      ],
+      driveFolderId: 'folder-1',
+      driveFileId: 'file-1',
+      model: 'test-model',
+      version: 1,
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('enforces closedReason bounds for open loops', () => {
+    const result = SummaryArtifactSchema.safeParse({
+      artifactId: 'artifact-1',
+      source: 'gmail',
+      sourceId: 'source-1',
+      title: 'A title',
+      createdAtISO: '2026-01-01T12:00:00Z',
+      summary: 'Summary text',
+      highlights: ['One'],
+      openLoops: [
+        {
+          text: 'Confirm owner',
+          status: 'closed',
+          closedReason: 'x'.repeat(241),
+        },
+      ],
+      driveFolderId: 'folder-1',
+      driveFileId: 'file-1',
+      model: 'test-model',
+      version: 1,
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('remains backward compatible for open loops without lifecycle fields', () => {
+    const result = SummaryArtifactSchema.safeParse({
+      artifactId: 'artifact-1',
+      source: 'gmail',
+      sourceId: 'source-1',
+      title: 'A title',
+      createdAtISO: '2026-01-01T12:00:00Z',
+      summary: 'Summary text',
+      highlights: ['One'],
+      openLoops: [{ text: 'Confirm owner', status: 'open' }],
+      driveFolderId: 'folder-1',
+      driveFileId: 'file-1',
+      model: 'test-model',
+      version: 1,
+    });
+
+    expect(result.success).toBe(true);
+  });
   it('accepts suggested actions on summary artifacts', () => {
     const result = SummaryArtifactSchema.safeParse({
       artifactId: 'artifact-1',

@@ -19,6 +19,7 @@ import { createDriveClient } from '../../../lib/googleDrive';
 import { mapGoogleError } from '../../../lib/googleRequest';
 import { normalizeTimelineCitations } from '../../../lib/llm/providerOutput';
 import { ProviderError } from '../../../lib/llm/providerErrors';
+import { canonicalizeEntities, readEntityAliasesFromDrive } from '../../../lib/entities/aliases';
 import { getTimelineProviderFromDrive } from '../../../lib/llm/providerRouter';
 import { hashUserHint, logError, logInfo, safeError } from '../../../lib/logger';
 import { checkRateLimit, getRateLimitKey } from '../../../lib/rateLimit';
@@ -173,6 +174,13 @@ export const POST = async (request: NextRequest) => {
     return respond(jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.'));
   }
 
+  let aliasConfig = { version: 1 as const, updatedAtISO: new Date().toISOString(), aliases: [] as never[] };
+  try {
+    aliasConfig = (await readEntityAliasesFromDrive(drive, driveFolderId, ctx)).aliases as typeof aliasConfig;
+  } catch {
+    // alias loading is best-effort
+  }
+
   const loadedIndex = await loadArtifactIndex(drive, driveFolderId, ctx);
   const indexEntries = loadedIndex.index.artifacts.filter((entry) => entry.kind !== 'synthesis');
   let selectedEntries: ArtifactIndexEntry[];
@@ -300,6 +308,7 @@ export const POST = async (request: NextRequest) => {
 
     const nowISO = new Date().toISOString();
     const normalizedSuggestedActions = normalizeSynthesisActions(providerOutput.synthesis.suggestedActions, nowISO);
+    const canonicalEntities = canonicalizeEntities(providerOutput.synthesis.entities, aliasConfig);
 
     const citationEntries = new Map(loadedArtifacts.map(({ entry, artifact }) => [
       artifact.artifactId,
@@ -342,7 +351,7 @@ export const POST = async (request: NextRequest) => {
         tags: providerOutput.synthesis.tags ?? body.tags,
         topics: providerOutput.synthesis.topics,
         participants: providerOutput.synthesis.participants ?? body.participants,
-        entities: providerOutput.synthesis.entities,
+        entities: canonicalEntities,
         decisions: providerOutput.synthesis.decisions,
         openLoops: providerOutput.synthesis.openLoops,
         risks: providerOutput.synthesis.risks,
@@ -375,9 +384,9 @@ export const POST = async (request: NextRequest) => {
           tags: providerOutput.synthesis.tags ?? body.tags,
           topics: providerOutput.synthesis.topics,
           participants: providerOutput.synthesis.participants ?? body.participants,
-          entities: providerOutput.synthesis.entities?.slice(0, 10),
+          entities: canonicalEntities.slice(0, 10),
           decisionsCount: providerOutput.synthesis.decisions?.length ?? 0,
-          openLoopsCount: providerOutput.synthesis.openLoops?.length ?? 0,
+          openLoopsCount: (providerOutput.synthesis.openLoops ?? []).filter((loop) => (loop.status ?? 'open') === 'open').length,
           risksCount: providerOutput.synthesis.risks?.length ?? 0,
           updatedAtISO: createdAtISO,
         });
@@ -389,6 +398,7 @@ export const POST = async (request: NextRequest) => {
       ok: true,
       synthesis: {
         ...providerOutput.synthesis,
+        ...(canonicalEntities.length ? { entities: canonicalEntities } : {}),
         mode: body.mode,
         title: providerOutput.synthesis.title || body.title || modeTitle(body.mode),
         ...(normalizedSuggestedActions?.length ? { suggestedActions: normalizedSuggestedActions } : {}),

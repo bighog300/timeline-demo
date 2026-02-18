@@ -54,6 +54,7 @@ export type TimelineFilters = {
   hasOpenLoops: boolean;
   hasRisks: boolean;
   hasDecisions: boolean;
+  riskSeverity?: 'all' | 'low' | 'medium' | 'high';
   dateFromISO?: string;
   dateToISO?: string;
 };
@@ -212,6 +213,11 @@ export const filterEntries = (entries: TimelineEntry[], filters: TimelineFilters
     }
     if (filters.hasRisks && !(entry.risks?.length)) {
       return false;
+    }
+    if (filters.riskSeverity && filters.riskSeverity !== 'all') {
+      if (!(entry.risks ?? []).some((risk) => risk.severity === filters.riskSeverity)) {
+        return false;
+      }
     }
     if (filters.hasDecisions && !(entry.decisions?.length)) {
       return false;

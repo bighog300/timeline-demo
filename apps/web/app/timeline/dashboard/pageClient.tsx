@@ -158,17 +158,17 @@ export default function TimelineDashboardPageClient() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, marginBottom: 16 }}>
             <div style={{ border: '1px solid #ddd', padding: 10 }}>
               <h3>Top entities</h3>
-              <ul>{(data.topEntities ?? []).slice(0, 10).map((entity) => <li key={`${entity.name}-${entity.type ?? ''}`}>{entity.name}{entity.type ? ` (${entity.type})` : ''} · {entity.count}</li>)}</ul>
+              <ul>{(data.topEntities ?? []).slice(0, 10).map((entity) => <li key={`${entity.name}-${entity.type ?? ''}`}><Link href={`/timeline?entity=${encodeURIComponent(entity.name.toLowerCase())}`}>{entity.name}</Link>{entity.type ? ` (${entity.type})` : ''} · {entity.count}</li>)}</ul>
             </div>
             <div style={{ border: '1px solid #ddd', padding: 10 }}>
               <h3>Open loops</h3>
               <p>{data.summary.openLoopsOpenCount}</p>
-              <Link href="/timeline">Open timeline filters</Link>
+              <Link href="/timeline?hasOpenLoops=1">Open timeline filters</Link>
             </div>
             <div style={{ border: '1px solid #ddd', padding: 10 }}>
               <h3>High risks</h3>
               <p>{data.summary.highRisksCount}</p>
-              <Link href="/timeline">Open timeline filters</Link>
+              <Link href="/timeline?hasRisks=1&riskSeverity=high">Open timeline filters</Link>
             </div>
           </div>
 

@@ -74,7 +74,7 @@ export const artifactToIndexEntry = (artifact: SummaryArtifact): ArtifactIndexEn
   ], 30),
   entities: topEntities(artifact.entities),
   decisionsCount: artifact.decisions?.length ?? 0,
-  openLoopsCount: artifact.openLoops?.length ?? 0,
+  openLoopsCount: (artifact.openLoops ?? []).filter((loop) => (loop.status ?? 'open') === 'open').length,
   risksCount: artifact.risks?.length ?? 0,
   updatedAtISO: artifact.createdAtISO,
 });
