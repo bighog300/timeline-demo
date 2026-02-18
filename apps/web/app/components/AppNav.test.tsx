@@ -23,6 +23,7 @@ describe('AppNav demo tabs visibility', () => {
 
     expect(screen.queryByRole('link', { name: 'Calendar' })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Chat' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Saved Selections' })).toBeInTheDocument();
   });
 
   it('shows calendar and chat tabs when feature flag is enabled', () => {

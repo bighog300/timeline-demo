@@ -34,6 +34,11 @@ const navItems: NavItem[] = [
     match: (pathname) => pathname.startsWith('/saved-searches'),
   },
   {
+    href: '/saved-selections',
+    label: 'Saved Selections',
+    match: (pathname) => pathname.startsWith('/saved-selections'),
+  },
+  {
     href: '/timeline',
     label: 'Timeline',
     match: (pathname) => pathname.startsWith('/timeline'),
