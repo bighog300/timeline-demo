@@ -110,7 +110,7 @@ export const POST = async (request: NextRequest) => {
           ? await fetchGmailMessageText(gmail, item.id, ctx)
           : await fetchDriveFileText(drive, item.id, driveFolderId, ctx);
 
-      const { summary, highlights, model } = await time(ctx, 'summarize', async () =>
+      const { summary, highlights, contentDateISO, model } = await time(ctx, 'summarize', async () =>
         timelineProvider.summarize(
           {
             title: content.title,
@@ -135,6 +135,7 @@ export const POST = async (request: NextRequest) => {
         createdAtISO,
         summary,
         highlights,
+        ...(contentDateISO ? { contentDateISO } : {}),
         sourceMetadata: content.metadata,
         sourcePreview,
         driveFolderId,

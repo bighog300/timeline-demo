@@ -5,10 +5,12 @@ import { parseTimelineProviderOutput } from '../providerOutput';
 import type { TimelineProvider } from './types';
 
 const jsonOnlyInstruction =
-  'Return ONLY valid JSON with keys summary and highlights (array of strings). No prose.';
+  'Return ONLY valid JSON with keys summary (string), highlights (string[]), and contentDateISO (string|null). No prose.';
 
 const defaultSummaryPrompt = 'Create a concise summary of the source.';
 const defaultHighlightsPrompt = 'Extract key highlights as short bullet-friendly phrases.';
+const defaultContentDatePrompt =
+  'If the content describes a specific date/time (e.g., event date), set contentDateISO to that date/time in ISO 8601. If multiple dates exist, choose the primary one. If no meaningful date, set null.';
 
 const buildUserPrompt = (
   title: string,
@@ -27,6 +29,7 @@ const buildUserPrompt = (
   return [
     `${summaryPrompt}`,
     `${highlightsPrompt}`,
+    `${defaultContentDatePrompt}`,
     '',
     `Title: ${title}`,
     `Source: ${source}`,
@@ -103,6 +106,7 @@ export const geminiTimelineProvider: TimelineProvider = {
     return {
       summary: parsed.summary,
       highlights: parsed.highlights,
+      contentDateISO: parsed.contentDateISO,
       model: settings.model,
     };
   },

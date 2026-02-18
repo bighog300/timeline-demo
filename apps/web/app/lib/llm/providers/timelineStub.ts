@@ -8,8 +8,19 @@ export const stubTimelineProvider: TimelineProvider = {
       text: input.text,
     });
 
+    const metadataDateISO =
+      input.sourceMetadata && typeof input.sourceMetadata === 'object'
+        ? (input.sourceMetadata as { dateISO?: unknown }).dateISO
+        : undefined;
+
+    const contentDateISO =
+      typeof metadataDateISO === 'string' && !Number.isNaN(Date.parse(metadataDateISO))
+        ? metadataDateISO
+        : undefined;
+
     return {
       ...result,
+      ...(contentDateISO ? { contentDateISO } : {}),
       model: settings.model || 'stub',
     };
   },

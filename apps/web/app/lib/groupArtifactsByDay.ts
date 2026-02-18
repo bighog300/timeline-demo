@@ -14,7 +14,9 @@ const toDayKey = (value: string | undefined): string | null => {
 };
 
 export const artifactDayKey = (artifact: SummaryArtifact): string | null =>
-  toDayKey(artifact.sourceMetadata?.dateISO) ?? toDayKey(artifact.createdAtISO);
+  toDayKey(artifact.contentDateISO) ??
+  toDayKey(artifact.sourceMetadata?.dateISO) ??
+  toDayKey(artifact.createdAtISO);
 
 export const groupArtifactsByDay = (artifacts: SummaryArtifact[]): GroupedArtifactsByDay => {
   return artifacts.reduce<GroupedArtifactsByDay>((acc, artifact) => {

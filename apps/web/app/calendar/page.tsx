@@ -8,7 +8,7 @@ import { getGoogleAccessToken, getGoogleSession } from '../lib/googleAuth';
 import { createDriveClient } from '../lib/googleDrive';
 import { findIndexFile, readIndexFile } from '../lib/indexDrive';
 import type { SummaryArtifact } from '../lib/types';
-import { groupArtifactsByDay } from '../lib/groupArtifactsByDay';
+import { artifactDayKey, groupArtifactsByDay } from '../lib/groupArtifactsByDay';
 import styles from './page.module.css';
 import RebuildIndexButton from './RebuildIndexButton';
 
@@ -25,13 +25,6 @@ type CalendarArtifactView = {
   preview?: string;
 };
 
-const toDayKey = (iso: string) => {
-  const date = new Date(iso);
-  if (Number.isNaN(date.valueOf())) {
-    return 'unknown';
-  }
-  return date.toISOString().slice(0, 10);
-};
 
 const excerpt = (summary: string) => {
   const trimmed = summary.trim();
@@ -123,7 +116,7 @@ export default async function CalendarPage({
         title: artifact.title,
         source: artifact.source,
         createdAtISO: artifact.createdAtISO,
-        dayKey: toDayKey(artifact.sourceMetadata?.dateISO ?? artifact.createdAtISO),
+        dayKey: artifactDayKey(artifact) ?? 'unknown',
         driveWebViewLink: artifact.driveWebViewLink,
         preview: excerpt(artifact.summary),
       }))
@@ -137,7 +130,7 @@ export default async function CalendarPage({
         <div>
           <p className={styles.eyebrow}>Calendar</p>
           <h1>Saved summary calendar</h1>
-          <p>Month/day projection of your Drive-backed summary artifacts.</p>
+          <p>Month/day projection of your Drive-backed summary artifacts. Grouped by content date (when available).</p>
         </div>
       </div>
 
