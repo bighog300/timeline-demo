@@ -11,6 +11,12 @@ const ProviderOutputSchema = z
   })
   .passthrough();
 
+const ProviderDateOnlyOutputSchema = z
+  .object({
+    contentDateISO: z.union([isoDateString, z.null()]).optional(),
+  })
+  .strict();
+
 type ParsedOutput = {
   summary: string;
   highlights: string[];
@@ -58,4 +64,31 @@ export const parseTimelineProviderOutput = (rawText: string): ParsedOutput => {
     highlights,
     ...(contentDateISO ? { contentDateISO } : {}),
   };
+};
+
+export const parseDateOnlyProviderOutput = (rawText: string): { contentDateISO?: string } => {
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(rawText);
+  } catch {
+    throw new ProviderError({
+      code: 'bad_output',
+      status: 502,
+      provider: 'timeline',
+      message: 'Provider response was not valid JSON.',
+    });
+  }
+
+  const parsed = ProviderDateOnlyOutputSchema.safeParse(parsedJson);
+  if (!parsed.success) {
+    throw new ProviderError({
+      code: 'bad_output',
+      status: 502,
+      provider: 'timeline',
+      message: 'Provider response format was invalid.',
+    });
+  }
+
+  const contentDateISO = parsed.data.contentDateISO?.trim();
+  return contentDateISO ? { contentDateISO } : {};
 };
