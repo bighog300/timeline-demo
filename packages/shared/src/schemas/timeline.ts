@@ -42,6 +42,30 @@ export const SourceSelectionSchema = z
   })
   .strict();
 
+export const SuggestedActionSchema = z
+  .object({
+    id: z.string().min(1).optional(),
+    type: z.enum(['reminder', 'task', 'calendar']),
+    text: z.string().trim().min(3).max(240),
+    dueDateISO: z.union([isoDateString, z.null()]).optional(),
+    confidence: z.number().min(0).max(1).nullable().optional(),
+    status: z.enum(['proposed', 'accepted', 'dismissed']).optional(),
+    createdAtISO: isoDateString.optional(),
+    updatedAtISO: isoDateString.optional(),
+    calendarEvent: z
+      .object({
+        id: z.string().min(1),
+        htmlLink: z.string().url(),
+        startISO: isoDateString,
+        endISO: isoDateString,
+        createdAtISO: isoDateString,
+      })
+      .strict()
+      .nullable()
+      .optional(),
+  })
+  .strict();
+
 export const SummaryArtifactSchema = z
   .object({
     artifactId: z.string(),
@@ -65,33 +89,7 @@ export const SummaryArtifactSchema = z
     dateConfidence: z.number().min(0).max(1).optional(),
     sourceMetadata: SourceMetadataSchema.optional(),
     sourcePreview: z.string().optional(),
-    suggestedActions: z
-      .array(
-        z
-          .object({
-            id: z.string().min(1).optional(),
-            type: z.enum(['reminder', 'task', 'calendar']),
-            text: z.string().trim().min(3).max(240),
-            dueDateISO: z.union([isoDateString, z.null()]).optional(),
-            confidence: z.number().min(0).max(1).nullable().optional(),
-            status: z.enum(['proposed', 'accepted', 'dismissed']).optional(),
-            createdAtISO: isoDateString.optional(),
-            updatedAtISO: isoDateString.optional(),
-            calendarEvent: z
-              .object({
-                id: z.string().min(1),
-                htmlLink: z.string().url(),
-                startISO: isoDateString,
-                endISO: isoDateString,
-                createdAtISO: isoDateString,
-              })
-              .strict()
-              .nullable()
-              .optional(),
-          })
-          .strict(),
-      )
-      .optional(),
+    suggestedActions: z.array(SuggestedActionSchema).optional(),
     driveFolderId: z.string(),
     driveFileId: z.string(),
     driveWebViewLink: z.string().optional(),
@@ -305,6 +303,7 @@ export const SynthesisOutputSchema = z
     decisions: z.array(z.string().trim().min(1)).max(20).optional(),
     risks: z.array(z.string().trim().min(1)).max(20).optional(),
     openLoops: z.array(z.string().trim().min(1)).max(30).optional(),
+    suggestedActions: z.array(SuggestedActionSchema).optional(),
   })
   .strict();
 
@@ -339,6 +338,7 @@ export const SynthesisArtifactSchema = z
     summary: z.string().optional(),
     tags: z.array(z.string()).optional(),
     participants: z.array(z.string()).optional(),
+    suggestedActions: z.array(SuggestedActionSchema).optional(),
   })
   .strict();
 
@@ -368,6 +368,7 @@ export type SourceMetadata = z.infer<typeof SourceMetadataSchema>;
 export type UrlSelection = z.infer<typeof UrlSelectionSchema>;
 export type SourceSelection = z.infer<typeof SourceSelectionSchema>;
 export type SummaryArtifact = z.infer<typeof SummaryArtifactSchema>;
+export type SuggestedAction = z.infer<typeof SuggestedActionSchema>;
 export type DriveSummaryEnvelope = z.infer<typeof DriveSummaryEnvelopeSchema>;
 export type DriveSummaryJson = z.infer<typeof DriveSummaryJsonSchema>;
 export type SelectionSetItem = z.infer<typeof SelectionSetItemSchema>;

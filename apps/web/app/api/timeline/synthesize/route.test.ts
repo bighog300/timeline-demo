@@ -284,6 +284,91 @@ describe('POST /api/timeline/synthesize', () => {
     expect(mockSaveArtifactIndex).not.toHaveBeenCalled();
   });
 
+
+  it('normalizes and persists synthesis suggestedActions when saveToTimeline=true', async () => {
+    const timelineSynthesize = vi.fn().mockResolvedValue({
+      synthesis: {
+        synthesisId: 'syn-99',
+        mode: 'briefing',
+        title: 't',
+        createdAtISO: '2026-01-01T00:00:00Z',
+        content: 'c',
+        suggestedActions: [{ type: 'task', text: 'Follow up with owner', confidence: 0.8 }],
+      },
+      citations: [],
+    });
+    const drive = {
+      files: {
+        get: vi.fn().mockResolvedValue({ data: buildArtifact({ artifactId: 'a1', driveFileId: 'f1' }) }),
+        create: vi.fn().mockResolvedValue({ data: { id: 'saved-file' } }),
+      },
+    };
+    mockCreateDriveClient.mockReturnValue(drive as never);
+    mockLoadArtifactIndex.mockResolvedValue({
+      fileId: 'idx-1',
+      index: { version: 1, updatedAtISO: '2026-01-01T00:00:00Z', artifacts: [{ id: 'a1', driveFileId: 'f1', title: 'A1' }] },
+    });
+    mockSaveArtifactIndex.mockResolvedValue({ fileId: 'idx-1', index: { version: 1, updatedAtISO: 'x', artifacts: [] } } as never);
+    mockGetTimelineProviderFromDrive.mockResolvedValue({
+      settings: { provider: 'stub', model: 'stub' },
+      provider: { summarize: vi.fn(), timelineChat: vi.fn(), timelineSynthesize },
+    } as never);
+
+    const response = await POST(
+      new Request('http://localhost/api/timeline/synthesize', {
+        method: 'POST',
+        body: JSON.stringify({ mode: 'briefing', saveToTimeline: true }),
+      }) as never,
+    );
+
+    const payload = await response.json();
+    expect(payload.synthesis.suggestedActions[0].status).toBe('proposed');
+    const savedBody = JSON.parse((drive.files.create as ReturnType<typeof vi.fn>).mock.calls[0][0].media.body as string);
+    expect(savedBody.suggestedActions[0].id).toBeTruthy();
+    expect(savedBody.suggestedActions[0].createdAtISO).toBeTruthy();
+  });
+
+  it('returns synthesis suggestedActions without persistence when saveToTimeline=false', async () => {
+    const timelineSynthesize = vi.fn().mockResolvedValue({
+      synthesis: {
+        synthesisId: 'syn-1',
+        mode: 'briefing',
+        title: 't',
+        createdAtISO: '2026-01-01T00:00:00Z',
+        content: 'c',
+        suggestedActions: [{ type: 'reminder', text: 'Ping finance team' }],
+      },
+      citations: [],
+    });
+    const drive = {
+      files: {
+        get: vi.fn().mockResolvedValue({ data: buildArtifact({ artifactId: 'a1', driveFileId: 'f1' }) }),
+        create: vi.fn().mockResolvedValue({ data: { id: 'saved-file' } }),
+      },
+    };
+    mockCreateDriveClient.mockReturnValue(drive as never);
+    mockLoadArtifactIndex.mockResolvedValue({
+      fileId: 'idx-1',
+      index: { version: 1, updatedAtISO: '2026-01-01T00:00:00Z', artifacts: [{ id: 'a1', driveFileId: 'f1', title: 'A1' }] },
+    });
+    mockGetTimelineProviderFromDrive.mockResolvedValue({
+      settings: { provider: 'stub', model: 'stub' },
+      provider: { summarize: vi.fn(), timelineChat: vi.fn(), timelineSynthesize },
+    } as never);
+
+    const response = await POST(
+      new Request('http://localhost/api/timeline/synthesize', {
+        method: 'POST',
+        body: JSON.stringify({ mode: 'briefing', saveToTimeline: false }),
+      }) as never,
+    );
+
+    const payload = await response.json();
+    expect(payload.synthesis.suggestedActions).toHaveLength(1);
+    expect(payload.savedArtifactId).toBeUndefined();
+    expect(drive.files.create).not.toHaveBeenCalled();
+  });
+
   it('auth missing -> 401', async () => {
     mockGetGoogleSession.mockResolvedValue(null as never);
 

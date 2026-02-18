@@ -20,6 +20,19 @@ export const extractContentDateWithStub = async (
 const buildSynthesisTitle = (mode: 'briefing' | 'status_report' | 'decision_log' | 'open_loops') =>
   `Timeline ${mode.replace('_', ' ')}`;
 
+
+const buildStubSynthesisActions = (mode: 'briefing' | 'status_report' | 'decision_log' | 'open_loops') => {
+  const dueDateISO = '2026-01-15T14:00:00Z';
+  if (mode === 'decision_log') {
+    return [
+      { type: 'task' as const, text: 'Document the final decision in project notes', confidence: 0.78 },
+      { type: 'calendar' as const, text: 'Schedule decision review', dueDateISO, confidence: 0.64 },
+    ];
+  }
+
+  return [{ type: 'reminder' as const, text: 'Share synthesis follow-up with owners', confidence: 0.7 }];
+};
+
 const buildStubSuggestedActions = (text: string) => {
   const normalized = text.toLowerCase();
   if (!normalized.includes('follow up') && !normalized.includes('todo') && !normalized.includes('task')) {
@@ -87,6 +100,7 @@ export const stubTimelineProvider: TimelineProvider = {
         createdAtISO: nowISO,
         content,
         keyPoints: top ? [top.highlights[0] ?? top.summary.slice(0, 120)] : [],
+        suggestedActions: buildStubSynthesisActions(input.mode),
       },
       citations: top
         ? [

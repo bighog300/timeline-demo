@@ -20,7 +20,7 @@ const timelineChatJsonInstruction =
   'Return ONLY valid JSON: {"answer": string, "citations": [{"artifactId": string, "excerpt": string}], "usedArtifactIds": string[]}. Use only provided artifacts and do not hallucinate sources.';
 
 const timelineSynthesisJsonInstruction =
-  'Return ONLY valid JSON: {"synthesis": {"synthesisId": string, "mode": "briefing"|"status_report"|"decision_log"|"open_loops", "title": string, "createdAtISO": string|null, "content": string, "keyPoints"?: string[], "decisions"?: string[], "risks"?: string[], "openLoops"?: string[]}, "citations": [{"artifactId": string, "excerpt": string}]}. Use ONLY provided artifacts and never fabricate sources.';
+  'Return ONLY valid JSON: {"synthesis": {"synthesisId": string, "mode": "briefing"|"status_report"|"decision_log"|"open_loops", "title": string, "createdAtISO": string|null, "content": string, "keyPoints"?: string[], "decisions"?: string[], "risks"?: string[], "openLoops"?: string[], "suggestedActions"?: [{"id"?: string, "type": "reminder"|"task"|"calendar", "text": string, "dueDateISO"?: string|null, "confidence"?: number|null}]}, "citations": [{"artifactId": string, "excerpt": string}]}. Use ONLY provided artifacts and never fabricate sources.';
 
 const defaultSummaryPrompt = 'Create a concise summary of the source.';
 const defaultHighlightsPrompt = 'Extract key highlights as short bullet-friendly phrases.';
@@ -47,6 +47,10 @@ const buildTimelineSynthesisPrompt = (
     'Ground every claim in summaries/highlights (and evidence only when includeEvidence=true).',
     'Citations must reference exact artifactId values and short excerpts from provided content.',
     'Never invent sources or artifact ids.',
+    'Optionally include synthesis.suggestedActions only when grounded in explicit source details.',
+    'Keep suggestedActions practical and non-speculative.',
+    'Set dueDateISO only if explicit date/time exists in provided artifacts; otherwise omit it.',
+    'Use calendar actions only when scheduling/date details are explicit in artifacts.',
     '',
     `Mode: ${input.mode}`,
     `Requested title: ${input.title ?? ''}`,

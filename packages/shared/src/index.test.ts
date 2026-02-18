@@ -440,4 +440,70 @@ describe('shared schemas', () => {
     expect(result.success).toBe(true);
   });
 
+  it('accepts synthesis artifact schema with suggested actions', () => {
+    const result = SynthesisArtifactSchema.safeParse({
+      kind: 'synthesis',
+      id: 'syn-2',
+      title: 'Actionable synthesis',
+      mode: 'briefing',
+      createdAtISO: '2026-01-01T00:00:00Z',
+      sourceArtifactIds: ['a1'],
+      content: 'Consolidated notes',
+      citations: [{ artifactId: 'a1', excerpt: 'A cited excerpt' }],
+      suggestedActions: [
+        {
+          type: 'task',
+          text: 'Share status update with stakeholders',
+          confidence: 0.7,
+          dueDateISO: null,
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('applies suggested action constraints on synthesis artifacts', () => {
+    const badType = SynthesisArtifactSchema.safeParse({
+      kind: 'synthesis',
+      id: 'syn-2',
+      title: 'Bad type synthesis',
+      mode: 'briefing',
+      createdAtISO: '2026-01-01T00:00:00Z',
+      sourceArtifactIds: ['a1'],
+      content: 'Consolidated notes',
+      citations: [{ artifactId: 'a1', excerpt: 'A cited excerpt' }],
+      suggestedActions: [{ type: 'note', text: 'Invalid type' }],
+    });
+
+    const badConfidence = SynthesisArtifactSchema.safeParse({
+      kind: 'synthesis',
+      id: 'syn-3',
+      title: 'Bad confidence synthesis',
+      mode: 'briefing',
+      createdAtISO: '2026-01-01T00:00:00Z',
+      sourceArtifactIds: ['a1'],
+      content: 'Consolidated notes',
+      citations: [{ artifactId: 'a1', excerpt: 'A cited excerpt' }],
+      suggestedActions: [{ type: 'task', text: 'Valid action text', confidence: 1.5 }],
+    });
+
+    expect(badType.success).toBe(false);
+    expect(badConfidence.success).toBe(false);
+  });
+
+  it('keeps synthesis artifact backward compatible without suggested actions', () => {
+    const result = SynthesisArtifactSchema.safeParse({
+      kind: 'synthesis',
+      id: 'syn-4',
+      title: 'No actions synthesis',
+      mode: 'briefing',
+      createdAtISO: '2026-01-01T00:00:00Z',
+      sourceArtifactIds: ['a1'],
+      content: 'Consolidated notes',
+      citations: [{ artifactId: 'a1', excerpt: 'A cited excerpt' }],
+    });
+
+    expect(result.success).toBe(true);
+  });
 });

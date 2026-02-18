@@ -6,6 +6,7 @@ import {
   SynthesisResponseSchema,
   SummaryArtifactSchema,
   type ArtifactIndexEntry,
+  type SuggestedAction,
 } from '@timeline/shared';
 
 import { jsonError } from '../../../lib/apiErrors';
@@ -65,6 +66,28 @@ const estimateChars = (artifact: {
   artifact.summary.length +
   artifact.highlights.reduce((acc, item) => acc + item.length, 0) +
   (artifact.evidence ?? []).reduce((acc, item) => acc + item.excerpt.length, 0);
+
+
+const normalizeSynthesisActions = (actions: SuggestedAction[] | undefined, nowISO: string): SuggestedAction[] | undefined => {
+  if (!actions?.length) {
+    return undefined;
+  }
+
+  return actions.map((action) => {
+    const hashedId = createHash('sha1')
+      .update(`${action.type}|${action.text.trim().toLowerCase()}|${action.dueDateISO ?? ''}`)
+      .digest('hex')
+      .slice(0, 12);
+
+    return {
+      ...action,
+      id: action.id?.trim() || `act_${hashedId}`,
+      status: action.status ?? 'proposed',
+      createdAtISO: action.createdAtISO ?? nowISO,
+      updatedAtISO: nowISO,
+    };
+  });
+};
 
 const modeTitle = (mode: 'briefing' | 'status_report' | 'decision_log' | 'open_loops') => {
   switch (mode) {
@@ -275,6 +298,9 @@ export const POST = async (request: NextRequest) => {
       settings,
     );
 
+    const nowISO = new Date().toISOString();
+    const normalizedSuggestedActions = normalizeSynthesisActions(providerOutput.synthesis.suggestedActions, nowISO);
+
     const citationEntries = new Map(loadedArtifacts.map(({ entry, artifact }) => [
       artifact.artifactId,
       { title: entry.title ?? artifact.title, contentDateISO: entry.contentDateISO ?? artifact.contentDateISO },
@@ -298,7 +324,7 @@ export const POST = async (request: NextRequest) => {
     let savedArtifactId: string | undefined;
 
     if (body.saveToTimeline) {
-      const createdAtISO = new Date().toISOString();
+      const createdAtISO = nowISO;
       const synthesisId =
         providerOutput.synthesis.synthesisId ||
         `syn_${createHash('sha1').update(`${createdAtISO}:${usedArtifactIds.join('|')}:${body.mode}`).digest('hex').slice(0, 12)}`;
@@ -315,6 +341,7 @@ export const POST = async (request: NextRequest) => {
         summary: providerOutput.synthesis.content.slice(0, 220),
         tags: body.tags,
         participants: body.participants,
+        ...(normalizedSuggestedActions?.length ? { suggestedActions: normalizedSuggestedActions } : {}),
       });
 
       const fileName = `synthesis_${createdAtISO.slice(0, 10).replace(/-/g, '')}_${body.mode}_${synthesisId}.json`;
@@ -354,6 +381,7 @@ export const POST = async (request: NextRequest) => {
         ...providerOutput.synthesis,
         mode: body.mode,
         title: providerOutput.synthesis.title || body.title || modeTitle(body.mode),
+        ...(normalizedSuggestedActions?.length ? { suggestedActions: normalizedSuggestedActions } : {}),
       },
       citations,
       usedArtifactIds,
