@@ -33,7 +33,7 @@ vi.mock('../../../lib/timeline/artifactIndex', () => ({
 import { getGoogleAccessToken, getGoogleSession } from '../../../lib/googleAuth';
 import { createDriveClient } from '../../../lib/googleDrive';
 import { createGmailClient } from '../../../lib/googleGmail';
-import { fetchGmailMessageText } from '../../../lib/fetchSourceText';
+import { fetchDriveFileText, fetchGmailMessageText } from '../../../lib/fetchSourceText';
 import { ProviderError } from '../../../lib/llm/providerErrors';
 import { getTimelineProviderFromDrive } from '../../../lib/llm/providerRouter';
 import { writeArtifactToDrive } from '../../../lib/writeArtifactToDrive';
@@ -44,6 +44,7 @@ const mockGetGoogleAccessToken = vi.mocked(getGoogleAccessToken);
 const mockCreateDriveClient = vi.mocked(createDriveClient);
 const mockCreateGmailClient = vi.mocked(createGmailClient);
 const mockFetchGmailMessageText = vi.mocked(fetchGmailMessageText);
+const mockFetchDriveFileText = vi.mocked(fetchDriveFileText);
 const mockGetTimelineProviderFromDrive = vi.mocked(getTimelineProviderFromDrive);
 const mockWriteArtifactToDrive = vi.mocked(writeArtifactToDrive);
 
@@ -205,5 +206,76 @@ describe('POST /api/timeline/summarize', () => {
     expect(writtenArtifact.suggestedActions?.[0].status).toBe('proposed');
     expect(writtenArtifact.suggestedActions?.[1].id).toBe('provider-id');
   });
+
+
+  it('supports url selections and persists url metadata in artifacts', async () => {
+    mockGetGoogleSession.mockResolvedValue({ driveFolderId: 'folder-1', user: { email: 'test@example.com' } } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockCreateGmailClient.mockReturnValue({} as never);
+    mockCreateDriveClient.mockReturnValue({
+      files: {
+        get: vi.fn().mockResolvedValue({
+          data: JSON.stringify({
+            url: 'https://example.com/source',
+            finalUrl: 'https://example.com/final',
+            fetchedAtISO: '2024-05-01T12:00:00Z',
+            title: 'Fetched title',
+          }),
+        }),
+      },
+    } as never);
+    mockFetchDriveFileText.mockResolvedValue({ title: 'Raw URL', text: 'URL text content', metadata: { mimeType: 'text/plain' } });
+    mockGetTimelineProviderFromDrive.mockResolvedValue({
+      settings: { provider: 'stub', model: 'stub-model' },
+      provider: {
+        summarize: vi.fn().mockResolvedValue({
+          summary: 'Summary text',
+          highlights: ['Point A'],
+          evidence: [{ excerpt: 'Evidence excerpt' }],
+          suggestedActions: [{ type: 'task', text: 'Do thing' }],
+          contentDateISO: '2024-04-15T10:30:00Z',
+          model: 'stub-model',
+        }),
+      },
+    } as never);
+    mockWriteArtifactToDrive.mockResolvedValue({
+      markdownFileId: 'md-1',
+      markdownWebViewLink: 'https://drive.google.com/md-1',
+      jsonFileId: 'json-1',
+      jsonWebViewLink: 'https://drive.google.com/json-1',
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/timeline/summarize', {
+        method: 'POST',
+        body: JSON.stringify({
+          items: [
+            {
+              kind: 'url',
+              url: 'https://example.com/source',
+              driveTextFileId: 'text-id',
+              driveMetaFileId: 'meta-id',
+              title: 'Hint title',
+            },
+          ],
+        }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(200);
+    const writtenArtifact = mockWriteArtifactToDrive.mock.calls.at(-1)?.[2] as {
+      sourceMetadata?: { url?: string; finalUrl?: string; driveMetaFileId?: string };
+      contentDateISO?: string;
+      evidence?: Array<{ excerpt: string }>;
+      suggestedActions?: Array<{ status: string }>;
+    };
+    expect(writtenArtifact.sourceMetadata?.url).toBe('https://example.com/source');
+    expect(writtenArtifact.sourceMetadata?.finalUrl).toBe('https://example.com/final');
+    expect(writtenArtifact.sourceMetadata?.driveMetaFileId).toBe('meta-id');
+    expect(writtenArtifact.contentDateISO).toBe('2024-04-15T10:30:00Z');
+    expect(writtenArtifact.evidence?.length).toBeGreaterThan(0);
+    expect(writtenArtifact.suggestedActions?.[0]?.status).toBe('proposed');
+  });
+
 
 });

@@ -15,7 +15,12 @@ export type ApiErrorCode =
   | 'forbidden'
   | 'bad_request'
   | 'not_found'
-  | 'internal_error';
+  | 'internal_error'
+  | 'url_not_allowed'
+  | 'unsupported_content_type'
+  | 'content_too_large'
+  | 'insufficient_text'
+  | 'fetch_timeout';
 
 export type ApiErrorPayload = {
   error: {

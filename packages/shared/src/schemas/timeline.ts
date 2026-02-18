@@ -18,6 +18,27 @@ export const SourceMetadataSchema = z
     driveName: z.string().optional(),
     driveModifiedTime: isoDateString.optional(),
     driveWebViewLink: z.string().optional(),
+    url: z.string().url().optional(),
+    finalUrl: z.string().url().optional(),
+    driveMetaFileId: z.string().optional(),
+    fetchedAtISO: isoDateString.optional(),
+  })
+  .strict();
+
+export const UrlSelectionSchema = z
+  .object({
+    kind: z.literal('url'),
+    url: z.string().url(),
+    driveTextFileId: z.string().min(1),
+    driveMetaFileId: z.string().min(1),
+    title: z.string().optional(),
+  })
+  .strict();
+
+export const SourceSelectionSchema = z
+  .object({
+    source: SourceType,
+    id: z.string(),
   })
   .strict();
 
@@ -210,14 +231,7 @@ export const AdminSettingsSchema = z
 
 export const SummarizeRequestSchema = z
   .object({
-    items: z.array(
-      z
-        .object({
-          source: SourceType,
-          id: z.string(),
-        })
-        .strict(),
-    ),
+    items: z.array(z.union([SourceSelectionSchema, UrlSelectionSchema])),
   })
   .strict();
 
@@ -271,6 +285,8 @@ export const ApiErrorSchema = z
 
 export type SourceType = z.infer<typeof SourceType>;
 export type SourceMetadata = z.infer<typeof SourceMetadataSchema>;
+export type UrlSelection = z.infer<typeof UrlSelectionSchema>;
+export type SourceSelection = z.infer<typeof SourceSelectionSchema>;
 export type SummaryArtifact = z.infer<typeof SummaryArtifactSchema>;
 export type DriveSummaryEnvelope = z.infer<typeof DriveSummaryEnvelopeSchema>;
 export type DriveSummaryJson = z.infer<typeof DriveSummaryJsonSchema>;
