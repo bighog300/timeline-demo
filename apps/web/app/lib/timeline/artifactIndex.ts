@@ -30,8 +30,14 @@ const parseJson = (data: unknown): unknown => {
   }
 };
 
-const sanitizeArray = (values?: string[]) =>
-  Array.from(new Set((values ?? []).map((value) => value.trim()).filter(Boolean))).slice(0, 20);
+const sanitizeArray = (values?: string[], maxItems = 20) =>
+  Array.from(new Set((values ?? []).map((value) => value.trim()).filter(Boolean))).slice(0, maxItems);
+
+const topEntities = (values?: SummaryArtifact['entities']) =>
+  (values ?? [])
+    .map((entity) => ({ name: entity.name.trim(), ...(entity.type ? { type: entity.type } : {}) }))
+    .filter((entity) => entity.name)
+    .slice(0, 10);
 
 const isWriteConflictError = (error: unknown) => {
   if (!error || typeof error !== 'object') {
@@ -56,13 +62,20 @@ export const artifactToIndexEntry = (artifact: SummaryArtifact): ArtifactIndexEn
   title: artifact.title,
   ...(artifact.contentDateISO ? { contentDateISO: artifact.contentDateISO } : {}),
   tags: sanitizeArray([
+    ...(artifact.tags ?? []),
     ...(artifact.sourceMetadata?.labels ?? []),
     ...(artifact.sourceMetadata?.mimeType ? [artifact.sourceMetadata.mimeType] : []),
   ]),
+  topics: sanitizeArray(artifact.topics),
   participants: sanitizeArray([
+    ...(artifact.participants ?? []),
     ...(artifact.sourceMetadata?.from ? [artifact.sourceMetadata.from] : []),
     ...(artifact.sourceMetadata?.to ? [artifact.sourceMetadata.to] : []),
-  ]),
+  ], 30),
+  entities: topEntities(artifact.entities),
+  decisionsCount: artifact.decisions?.length ?? 0,
+  openLoopsCount: artifact.openLoops?.length ?? 0,
+  risksCount: artifact.risks?.length ?? 0,
   updatedAtISO: artifact.createdAtISO,
 });
 

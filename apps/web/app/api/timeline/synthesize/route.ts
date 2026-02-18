@@ -339,8 +339,13 @@ export const POST = async (request: NextRequest) => {
         content: providerOutput.synthesis.content,
         citations: citations.map((citation) => ({ artifactId: citation.artifactId, excerpt: citation.excerpt })),
         summary: providerOutput.synthesis.content.slice(0, 220),
-        tags: body.tags,
-        participants: body.participants,
+        tags: providerOutput.synthesis.tags ?? body.tags,
+        topics: providerOutput.synthesis.topics,
+        participants: providerOutput.synthesis.participants ?? body.participants,
+        entities: providerOutput.synthesis.entities,
+        decisions: providerOutput.synthesis.decisions,
+        openLoops: providerOutput.synthesis.openLoops,
+        risks: providerOutput.synthesis.risks,
         ...(normalizedSuggestedActions?.length ? { suggestedActions: normalizedSuggestedActions } : {}),
       });
 
@@ -367,8 +372,13 @@ export const POST = async (request: NextRequest) => {
           kind: 'synthesis',
           title: providerOutput.synthesis.title,
           contentDateISO: createdAtISO,
-          tags: body.tags,
-          participants: body.participants,
+          tags: providerOutput.synthesis.tags ?? body.tags,
+          topics: providerOutput.synthesis.topics,
+          participants: providerOutput.synthesis.participants ?? body.participants,
+          entities: providerOutput.synthesis.entities?.slice(0, 10),
+          decisionsCount: providerOutput.synthesis.decisions?.length ?? 0,
+          openLoopsCount: providerOutput.synthesis.openLoops?.length ?? 0,
+          risksCount: providerOutput.synthesis.risks?.length ?? 0,
           updatedAtISO: createdAtISO,
         });
         await saveArtifactIndex(drive, driveFolderId, loadedIndex.fileId, nextIndex, ctx);

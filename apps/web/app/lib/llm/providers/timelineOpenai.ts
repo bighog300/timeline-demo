@@ -11,7 +11,7 @@ import {
 import type { TimelineProvider } from './types';
 
 const jsonOnlyInstruction =
-  'Return ONLY valid JSON with keys summary (string), highlights (string[]), evidence (array optional), dateConfidence (number 0..1 optional), and contentDateISO (string|null), and optional suggestedActions (array of {id?: string, type: "reminder"|"task"|"calendar", text: string, dueDateISO?: string|null, confidence?: number|null}). No prose.';
+  'Return ONLY valid JSON with keys summary (string), highlights (string[]), evidence (array optional), dateConfidence (number 0..1 optional), contentDateISO (string|null), optional suggestedActions, and optional structured fields: entities[{name,type?}], decisions[{text,dateISO?,owner?,confidence?}], openLoops[{text,owner?,dueDateISO?,status?,confidence?}], risks[{text,severity?,likelihood?,owner?,mitigation?,confidence?}], participants[string[]], tags[string[]], topics[string[]]. Keep extraction grounded only in source text. No prose.';
 
 const dateOnlyJsonInstruction =
   'Return ONLY valid JSON: {"contentDateISO": string|null}. Use null when no primary date is present. No prose.';
@@ -20,7 +20,7 @@ const timelineChatJsonInstruction =
   'Return ONLY valid JSON: {"answer": string, "citations": [{"artifactId": string, "excerpt": string}], "usedArtifactIds": string[]}. Use only provided artifacts and do not hallucinate sources.';
 
 const timelineSynthesisJsonInstruction =
-  'Return ONLY valid JSON: {"synthesis": {"synthesisId": string, "mode": "briefing"|"status_report"|"decision_log"|"open_loops", "title": string, "createdAtISO": string|null, "content": string, "keyPoints"?: string[], "decisions"?: string[], "risks"?: string[], "openLoops"?: string[], "suggestedActions"?: [{"id"?: string, "type": "reminder"|"task"|"calendar", "text": string, "dueDateISO"?: string|null, "confidence"?: number|null}]}, "citations": [{"artifactId": string, "excerpt": string}]}. Use ONLY provided artifacts and never fabricate sources.';
+  'Return ONLY valid JSON: {"synthesis": {"synthesisId": string, "mode": "briefing"|"status_report"|"decision_log"|"open_loops", "title": string, "createdAtISO": string|null, "content": string, "keyPoints"?: string[], "entities"?: [{"name": string, "type"?: "person"|"org"|"project"|"product"|"place"|"other"}], "decisions"?: [{"text": string, "dateISO"?: string|null, "owner"?: string|null, "confidence"?: number|null}], "risks"?: [{"text": string, "severity"?: "low"|"medium"|"high", "likelihood"?: "low"|"medium"|"high", "owner"?: string|null, "mitigation"?: string|null, "confidence"?: number|null}], "openLoops"?: [{"text": string, "owner"?: string|null, "dueDateISO"?: string|null, "status"?: "open"|"closed", "confidence"?: number|null}], "participants"?: string[], "tags"?: string[], "topics"?: string[], "suggestedActions"?: [{"id"?: string, "type": "reminder"|"task"|"calendar", "text": string, "dueDateISO"?: string|null, "confidence"?: number|null}]}, "citations": [{"artifactId": string, "excerpt": string}]}. Use ONLY provided artifacts and never fabricate sources.';
 
 const defaultSummaryPrompt = 'Create a concise summary of the source.';
 const defaultHighlightsPrompt = 'Extract key highlights as short bullet-friendly phrases.';
@@ -51,6 +51,7 @@ const buildTimelineSynthesisPrompt = (
     'Keep suggestedActions practical and non-speculative.',
     'Set dueDateISO only if explicit date/time exists in provided artifacts; otherwise omit it.',
     'Use calendar actions only when scheduling/date details are explicit in artifacts.',
+    'Optionally include consolidated entities, decisions, openLoops, and risks across artifacts; dedupe and stay grounded in provided content only.',
     '',
     `Mode: ${input.mode}`,
     `Requested title: ${input.title ?? ''}`,
@@ -115,6 +116,7 @@ const buildUserPrompt = (
     'Extract 3-5 evidence snippets as evidence[].excerpt with optional sourceId.',
     'Optionally include suggestedActions grounded in explicit source details only. Keep practical and non-speculative.',
     'Set suggestedActions[].dueDateISO only when the date/time is explicitly present in source text or metadata; otherwise omit it.',
+    'Optionally include grounded structured extraction fields: entities, decisions, openLoops, risks, participants, tags/topics. Avoid speculation.',
     '',
     `Title: ${title}`,
     `Source: ${source}`,

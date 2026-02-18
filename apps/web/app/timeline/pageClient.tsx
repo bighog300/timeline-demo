@@ -129,6 +129,10 @@ const DEFAULT_FILTERS: TimelineFilters = {
   kind: 'all',
   tag: 'all',
   text: '',
+  entity: '',
+  hasOpenLoops: false,
+  hasRisks: false,
+  hasDecisions: false,
   dateFromISO: '',
   dateToISO: '',
 };
@@ -201,6 +205,10 @@ const parseStoredFilters = (): TimelineFilters => {
       ...DEFAULT_FILTERS,
       ...parsed,
       text: typeof parsed?.text === 'string' ? parsed.text : '',
+      entity: typeof parsed?.entity === 'string' ? parsed.entity : '',
+      hasOpenLoops: Boolean(parsed?.hasOpenLoops),
+      hasRisks: Boolean(parsed?.hasRisks),
+      hasDecisions: Boolean(parsed?.hasDecisions),
       dateFromISO: typeof parsed?.dateFromISO === 'string' ? parsed.dateFromISO : '',
       dateToISO: typeof parsed?.dateToISO === 'string' ? parsed.dateToISO : '',
     };
@@ -513,6 +521,10 @@ export default function TimelinePageClient() {
     filters.kind !== 'all' ||
     filters.tag !== 'all' ||
     filters.text.trim().length > 0 ||
+    filters.entity.trim().length > 0 ||
+    filters.hasOpenLoops ||
+    filters.hasRisks ||
+    filters.hasDecisions ||
     Boolean(filters.dateFromISO) ||
     Boolean(filters.dateToISO);
 
@@ -2416,6 +2428,33 @@ export default function TimelinePageClient() {
                                       >
                                         Open source file
                                       </a>
+                                    ) : null}
+                                  </div>
+                                </details>
+                              ) : null}
+
+                              {entry.entities?.length || entry.decisions?.length || entry.openLoops?.length || entry.risks?.length ? (
+                                <details className={styles.preview}>
+                                  <summary>Structured</summary>
+                                  <div className={styles.previewContent}>
+                                    {entry.entities?.length ? <p><strong>Entities:</strong> {entry.entities.map((entity) => `${entity.name}${entity.type ? ` (${entity.type})` : ''}`).join(', ')}</p> : null}
+                                    {entry.decisions?.length ? (
+                                      <>
+                                        <p><strong>Decisions</strong></p>
+                                        <ul className={styles.highlights}>{entry.decisions.slice(0, isExpanded ? undefined : 3).map((item, idx) => <li key={`${entry.key}-decision-${idx}`}>{item.text}</li>)}</ul>
+                                      </>
+                                    ) : null}
+                                    {entry.openLoops?.length ? (
+                                      <>
+                                        <p><strong>Open loops</strong></p>
+                                        <ul className={styles.highlights}>{entry.openLoops.filter((loop) => (loop.status ?? 'open') === 'open').slice(0, isExpanded ? undefined : 3).map((item, idx) => <li key={`${entry.key}-openloop-${idx}`}>{item.text}</li>)}</ul>
+                                      </>
+                                    ) : null}
+                                    {entry.risks?.length ? (
+                                      <>
+                                        <p><strong>Risks</strong></p>
+                                        <ul className={styles.highlights}>{entry.risks.slice(0, isExpanded ? undefined : 3).map((item, idx) => <li key={`${entry.key}-risk-${idx}`}>{item.text}</li>)}</ul>
+                                      </>
                                     ) : null}
                                   </div>
                                 </details>

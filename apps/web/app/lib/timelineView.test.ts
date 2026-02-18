@@ -25,6 +25,11 @@ const buildEntry = (partial: Partial<TimelineEntry>): TimelineEntry => ({
   highlights: partial.highlights,
   sourcePreview: partial.sourcePreview,
   sourceMetadata: partial.sourceMetadata,
+  entities: partial.entities,
+  decisions: partial.decisions,
+  openLoops: partial.openLoops,
+  risks: partial.risks,
+  participants: partial.participants,
   metadata: partial.metadata,
 });
 
@@ -69,6 +74,10 @@ describe('timelineView', () => {
       kind: 'summary',
       tag: 'all',
       text: 'kickoff',
+      entity: '',
+      hasOpenLoops: false,
+      hasRisks: false,
+      hasDecisions: false,
     };
 
     const filtered = filterEntries(entries, filters);

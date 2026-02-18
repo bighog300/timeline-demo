@@ -31,6 +31,53 @@ const normalizeSuggestedActions = (value: unknown) => {
     });
 };
 
+
+const normalizeEntities = (value: unknown) =>
+  Array.isArray(value)
+    ? value
+        .filter((item) => item && typeof item === 'object')
+        .map((item) => ({
+          name: normalizeString((item as { name?: unknown }).name) ?? '',
+          type: normalizeString((item as { type?: unknown }).type),
+        }))
+        .filter((item) => item.name)
+    : undefined;
+
+const normalizeStructuredRows = (value: unknown, kind: 'decision' | 'openLoop' | 'risk') =>
+  Array.isArray(value)
+    ? value
+        .filter((item) => item && typeof item === 'object')
+        .map((item) => {
+          const row = item as Record<string, unknown>;
+          if (kind === 'decision') {
+            return {
+              text: normalizeString(row.text) ?? '',
+              dateISO: row.dateISO === null ? null : normalizeString(row.dateISO),
+              owner: row.owner === null ? null : normalizeString(row.owner),
+              confidence: typeof row.confidence === 'number' ? row.confidence : row.confidence === null ? null : undefined,
+            };
+          }
+          if (kind === 'openLoop') {
+            return {
+              text: normalizeString(row.text) ?? '',
+              owner: row.owner === null ? null : normalizeString(row.owner),
+              dueDateISO: row.dueDateISO === null ? null : normalizeString(row.dueDateISO),
+              status: normalizeString(row.status),
+              confidence: typeof row.confidence === 'number' ? row.confidence : row.confidence === null ? null : undefined,
+            };
+          }
+          return {
+            text: normalizeString(row.text) ?? '',
+            severity: normalizeString(row.severity),
+            likelihood: normalizeString(row.likelihood),
+            owner: row.owner === null ? null : normalizeString(row.owner),
+            mitigation: row.mitigation === null ? null : normalizeString(row.mitigation),
+            confidence: typeof row.confidence === 'number' ? row.confidence : row.confidence === null ? null : undefined,
+          };
+        })
+        .filter((item) => item.text)
+    : undefined;
+
 const normalizeSourceMetadata = (value: unknown) => {
   if (!isRecord(value)) {
     return undefined;
@@ -82,6 +129,13 @@ const coerceArtifact = (value: unknown): SummaryArtifact | null => {
     sourceMetadata: normalizeSourceMetadata(value.sourceMetadata),
     sourcePreview: normalizeString(value.sourcePreview),
     suggestedActions: normalizeSuggestedActions(value.suggestedActions),
+    entities: normalizeEntities(value.entities),
+    decisions: normalizeStructuredRows(value.decisions, 'decision'),
+    openLoops: normalizeStructuredRows(value.openLoops, 'openLoop'),
+    risks: normalizeStructuredRows(value.risks, 'risk'),
+    participants: normalizeStringArray(value.participants),
+    tags: normalizeStringArray(value.tags),
+    topics: normalizeStringArray(value.topics),
     driveFolderId: typeof value.driveFolderId === 'string' ? value.driveFolderId : '',
     driveFileId: typeof value.driveFileId === 'string' ? value.driveFileId : '',
     driveWebViewLink: normalizeString(value.driveWebViewLink),

@@ -182,7 +182,7 @@ export const summarizeTimelineItems = async (
     try {
       const resolved = await resolveSourceContent(drive, gmail, item, driveFolderId);
 
-      const { summary, highlights, evidence, dateConfidence, contentDateISO, model, suggestedActions } = await time(ctx, 'summarize', async () =>
+      const { summary, highlights, evidence, dateConfidence, contentDateISO, model, suggestedActions, entities, decisions, openLoops, risks, participants, tags, topics } = await time(ctx, 'summarize', async () =>
         timelineProvider.summarize(
           {
             title: resolved.title,
@@ -212,6 +212,13 @@ export const summarizeTimelineItems = async (
         ...(evidence?.length ? { evidence } : {}),
         ...(typeof dateConfidence === 'number' ? { dateConfidence } : {}),
         ...(normalizedSuggestedActions?.length ? { suggestedActions: normalizedSuggestedActions } : {}),
+        ...(entities?.length ? { entities } : {}),
+        ...(decisions?.length ? { decisions } : {}),
+        ...(openLoops?.length ? { openLoops } : {}),
+        ...(risks?.length ? { risks } : {}),
+        ...(participants?.length ? { participants } : {}),
+        ...(tags?.length ? { tags } : {}),
+        ...(topics?.length ? { topics } : {}),
         sourceMetadata: resolved.metadata,
         sourcePreview,
         driveFolderId,

@@ -507,3 +507,81 @@ describe('shared schemas', () => {
     expect(result.success).toBe(true);
   });
 });
+
+describe('structured intelligence schemas', () => {
+  it('accepts structured fields on summary artifact', () => {
+    const result = SummaryArtifactSchema.safeParse({
+      artifactId: 'artifact-structured',
+      source: 'drive',
+      sourceId: 'source-1',
+      title: 'Structured title',
+      createdAtISO: '2026-01-01T12:00:00Z',
+      summary: 'Summary text',
+      highlights: ['One'],
+      entities: [{ name: 'Alice', type: 'person' }],
+      decisions: [{ text: 'Proceed with launch', confidence: 0.8 }],
+      openLoops: [{ text: 'Confirm owner', status: 'open', confidence: 0.6 }],
+      risks: [{ text: 'Supplier delay risk', severity: 'high', confidence: 0.7 }],
+      driveFolderId: 'folder-1',
+      driveFileId: 'file-1',
+      model: 'test-model',
+      version: 1,
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid structured confidence and short text', () => {
+    const badConfidence = SummaryArtifactSchema.safeParse({
+      artifactId: 'artifact-structured',
+      source: 'drive',
+      sourceId: 'source-1',
+      title: 'Structured title',
+      createdAtISO: '2026-01-01T12:00:00Z',
+      summary: 'Summary text',
+      highlights: ['One'],
+      decisions: [{ text: 'Proceed with launch', confidence: 1.8 }],
+      driveFolderId: 'folder-1',
+      driveFileId: 'file-1',
+      model: 'test-model',
+      version: 1,
+    });
+
+    const badText = SummaryArtifactSchema.safeParse({
+      artifactId: 'artifact-structured',
+      source: 'drive',
+      sourceId: 'source-1',
+      title: 'Structured title',
+      createdAtISO: '2026-01-01T12:00:00Z',
+      summary: 'Summary text',
+      highlights: ['One'],
+      decisions: [{ text: 'no', confidence: 0.5 }],
+      driveFolderId: 'folder-1',
+      driveFileId: 'file-1',
+      model: 'test-model',
+      version: 1,
+    });
+
+    expect(badConfidence.success).toBe(false);
+    expect(badText.success).toBe(false);
+  });
+
+  it('accepts artifact index entries with and without structured rollups', async () => {
+    const { ArtifactIndexEntrySchema } = await import('./index.js');
+    const legacy = ArtifactIndexEntrySchema.safeParse({
+      id: 'a1',
+      driveFileId: 'f1',
+    });
+    const structured = ArtifactIndexEntrySchema.safeParse({
+      id: 'a2',
+      driveFileId: 'f2',
+      entities: [{ name: 'Project Atlas', type: 'project' }],
+      decisionsCount: 2,
+      openLoopsCount: 3,
+      risksCount: 1,
+    });
+
+    expect(legacy.success).toBe(true);
+    expect(structured.success).toBe(true);
+  });
+});
