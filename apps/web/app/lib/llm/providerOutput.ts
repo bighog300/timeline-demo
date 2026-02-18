@@ -52,6 +52,7 @@ const TimelineSynthesisProviderOutputSchema = z
         decisions: z.array(z.string()).optional(),
         risks: z.array(z.string()).optional(),
         openLoops: z.array(z.string()).optional(),
+        suggestedActions: z.array(SuggestedActionProviderSchema).optional(),
       })
       .passthrough(),
     citations: z
@@ -345,6 +346,9 @@ export const parseTimelineSynthesisProviderOutput = (
         : {}),
       ...(normalizeStringList(parsed.data.synthesis.openLoops, MAX_SYNTHESIS_ITEMS).length
         ? { openLoops: normalizeStringList(parsed.data.synthesis.openLoops, MAX_SYNTHESIS_ITEMS) }
+        : {}),
+      ...(parsed.data.synthesis.suggestedActions
+        ? { suggestedActions: normalizeSuggestedActions(parsed.data.synthesis.suggestedActions) }
         : {}),
     },
     citations: normalizeTimelineCitations(parsed.data.citations, {

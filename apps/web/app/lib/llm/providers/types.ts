@@ -83,6 +83,7 @@ export type TimelineSynthesizeOutput = {
     decisions?: string[];
     risks?: string[];
     openLoops?: string[];
+    suggestedActions?: SuggestedActionOutput[];
   };
   citations: TimelineSynthesisCitation[];
 };

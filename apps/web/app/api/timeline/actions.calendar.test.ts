@@ -40,6 +40,28 @@ const mockGetGoogleAccessToken = vi.mocked(getGoogleAccessToken);
 const mockCreateDriveClient = vi.mocked(createDriveClient);
 const mockCreateCalendarEvent = vi.mocked(createCalendarEvent);
 
+
+const buildSynthesisArtifact = (overrides?: Record<string, unknown>) => ({
+  kind: 'synthesis',
+  id: 'syn-1',
+  title: 'Synthesis Title',
+  mode: 'briefing',
+  createdAtISO: '2024-01-01T00:00:00Z',
+  sourceArtifactIds: ['a1'],
+  content: 'content',
+  citations: [{ artifactId: 'a1', excerpt: 'x' }],
+  suggestedActions: [
+    {
+      id: 'syn-calendar',
+      type: 'calendar',
+      text: 'Set synthesis follow-up',
+      dueDateISO: '2024-02-10T09:00:00Z',
+      status: 'proposed',
+    },
+  ],
+  ...overrides,
+});
+
 const buildArtifact = (overrides?: Record<string, unknown>) => ({
   type: 'summary',
   status: 'complete',
@@ -102,6 +124,34 @@ describe('POST /api/timeline/actions calendar integration', () => {
     const body = JSON.parse(update.mock.calls[0][0].media.body as string);
     expect(body.suggestedActions[0].calendarEvent).toMatchObject({ id: 'event-123' });
     expect(body.suggestedActions[0].status).toBe('accepted');
+  });
+
+
+  it('accepts synthesis calendar action and persists calendarEvent', async () => {
+    const update = vi.fn().mockResolvedValue({ data: { id: 'artifact-file-1' } });
+    mockCreateCalendarEvent.mockResolvedValue({
+      id: 'event-456',
+      htmlLink: 'https://calendar.google.com/calendar/event?eid=def',
+      startISO: '2024-02-10T09:00:00Z',
+      endISO: '2024-02-10T10:00:00Z',
+    });
+    mockCreateDriveClient.mockReturnValue({
+      files: {
+        get: vi.fn().mockResolvedValue({ data: buildSynthesisArtifact() }),
+        update,
+        list: vi.fn().mockResolvedValue({ data: { files: [] } }),
+        create: vi.fn(),
+      },
+    } as never);
+
+    const response = await POST(new Request('http://localhost/api/timeline/actions', {
+      method: 'POST',
+      body: JSON.stringify({ artifactId: 'artifact-file-1', actionId: 'syn-calendar', decision: 'accept' }),
+    }) as never);
+
+    expect(response.status).toBe(200);
+    const body = JSON.parse(update.mock.calls[0][0].media.body as string);
+    expect(body.suggestedActions[0].calendarEvent.id).toBe('event-456');
   });
 
   it('returns 400 when calendar action is accepted without dueDateISO', async () => {

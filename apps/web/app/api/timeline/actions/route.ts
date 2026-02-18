@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { DriveSummaryJsonSchema } from '@timeline/shared';
+import { DriveSummaryJsonSchema, SynthesisArtifactSchema } from '@timeline/shared';
 import { z } from 'zod';
 
 import { jsonError } from '../../../lib/apiErrors';
@@ -57,6 +57,24 @@ const parseDriveJson = (data: unknown): unknown => {
     }
   }
   return data;
+};
+
+
+const parseArtifactForActions = (value: unknown):
+  | { kind: 'summary'; artifact: ReturnType<typeof DriveSummaryJsonSchema.parse> }
+  | { kind: 'synthesis'; artifact: ReturnType<typeof SynthesisArtifactSchema.parse> }
+  | null => {
+  const synthesis = SynthesisArtifactSchema.safeParse(value);
+  if (synthesis.success) {
+    return { kind: 'synthesis', artifact: synthesis.data };
+  }
+
+  const summary = DriveSummaryJsonSchema.safeParse(value);
+  if (summary.success) {
+    return { kind: 'summary', artifact: summary.data };
+  }
+
+  return null;
 };
 
 const appendActionLogBestEffort = async (
@@ -212,12 +230,12 @@ export const POST = async (request: NextRequest) => {
     return respond(jsonError(mapped.status, mapped.code, mapped.message, mapped.details));
   }
 
-  const parsed = DriveSummaryJsonSchema.safeParse(parseDriveJson(fileResponse.data));
-  if (!parsed.success) {
+  const parsedArtifact = parseArtifactForActions(parseDriveJson(fileResponse.data));
+  if (!parsedArtifact) {
     return respond(jsonError(400, 'invalid_request', 'Artifact data was invalid.'));
   }
 
-  const artifact = parsed.data;
+  const artifact = parsedArtifact.artifact;
   const status = body.decision === 'accept' ? 'accepted' : 'dismissed';
   const nowISO = new Date().toISOString();
   const existingActions = artifact.suggestedActions ?? [];
@@ -307,11 +325,17 @@ export const POST = async (request: NextRequest) => {
     };
   });
 
-  const nextArtifact = {
-    ...artifact,
-    suggestedActions: nextActions,
-    updatedAtISO: nowISO,
-  };
+  const nextArtifact =
+    parsedArtifact.kind === 'summary'
+      ? {
+          ...artifact,
+          suggestedActions: nextActions,
+          updatedAtISO: nowISO,
+        }
+      : {
+          ...artifact,
+          suggestedActions: nextActions,
+        };
 
   try {
     await withRetry((signal) =>

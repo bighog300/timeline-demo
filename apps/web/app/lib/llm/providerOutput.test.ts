@@ -210,6 +210,42 @@ describe('parseTimelineSynthesisProviderOutput', () => {
     expect(parsed.citations).toEqual([{ artifactId: 'a1', excerpt: 'Evidence excerpt' }]);
   });
 
+
+  it('normalizes synthesis suggestedActions with dedupe and clamp', () => {
+    const parsed = parseTimelineSynthesisProviderOutput(
+      JSON.stringify({
+        synthesis: {
+          content: 'valid content',
+          suggestedActions: [
+            { type: 'task', text: ' Draft recap ', dueDateISO: null },
+            { type: 'task', text: 'Draft recap', dueDateISO: null },
+            ...Array.from({ length: 20 }).map((_, index) => ({ type: 'reminder', text: `Action ${index}` })),
+          ],
+        },
+        citations: [],
+      }),
+      { mode: 'briefing', title: 'Fallback title', nowISO: '2026-01-01T00:00:00Z' },
+    );
+
+    expect(parsed.synthesis.suggestedActions).toHaveLength(8);
+    expect(parsed.synthesis.suggestedActions?.[0]).toMatchObject({ type: 'task', text: 'Draft recap' });
+  });
+
+  it('throws bad_output for invalid synthesis suggestedActions shape', () => {
+    expect(() =>
+      parseTimelineSynthesisProviderOutput(
+        JSON.stringify({
+          synthesis: {
+            content: 'valid content',
+            suggestedActions: [{ type: 'task', text: 'Valid text', confidence: 4 }],
+          },
+          citations: [],
+        }),
+        { mode: 'briefing', title: 'Fallback title', nowISO: '2026-01-01T00:00:00Z' },
+      ),
+    ).toThrowError(ProviderError);
+  });
+
   it('throws bad_output when content is blank', () => {
     expect(() =>
       parseTimelineSynthesisProviderOutput(

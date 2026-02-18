@@ -45,6 +45,21 @@ const mockGetGoogleSession = vi.mocked(getGoogleSession);
 const mockGetGoogleAccessToken = vi.mocked(getGoogleAccessToken);
 const mockCreateDriveClient = vi.mocked(createDriveClient);
 
+
+const buildSynthesisArtifact = () => ({
+  kind: 'synthesis',
+  id: 'syn-1',
+  title: 'Synthesis Title',
+  mode: 'briefing',
+  createdAtISO: '2024-01-01T00:00:00Z',
+  sourceArtifactIds: ['a1'],
+  content: 'content',
+  citations: [{ artifactId: 'a1', excerpt: 'x' }],
+  suggestedActions: [
+    { id: 'syn-act-1', type: 'task', text: 'Review synthesis', status: 'proposed', createdAtISO: '2024-01-01T00:00:00Z' },
+  ],
+});
+
 const buildArtifact = () => ({
   type: 'summary',
   status: 'complete',
@@ -126,6 +141,29 @@ describe('POST /api/timeline/actions', () => {
     expect(response.status).toBe(200);
     const payload = await response.json();
     expect(payload.status).toBe('dismissed');
+  });
+
+
+  it('accept/dismiss updates synthesis artifact actions', async () => {
+    const update = vi.fn().mockResolvedValue({ data: { id: 'artifact-file-1' } });
+    mockCreateDriveClient.mockReturnValue({
+      files: {
+        get: vi.fn().mockResolvedValue({ data: buildSynthesisArtifact() }),
+        update,
+        list: vi.fn().mockResolvedValue({ data: { files: [] } }),
+        create: vi.fn(),
+      },
+    } as never);
+
+    const response = await POST(new Request('http://localhost/api/timeline/actions', {
+      method: 'POST',
+      body: JSON.stringify({ artifactId: 'artifact-file-1', actionId: 'syn-act-1', decision: 'dismiss' }),
+    }) as never);
+
+    expect(response.status).toBe(200);
+    const body = JSON.parse(update.mock.calls[0][0].media.body as string);
+    expect(body.suggestedActions[0].status).toBe('dismissed');
+    expect(body.updatedAtISO).toBeUndefined();
   });
 
   it('returns 404 when action is not found', async () => {
