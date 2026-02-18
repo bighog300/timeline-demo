@@ -156,7 +156,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
 
   const loadSavedSelectionSets = async () => {
     setSavedSetsLoading(true);
-    const response = await fetch('/api/selection-sets');
+    const response = await fetch('/api/saved-searches');
     if (response.status === 401) {
       setError('reconnect_required');
       setSavedSetsLoading(false);
@@ -532,7 +532,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     setSavedSearchRetryTarget(null);
 
     try {
-      const selectionResponse = await fetch(`/api/selection-sets/${id}`);
+      const selectionResponse = await fetch(`/api/saved-searches/${id}`);
       if (!selectionResponse.ok) {
         const apiError = await parseApiError(selectionResponse);
         setSavedSearchRequestId(apiError?.requestId ?? null);
@@ -736,14 +736,14 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     }
 
     const defaultTitle = `${selectedSenders[0] ?? 'Gmail search'} · ${daysBack === 'custom' ? 'Custom date' : `${daysBack} days`}`;
-    const rawTitle = window.prompt('Save search as selection set', defaultTitle);
+    const rawTitle = window.prompt('Create saved search', defaultTitle);
     if (!rawTitle) {
       return;
     }
 
     const title = rawTitle.trim();
     if (!title) {
-      setNotice('Selection set title is required.');
+      setNotice('Saved search title is required.');
       return;
     }
 
@@ -755,7 +755,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
       }
     }
 
-    const response = await fetch('/api/selection-sets', {
+    const response = await fetch('/api/saved-searches', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -777,7 +777,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     }
 
     if (!response.ok) {
-      setNotice('Unable to save selection set. Please try again.');
+      setNotice('Unable to save saved search. Please try again.');
       return;
     }
 
@@ -786,14 +786,14 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
   };
 
   const applySavedSelectionSet = async (id: string) => {
-    const response = await fetch(`/api/selection-sets/${id}`);
+    const response = await fetch(`/api/saved-searches/${id}`);
     if (response.status === 401) {
       setError('reconnect_required');
       return;
     }
 
     if (!response.ok) {
-      setNotice('Unable to load selection set.');
+      setNotice('Unable to load saved search.');
       return;
     }
 
@@ -822,14 +822,14 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
   };
 
   const runSavedSelectionSet = async (id: string) => {
-    const response = await fetch(`/api/selection-sets/${id}`);
+    const response = await fetch(`/api/saved-searches/${id}`);
     if (response.status === 401) {
       setError('reconnect_required');
       return;
     }
 
     if (!response.ok) {
-      setNotice('Unable to load selection set.');
+      setNotice('Unable to load saved search.');
       return;
     }
 
@@ -893,7 +893,7 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
         <div className={styles.panelHeader}>
           <h2>Saved searches</h2>
           <Button variant="secondary" onClick={saveSelectionSet} disabled={!queryPreview}>
-            Save search as selection set
+            Create saved search
           </Button>
         </div>
         {savedSetsLoading ? <p className={styles.muted}>Loading saved searches...</p> : null}

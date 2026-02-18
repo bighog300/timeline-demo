@@ -171,7 +171,7 @@ describe('ChatPageClient', () => {
   });
 
 
-  it('renders selection set and run citations to /selection-sets while keeping summary links', async () => {
+  it('renders selection set and run citations to /saved-searches while keeping summary links', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -201,8 +201,8 @@ describe('ChatPageClient', () => {
     const runLink = screen.getByRole('link', { name: /Run run-1/i });
 
     expect(launchLink.getAttribute('href')).toContain('/timeline?artifactId=summary-1');
-    expect(setLink.getAttribute('href')).toBe('/selection-sets');
-    expect(runLink.getAttribute('href')).toBe('/selection-sets');
+    expect(setLink.getAttribute('href')).toBe('/saved-searches');
+    expect(runLink.getAttribute('href')).toBe('/saved-searches');
   });
 
   it.each([
