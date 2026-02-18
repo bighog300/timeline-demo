@@ -22,6 +22,7 @@ import { createCtx, withRequestId } from '../../../lib/requestContext';
 import { ProviderError } from '../../../lib/llm/providerErrors';
 import { getTimelineProviderFromDrive } from '../../../lib/llm/providerRouter';
 import { upsertArtifactIndex } from '../../../lib/timeline/artifactIndex';
+import { canonicalizeEntities, readEntityAliasesFromDrive } from '../../../lib/entities/aliases';
 
 const MAX_ITEMS = 10;
 const PREVIEW_CHARS = 600;
@@ -158,6 +159,12 @@ export const summarizeTimelineItems = async (
 
   const gmail = createGmailClient(accessToken);
   const drive = createDriveClient(accessToken);
+  let aliasConfig = { version: 1 as const, updatedAtISO: new Date().toISOString(), aliases: [] as never[] };
+  try {
+    aliasConfig = (await readEntityAliasesFromDrive(drive, driveFolderId, ctx)).aliases as typeof aliasConfig;
+  } catch {
+    // alias loading is best-effort
+  }
 
   let timelineProvider: Awaited<ReturnType<typeof getTimelineProviderFromDrive>>['provider'];
   let settings: Awaited<ReturnType<typeof getTimelineProviderFromDrive>>['settings'];
@@ -195,6 +202,7 @@ export const summarizeTimelineItems = async (
       );
 
       const createdAtISO = new Date().toISOString();
+      const canonicalEntities = canonicalizeEntities(entities, aliasConfig);
       const normalizedSuggestedActions = normalizeSuggestedActionsForArtifact(suggestedActions, createdAtISO);
       const sourcePreview =
         resolved.text.length > PREVIEW_CHARS
@@ -212,7 +220,7 @@ export const summarizeTimelineItems = async (
         ...(evidence?.length ? { evidence } : {}),
         ...(typeof dateConfidence === 'number' ? { dateConfidence } : {}),
         ...(normalizedSuggestedActions?.length ? { suggestedActions: normalizedSuggestedActions } : {}),
-        ...(entities?.length ? { entities } : {}),
+        ...(canonicalEntities.length ? { entities: canonicalEntities } : {}),
         ...(decisions?.length ? { decisions } : {}),
         ...(openLoops?.length ? { openLoops } : {}),
         ...(risks?.length ? { risks } : {}),

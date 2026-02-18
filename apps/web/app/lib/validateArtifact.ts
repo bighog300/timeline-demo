@@ -63,6 +63,9 @@ const normalizeStructuredRows = (value: unknown, kind: 'decision' | 'openLoop' |
               owner: row.owner === null ? null : normalizeString(row.owner),
               dueDateISO: row.dueDateISO === null ? null : normalizeString(row.dueDateISO),
               status: normalizeString(row.status),
+              closedAtISO: row.closedAtISO === null ? null : normalizeString(row.closedAtISO),
+              closedReason: row.closedReason === null ? null : normalizeString(row.closedReason),
+              sourceActionId: row.sourceActionId === null ? null : normalizeString(row.sourceActionId),
               confidence: typeof row.confidence === 'number' ? row.confidence : row.confidence === null ? null : undefined,
             };
           }

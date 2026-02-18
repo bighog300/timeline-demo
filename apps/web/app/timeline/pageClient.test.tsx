@@ -6,13 +6,14 @@ import TimelinePageClient from './pageClient';
 
 const mockUseSession = vi.fn();
 const pushMock = vi.fn();
+let mockSearchParams = new URLSearchParams();
 
 vi.mock('next-auth/react', () => ({
   useSession: () => mockUseSession(),
 }));
 
 vi.mock('next/navigation', () => ({
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => mockSearchParams,
   useRouter: () => ({
     push: pushMock,
   }),
@@ -157,6 +158,7 @@ describe('TimelinePageClient', () => {
     window.localStorage.clear();
     vi.restoreAllMocks();
     pushMock.mockClear();
+    mockSearchParams = new URLSearchParams();
     mockUseSession.mockReturnValue({
       data: { driveFolderId: 'folder-1' },
       status: 'authenticated',
@@ -1212,6 +1214,37 @@ describe('TimelinePageClient', () => {
         'href',
         'https://calendar.google.com/calendar/event?eid=abc',
       );
+    });
+  });
+
+
+  it('renders open loops and closes via API', async () => {
+    setSelections();
+    window.localStorage.setItem('timeline.summaryArtifacts', JSON.stringify({
+      'gmail:msg-1': {
+        ...syncArtifact,
+        openLoops: [{ text: 'Follow up with legal', status: 'open' }],
+      },
+    }));
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === '/api/timeline/index/get') return new Response(JSON.stringify({ index: null }), { status: 200 });
+      if (url === '/api/timeline/selection/list') return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      if (url === '/api/timeline/open-loops' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ ok: true, updatedOpenLoops: [{ text: 'Follow up with legal', status: 'closed', closedAtISO: '2026-01-01T00:00:00Z' }] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    render(<TimelinePageClient />);
+
+    fireEvent.click(await screen.findByText('Structured'));
+    fireEvent.click(await screen.findByRole('button', { name: /mark closed/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/timeline/open-loops', expect.any(Object));
     });
   });
 

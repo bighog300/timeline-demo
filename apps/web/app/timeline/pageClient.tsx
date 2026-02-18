@@ -133,6 +133,7 @@ const DEFAULT_FILTERS: TimelineFilters = {
   hasOpenLoops: false,
   hasRisks: false,
   hasDecisions: false,
+  riskSeverity: 'all',
   dateFromISO: '',
   dateToISO: '',
 };
@@ -209,6 +210,7 @@ const parseStoredFilters = (): TimelineFilters => {
       hasOpenLoops: Boolean(parsed?.hasOpenLoops),
       hasRisks: Boolean(parsed?.hasRisks),
       hasDecisions: Boolean(parsed?.hasDecisions),
+      riskSeverity: parsed?.riskSeverity === 'low' || parsed?.riskSeverity === 'medium' || parsed?.riskSeverity === 'high' ? parsed.riskSeverity : 'all',
       dateFromISO: typeof parsed?.dateFromISO === 'string' ? parsed.dateFromISO : '',
       dateToISO: typeof parsed?.dateToISO === 'string' ? parsed.dateToISO : '',
     };
@@ -225,6 +227,9 @@ const persistArtifacts = (
   window.localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(merged));
   return merged;
 };
+
+
+const parseBooleanParam = (value: string | null) => value === '1' || value === 'true';
 
 const toEpochMs = (value?: string) => {
   if (!value) {
@@ -391,6 +396,8 @@ export default function TimelinePageClient() {
   const [actionError, setActionError] = useState<ActionDecisionError>(null);
   const [actionErrorsByKey, setActionErrorsByKey] = useState<Record<string, string>>({});
   const [pendingActionKeys, setPendingActionKeys] = useState<Set<string>>(new Set());
+  const [pendingOpenLoopKeys, setPendingOpenLoopKeys] = useState<Set<string>>(new Set());
+  const [openLoopErrorsByKey, setOpenLoopErrorsByKey] = useState<Record<string, string>>({});
   const [indexRequestId, setIndexRequestId] = useState<string | null>(null);
   const [indexMessage, setIndexMessage] = useState<string | null>(null);
   const timelineTopRef = useRef<HTMLDivElement | null>(null);
@@ -1187,6 +1194,31 @@ export default function TimelinePageClient() {
     jumpedArtifactRef.current = artifactId;
   }, [artifacts, jumpToArtifactByDriveId, searchParams]);
 
+
+  useEffect(() => {
+    const nextEntity = searchParams?.get('entity')?.trim() ?? '';
+    const hasOpenLoops = parseBooleanParam(searchParams?.get('hasOpenLoops') ?? null);
+    const hasRisks = parseBooleanParam(searchParams?.get('hasRisks') ?? null);
+    const hasDecisions = parseBooleanParam(searchParams?.get('hasDecisions') ?? null);
+    const riskSeverityParam = searchParams?.get('riskSeverity');
+    const riskSeverity = riskSeverityParam === 'low' || riskSeverityParam === 'medium' || riskSeverityParam === 'high'
+      ? riskSeverityParam
+      : 'all';
+
+    if (!nextEntity && !hasOpenLoops && !hasRisks && !hasDecisions && riskSeverity === 'all') {
+      return;
+    }
+
+    setFilters((prev) => ({
+      ...prev,
+      entity: nextEntity || prev.entity,
+      hasOpenLoops: hasOpenLoops || prev.hasOpenLoops,
+      hasRisks: hasRisks || prev.hasRisks,
+      hasDecisions: hasDecisions || prev.hasDecisions,
+      riskSeverity: riskSeverity !== 'all' ? riskSeverity : prev.riskSeverity,
+    }));
+  }, [searchParams]);
+
   useEffect(() => {
     if (!pendingArtifactId) {
       return;
@@ -1364,6 +1396,87 @@ export default function TimelinePageClient() {
       }
     },
     [artifacts, updateArtifactActionsLocal],
+  );
+
+
+  const handleOpenLoopAction = useCallback(
+    async (
+      entryKey: string,
+      artifactDriveFileId: string,
+      openLoopIndex: number,
+      action: 'close' | 'reopen',
+    ) => {
+      const pendingKey = `${entryKey}:open-loop:${openLoopIndex}`;
+      const prevArtifacts = artifacts;
+      setOpenLoopErrorsByKey((prev) => {
+        const next = { ...prev };
+        delete next[pendingKey];
+        return next;
+      });
+      setPendingOpenLoopKeys((prev) => new Set(prev).add(pendingKey));
+
+      const prevArtifact = artifacts[entryKey];
+      if (!prevArtifact?.openLoops) {
+        setPendingOpenLoopKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(pendingKey);
+          return next;
+        });
+        return;
+      }
+
+      const nowISO = new Date().toISOString();
+      const optimisticOpenLoops = prevArtifact.openLoops.map((loop, idx) => {
+        if (idx !== openLoopIndex) return loop;
+        if (action === 'close') {
+          return { ...loop, status: 'closed' as const, closedAtISO: nowISO };
+        }
+        return { ...loop, status: 'open' as const, closedAtISO: null, closedReason: null, sourceActionId: null };
+      });
+
+      const optimisticArtifact = { ...prevArtifact, openLoops: optimisticOpenLoops };
+      const optimisticArtifacts = { ...artifacts, [entryKey]: optimisticArtifact };
+      setArtifacts(optimisticArtifacts);
+      window.localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(optimisticArtifacts));
+
+      try {
+        const response = await fetch('/api/timeline/open-loops', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ artifactId: artifactDriveFileId, openLoopIndex, action }),
+        });
+
+        if (!response.ok) {
+          setArtifacts(prevArtifacts);
+          window.localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(prevArtifacts));
+          const apiError = await parseApiError(response);
+          setOpenLoopErrorsByKey((prev) => ({
+            ...prev,
+            [pendingKey]: apiError?.message ?? 'Unable to update open loop.',
+          }));
+          return;
+        }
+
+        const payload = (await response.json()) as { updatedOpenLoops?: SummaryArtifact['openLoops'] };
+        if (payload.updatedOpenLoops && artifacts[entryKey]) {
+          const nextArtifact = { ...(artifacts[entryKey] as SummaryArtifact), openLoops: payload.updatedOpenLoops };
+          const nextArtifacts = { ...artifacts, [entryKey]: nextArtifact };
+          setArtifacts(nextArtifacts);
+          window.localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(nextArtifacts));
+        }
+      } catch {
+        setArtifacts(prevArtifacts);
+        window.localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(prevArtifacts));
+        setOpenLoopErrorsByKey((prev) => ({ ...prev, [pendingKey]: 'Unable to update open loop.' }));
+      } finally {
+        setPendingOpenLoopKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(pendingKey);
+          return next;
+        });
+      }
+    },
+    [artifacts],
   );
 
   const handleAutoSyncToggle = (checked: boolean) => {
@@ -2447,7 +2560,35 @@ export default function TimelinePageClient() {
                                     {entry.openLoops?.length ? (
                                       <>
                                         <p><strong>Open loops</strong></p>
-                                        <ul className={styles.highlights}>{entry.openLoops.filter((loop) => (loop.status ?? 'open') === 'open').slice(0, isExpanded ? undefined : 3).map((item, idx) => <li key={`${entry.key}-openloop-${idx}`}>{item.text}</li>)}</ul>
+                                        <ul className={styles.highlights}>
+                                          {entry.openLoops.slice(0, isExpanded ? undefined : 3).map((item, idx) => {
+                                            const loopKey = `${entry.key}:open-loop:${idx}`;
+                                            const pending = pendingOpenLoopKeys.has(loopKey);
+                                            const isClosed = (item.status ?? 'open') === 'closed';
+                                            const canMutate = Boolean(artifacts[entry.key]?.driveFileId);
+                                            return (
+                                              <li key={`${entry.key}-openloop-${idx}`}>
+                                                <span>
+                                                  {item.text} <em>({isClosed ? 'closed' : 'open'})</em>
+                                                  {item.closedReason ? ` — ${item.closedReason}` : ''}
+                                                </span>{' '}
+                                                <Button
+                                                  variant="ghost"
+                                                  disabled={pending || !canMutate}
+                                                  onClick={() =>
+                                                    artifacts[entry.key]?.driveFileId &&
+                                                    void handleOpenLoopAction(entry.key, artifacts[entry.key]?.driveFileId ?? '', idx, isClosed ? 'reopen' : 'close')
+                                                  }
+                                                >
+                                                  {isClosed ? 'Reopen' : 'Mark closed'}
+                                                </Button>
+                                                {openLoopErrorsByKey[loopKey] ? (
+                                                  <span className={styles.actionInlineError}> {openLoopErrorsByKey[loopKey]}</span>
+                                                ) : null}
+                                              </li>
+                                            );
+                                          })}
+                                        </ul>
                                       </>
                                     ) : null}
                                     {entry.risks?.length ? (

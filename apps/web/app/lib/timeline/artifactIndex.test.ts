@@ -85,4 +85,18 @@ describe('artifactIndex helpers', () => {
     expect(state.index.artifacts.map((item) => item.id).sort()).toEqual(['a1', 'a2', 'a3']);
     expect(state.updateCalls).toBe(2);
   });
+
+  it('counts only open openLoops in index entry rollup', () => {
+    const entry = artifactToIndexEntry(
+      artifact({
+        openLoops: [
+          { text: 'Open item', status: 'open' },
+          { text: 'Closed item', status: 'closed', closedAtISO: '2026-01-01T00:00:00Z' },
+        ],
+      }),
+    );
+
+    expect(entry.openLoopsCount).toBe(1);
+  });
+
 });
