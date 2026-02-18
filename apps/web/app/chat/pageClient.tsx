@@ -171,10 +171,15 @@ export default function ChatPageClient({
   const [summarizeMissingError, setSummarizeMissingError] = useState<string | null>(null);
   const [summarizeMissingSuccess, setSummarizeMissingSuccess] = useState<string | null>(null);
   const [showSaveSelectionPrompt, setShowSaveSelectionPrompt] = useState(false);
+  const [showAddToExistingPrompt, setShowAddToExistingPrompt] = useState(false);
   const [saveSelectionName, setSaveSelectionName] = useState('');
   const [saveSelectionLoading, setSaveSelectionLoading] = useState(false);
   const [saveSelectionError, setSaveSelectionError] = useState<string | null>(null);
   const [saveSelectionSuccess, setSaveSelectionSuccess] = useState<string | null>(null);
+  const [addToExistingLoading, setAddToExistingLoading] = useState(false);
+  const [addToExistingError, setAddToExistingError] = useState<string | null>(null);
+  const [addToExistingSuccess, setAddToExistingSuccess] = useState<string | null>(null);
+  const [addTargetFileId, setAddTargetFileId] = useState('');
 
   useEffect(() => {
     if (contextPrefs.mode !== 'selection_set') {
@@ -483,9 +488,54 @@ export default function ChatPageClient({
   const openSavePrompt = () => {
     setSaveSelectionError(null);
     setSaveSelectionSuccess(null);
+    setAddToExistingError(null);
+    setAddToExistingSuccess(null);
+    setShowAddToExistingPrompt(false);
     setSaveSelectionName(saveNameSuggestion);
     setShowSaveSelectionPrompt(true);
   };
+
+  const openAddToExistingPrompt = useCallback(async () => {
+    setShowSaveSelectionPrompt(false);
+    setSaveSelectionError(null);
+    setSaveSelectionSuccess(null);
+    setAddToExistingError(null);
+    setAddToExistingSuccess(null);
+    setAddToExistingLoading(true);
+
+    try {
+      const response = await fetch('/api/timeline/selections/list');
+      if (!response.ok) {
+        const apiError = await parseApiError(response);
+        setAddToExistingError(apiError?.message ?? `Failed to load saved selections (${response.status}).`);
+        return;
+      }
+
+      const payload = (await response.json()) as {
+        items?: Array<{ fileId?: string; name?: string }>;
+      };
+      const options = (payload.items ?? [])
+        .filter((item): item is { fileId: string; name: string } =>
+          typeof item.fileId === 'string' && typeof item.name === 'string',
+        )
+        .map((item) => ({ driveFileId: item.fileId, title: item.name }));
+
+      setSelectionSets(options);
+      setAddTargetFileId((current) =>
+        current && options.some((item) => item.driveFileId === current)
+          ? current
+          : (options[0]?.driveFileId ?? ''),
+      );
+      setShowAddToExistingPrompt(true);
+      if (options.length === 0) {
+        setAddToExistingError('No saved selections available.');
+      }
+    } catch {
+      setAddToExistingError('Failed to load saved selections.');
+    } finally {
+      setAddToExistingLoading(false);
+    }
+  }, []);
 
   const handleSaveSelectionFromContext = useCallback(async () => {
     const trimmed = saveSelectionName.trim();
@@ -534,6 +584,61 @@ export default function ChatPageClient({
       setSaveSelectionLoading(false);
     }
   }, [contextPrefs, saveSelectionName]);
+
+  const handleAddToExistingSelection = useCallback(async () => {
+    if (!addTargetFileId) {
+      setAddToExistingError('Choose a saved selection.');
+      return;
+    }
+
+    setAddToExistingLoading(true);
+    setAddToExistingError(null);
+    setAddToExistingSuccess(null);
+
+    try {
+      const response = await fetch(`/api/timeline/selections/${encodeURIComponent(addTargetFileId)}/add-from-context`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          context: contextPrefs.mode === 'recent'
+            ? {
+                mode: 'recent',
+                recentCount: contextPrefs.recentCount,
+                sourceFilter: contextPrefs.sourceFilter,
+              }
+            : {
+                mode: 'selection_set',
+                selectionSetId: contextPrefs.selectionSetId,
+                sourceFilter: contextPrefs.sourceFilter,
+              },
+        }),
+      });
+
+      if (!response.ok) {
+        const apiError = await parseApiError(response);
+        setAddToExistingError(
+          apiError?.message ?? `Failed to add context to saved selection (${response.status}).`,
+        );
+        return;
+      }
+
+      const payload = (await response.json()) as {
+        name?: string;
+        added?: number;
+        skippedDuplicates?: number;
+      };
+
+      setShowAddToExistingPrompt(false);
+      setAddToExistingSuccess(
+        `Added ${payload.added ?? 0} items to '${payload.name ?? 'Saved selection'}' (${payload.skippedDuplicates ?? 0} duplicates skipped).`,
+      );
+      router.refresh();
+    } catch {
+      setAddToExistingError('Failed to add context to saved selection.');
+    } finally {
+      setAddToExistingLoading(false);
+    }
+  }, [addTargetFileId, contextPrefs, router]);
 
 
   const handleSummarizeMissing = useCallback(async () => {
@@ -596,9 +701,14 @@ export default function ChatPageClient({
       <Card>
         <div className={styles.contextHeaderRow}>
           <h2>Artifacts in context</h2>
-          <Button type="button" variant="secondary" onClick={openSavePrompt}>
-            Save as Saved Selection
-          </Button>
+          <div className={styles.promptActions}>
+            <Button type="button" variant="secondary" onClick={openSavePrompt}>
+              Save as new Saved Selection
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => void openAddToExistingPrompt()}>
+              Add to existing...
+            </Button>
+          </div>
         </div>
         <p className={styles.emptyMeta}>Using: {contextKey}</p>
         {showSaveSelectionPrompt ? (
@@ -636,6 +746,49 @@ export default function ChatPageClient({
         {saveSelectionSuccess ? (
           <p className={styles.successMeta}>
             {saveSelectionSuccess}{' '}
+            <Link href="/saved-selections">Saved Selections</Link>
+          </p>
+        ) : null}
+        {showAddToExistingPrompt ? (
+          <div className={styles.savePrompt}>
+            <label>
+              Saved Selection
+              <select
+                value={addTargetFileId}
+                onChange={(event) => setAddTargetFileId(event.target.value)}
+                className={styles.input}
+                disabled={addToExistingLoading || selectionSets.length === 0}
+              >
+                {selectionSets.map((item) => (
+                  <option key={item.driveFileId} value={item.driveFileId}>
+                    {item.title}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className={styles.promptActions}>
+              <Button
+                type="button"
+                onClick={handleAddToExistingSelection}
+                disabled={addToExistingLoading || !addTargetFileId || selectionSets.length === 0}
+              >
+                {addToExistingLoading ? 'Adding...' : 'Add'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowAddToExistingPrompt(false)}
+                disabled={addToExistingLoading}
+              >
+                Cancel
+              </Button>
+            </div>
+            {addToExistingError ? <p className={styles.errorInline}>{addToExistingError}</p> : null}
+          </div>
+        ) : null}
+        {addToExistingSuccess ? (
+          <p className={styles.successMeta}>
+            {addToExistingSuccess}{' '}
             <Link href="/saved-selections">Saved Selections</Link>
           </p>
         ) : null}
