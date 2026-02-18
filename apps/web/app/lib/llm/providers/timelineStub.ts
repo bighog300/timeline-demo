@@ -1,8 +1,6 @@
 import { summarizeDeterministic } from '../../summarize';
 import type { TimelineProvider } from './types';
 
-
-
 export const extractContentDateWithStub = async (
   input: { sourceMetadata?: unknown },
 ): Promise<{ contentDateISO?: string }> => {
@@ -18,6 +16,9 @@ export const extractContentDateWithStub = async (
 
   return contentDateISO ? { contentDateISO } : {};
 };
+
+const buildSynthesisTitle = (mode: 'briefing' | 'status_report' | 'decision_log' | 'open_loops') =>
+  `Timeline ${mode.replace('_', ' ')}`;
 
 const buildStubSuggestedActions = (text: string) => {
   const normalized = text.toLowerCase();
@@ -68,6 +69,37 @@ export const stubTimelineProvider: TimelineProvider = {
         },
       ],
       usedArtifactIds: [top.artifactId],
+    };
+  },
+  timelineSynthesize: async (input) => {
+    const nowISO = new Date().toISOString();
+    const top = input.artifacts[0];
+    const title = input.title?.trim() || buildSynthesisTitle(input.mode);
+    const content = top
+      ? `Synthesis (${input.mode}) across ${input.artifacts.length} artifacts. Primary thread: ${top.summary}`
+      : `No artifacts were provided for ${input.mode}.`;
+
+    return {
+      synthesis: {
+        synthesisId: `syn_${nowISO.slice(0, 10)}_${input.mode}`.replace(/[^a-zA-Z0-9_]/g, ''),
+        mode: input.mode,
+        title,
+        createdAtISO: nowISO,
+        content,
+        keyPoints: top ? [top.highlights[0] ?? top.summary.slice(0, 120)] : [],
+      },
+      citations: top
+        ? [
+            {
+              artifactId: top.artifactId,
+              excerpt: (top.highlights[0] ?? top.summary).slice(0, 220),
+            },
+            {
+              artifactId: '__unknown__',
+              excerpt: 'This citation should be filtered by integrity checks.',
+            },
+          ]
+        : [],
     };
   },
 };

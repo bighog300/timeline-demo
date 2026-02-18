@@ -6,6 +6,7 @@ import {
   parseDateOnlyProviderOutput,
   parseTimelineChatProviderOutput,
   parseTimelineProviderOutput,
+  parseTimelineSynthesisProviderOutput,
 } from '../providerOutput';
 import type { TimelineProvider } from './types';
 
@@ -18,10 +19,53 @@ const dateOnlyJsonInstruction =
 const timelineChatJsonInstruction =
   'Return ONLY valid JSON: {"answer": string, "citations": [{"artifactId": string, "excerpt": string}], "usedArtifactIds": string[]}. Use only provided artifacts and do not hallucinate sources.';
 
+const timelineSynthesisJsonInstruction =
+  'Return ONLY valid JSON: {"synthesis": {"synthesisId": string, "mode": "briefing"|"status_report"|"decision_log"|"open_loops", "title": string, "createdAtISO": string|null, "content": string, "keyPoints"?: string[], "decisions"?: string[], "risks"?: string[], "openLoops"?: string[]}, "citations": [{"artifactId": string, "excerpt": string}]}. Use ONLY provided artifacts and never fabricate sources.';
+
 const defaultSummaryPrompt = 'Create a concise summary of the source.';
 const defaultHighlightsPrompt = 'Extract key highlights as short bullet-friendly phrases.';
 const defaultContentDatePrompt =
   'If the content describes a specific date/time (e.g., event date), set contentDateISO to that date/time in ISO 8601. If multiple dates exist, choose the primary one. If no meaningful date, set null.';
+
+const buildTimelineSynthesisPrompt = (
+  input: {
+    mode: 'briefing' | 'status_report' | 'decision_log' | 'open_loops';
+    title?: string;
+    includeEvidence: boolean;
+    artifacts: Array<{
+      artifactId: string;
+      title: string;
+      contentDateISO?: string;
+      summary: string;
+      highlights: string[];
+      evidence?: Array<{ sourceId?: string; excerpt: string }>;
+    }>;
+  },
+) =>
+  [
+    'Create a cross-artifact synthesis briefing using ONLY provided artifact content.',
+    'Ground every claim in summaries/highlights (and evidence only when includeEvidence=true).',
+    'Citations must reference exact artifactId values and short excerpts from provided content.',
+    'Never invent sources or artifact ids.',
+    '',
+    `Mode: ${input.mode}`,
+    `Requested title: ${input.title ?? ''}`,
+    `Include evidence: ${input.includeEvidence ? 'yes' : 'no'}`,
+    '',
+    'Artifacts:',
+    ...input.artifacts.map((artifact) =>
+      [
+        `ArtifactId: ${artifact.artifactId}`,
+        `Title: ${artifact.title}`,
+        `ContentDateISO: ${artifact.contentDateISO ?? 'unknown'}`,
+        `Summary: ${artifact.summary}`,
+        `Highlights: ${artifact.highlights.join(' | ') || '(none)'}`,
+        input.includeEvidence
+          ? `Evidence: ${(artifact.evidence ?? []).map((item) => item.excerpt).join(' | ') || '(none)'}`
+          : 'Evidence: (excluded)',
+      ].join('\n'),
+    ),
+  ].join('\n\n');
 
 const buildTimelineChatPrompt = (
   query: string,
@@ -194,5 +238,18 @@ export const geminiTimelineProvider: TimelineProvider = {
       timelineChatJsonInstruction,
     );
     return parseTimelineChatProviderOutput(rawText);
+  },
+  timelineSynthesize: async (input, settings) => {
+    const nowISO = new Date().toISOString();
+    const rawText = await callGemini(
+      settings,
+      buildTimelineSynthesisPrompt(input),
+      timelineSynthesisJsonInstruction,
+    );
+    return parseTimelineSynthesisProviderOutput(rawText, {
+      mode: input.mode,
+      title: input.title?.trim() || `Timeline ${input.mode.replace('_', ' ')}`,
+      nowISO,
+    });
   },
 };
