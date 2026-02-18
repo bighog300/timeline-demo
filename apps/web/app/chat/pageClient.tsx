@@ -11,6 +11,7 @@ import RebuildIndexButton from '../calendar/RebuildIndexButton';
 import Skeleton from '../components/ui/Skeleton';
 import { type ChatContextSelection } from '../lib/chatContextLoader';
 import { loadChatContextPrefs, saveChatContextPrefs } from '../lib/chatContextPrefs';
+import { parseApiError } from '../lib/apiErrors';
 import styles from './page.module.css';
 
 type ChatMessage = {
@@ -169,6 +170,11 @@ export default function ChatPageClient({
   const [summarizeMissingLoading, setSummarizeMissingLoading] = useState(false);
   const [summarizeMissingError, setSummarizeMissingError] = useState<string | null>(null);
   const [summarizeMissingSuccess, setSummarizeMissingSuccess] = useState<string | null>(null);
+  const [showSaveSelectionPrompt, setShowSaveSelectionPrompt] = useState(false);
+  const [saveSelectionName, setSaveSelectionName] = useState('');
+  const [saveSelectionLoading, setSaveSelectionLoading] = useState(false);
+  const [saveSelectionError, setSaveSelectionError] = useState<string | null>(null);
+  const [saveSelectionSuccess, setSaveSelectionSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (contextPrefs.mode !== 'selection_set') {
@@ -455,6 +461,80 @@ export default function ChatPageClient({
     }
   };
 
+  const selectedSetName = useMemo(() => {
+    if (contextPrefs.mode !== 'selection_set' || !contextPrefs.selectionSetId) {
+      return null;
+    }
+    return (
+      selectionSets.find((set) => set.driveFileId === contextPrefs.selectionSetId)?.title ?? null
+    );
+  }, [contextPrefs.mode, contextPrefs.selectionSetId, selectionSets]);
+
+  const saveNameSuggestion = useMemo(() => {
+    if (contextPrefs.mode === 'recent') {
+      return `Recent ${contextPrefs.recentCount} (${contextPrefs.sourceFilter})`;
+    }
+    if (selectedSetName) {
+      return `From selection: ${selectedSetName}`;
+    }
+    return 'Selection context';
+  }, [contextPrefs.mode, contextPrefs.recentCount, contextPrefs.sourceFilter, selectedSetName]);
+
+  const openSavePrompt = () => {
+    setSaveSelectionError(null);
+    setSaveSelectionSuccess(null);
+    setSaveSelectionName(saveNameSuggestion);
+    setShowSaveSelectionPrompt(true);
+  };
+
+  const handleSaveSelectionFromContext = useCallback(async () => {
+    const trimmed = saveSelectionName.trim();
+    if (!trimmed) {
+      setSaveSelectionError('Name is required.');
+      return;
+    }
+
+    setSaveSelectionLoading(true);
+    setSaveSelectionError(null);
+    setSaveSelectionSuccess(null);
+
+    try {
+      const response = await fetch('/api/timeline/selections/create-from-context', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: trimmed,
+          context: contextPrefs.mode === 'recent'
+            ? {
+                mode: 'recent',
+                recentCount: contextPrefs.recentCount,
+                sourceFilter: contextPrefs.sourceFilter,
+              }
+            : {
+                mode: 'selection_set',
+                selectionSetId: contextPrefs.selectionSetId,
+                sourceFilter: contextPrefs.sourceFilter,
+              },
+        }),
+      });
+
+      if (!response.ok) {
+        const apiError = await parseApiError(response);
+        setSaveSelectionError(
+          apiError?.message ?? `Failed to save selection from context (${response.status}).`,
+        );
+        return;
+      }
+
+      setShowSaveSelectionPrompt(false);
+      setSaveSelectionSuccess('Saved. Manage in Saved Selections');
+    } catch {
+      setSaveSelectionError('Failed to save selection from context.');
+    } finally {
+      setSaveSelectionLoading(false);
+    }
+  }, [contextPrefs, saveSelectionName]);
+
 
   const handleSummarizeMissing = useCallback(async () => {
     if (!contextPrefs.selectionSetId || contextPrefs.mode !== 'selection_set') {
@@ -514,8 +594,51 @@ export default function ChatPageClient({
         
 
       <Card>
-        <h2>Artifacts in context</h2>
+        <div className={styles.contextHeaderRow}>
+          <h2>Artifacts in context</h2>
+          <Button type="button" variant="secondary" onClick={openSavePrompt}>
+            Save as Saved Selection
+          </Button>
+        </div>
         <p className={styles.emptyMeta}>Using: {contextKey}</p>
+        {showSaveSelectionPrompt ? (
+          <div className={styles.savePrompt}>
+            <label>
+              Name
+              <input
+                type="text"
+                value={saveSelectionName}
+                onChange={(event) => setSaveSelectionName(event.target.value)}
+                placeholder="Saved selection name"
+                className={styles.input}
+              />
+            </label>
+            <div className={styles.promptActions}>
+              <Button
+                type="button"
+                onClick={handleSaveSelectionFromContext}
+                disabled={saveSelectionLoading}
+              >
+                {saveSelectionLoading ? 'Saving...' : 'Save'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setShowSaveSelectionPrompt(false)}
+                disabled={saveSelectionLoading}
+              >
+                Cancel
+              </Button>
+            </div>
+            {saveSelectionError ? <p className={styles.errorInline}>{saveSelectionError}</p> : null}
+          </div>
+        ) : null}
+        {saveSelectionSuccess ? (
+          <p className={styles.successMeta}>
+            {saveSelectionSuccess}{' '}
+            <Link href="/saved-selections">Saved Selections</Link>
+          </p>
+        ) : null}
         {contextPrefs.mode === 'selection_set' && contextStats ? (
           <p className={styles.emptyMeta}>
             Selection: {contextStats.selectionTotal} items · Summarized: {contextStats.summarizedCount} · Missing: {effectiveMissingCount}

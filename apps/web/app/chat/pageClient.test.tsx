@@ -205,6 +205,66 @@ describe('ChatPageClient', () => {
     expect(runLink.getAttribute('href')).toBe('/saved-searches');
   });
 
+
+  it('renders save button, opens prompt, posts context, and shows success link', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            reply: 'Done.',
+            suggested_actions: [],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            fileId: 'file-1',
+            name: 'Recent 8 (all)',
+            webViewLink: 'https://drive.google.com/file-1',
+            count: 8,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ChatPageClient />);
+
+    const button = screen.getByRole('button', { name: /save as saved selection/i });
+    expect(button).toBeInTheDocument();
+
+    fireEvent.click(button);
+    expect(screen.getByLabelText(/name/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/timeline/selections/create-from-context',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    const postCall = fetchMock.mock.calls[0];
+    const payload = JSON.parse(String(postCall?.[1]?.body)) as {
+      name: string;
+      context: { mode: string; recentCount: number; sourceFilter: string };
+    };
+    expect(payload).toEqual({
+      name: 'Recent 8 (all)',
+      context: { mode: 'recent', recentCount: 8, sourceFilter: 'all' },
+    });
+
+    expect(await screen.findByText(/saved\. manage in saved selections/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /saved selections/i })).toHaveAttribute(
+      'href',
+      '/saved-selections',
+    );
+  });
+
   it.each([
     ['not_configured', 'Chat provider isn’t configured. Admin: check provider & model in /admin.'],
     ['invalid_request', 'Chat provider rejected the request (check model/parameters).'],
