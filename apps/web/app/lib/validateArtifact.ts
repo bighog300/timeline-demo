@@ -8,6 +8,29 @@ const normalizeString = (value: unknown) => (typeof value === 'string' ? value :
 const normalizeStringArray = (value: unknown) =>
   Array.isArray(value) ? value.filter((item) => typeof item === 'string') : undefined;
 
+
+const normalizeSuggestedActions = (value: unknown) => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value
+    .filter((item) => item && typeof item === 'object')
+    .map((item) => {
+      const action = item as Record<string, unknown>;
+      return {
+        id: normalizeString(action.id),
+        type: normalizeString(action.type),
+        text: normalizeString(action.text) ?? '',
+        dueDateISO: action.dueDateISO === null ? null : normalizeString(action.dueDateISO),
+        confidence: typeof action.confidence === 'number' ? action.confidence : action.confidence === null ? null : undefined,
+        status: normalizeString(action.status),
+        createdAtISO: normalizeString(action.createdAtISO),
+        updatedAtISO: normalizeString(action.updatedAtISO),
+      };
+    });
+};
+
 const normalizeSourceMetadata = (value: unknown) => {
   if (!isRecord(value)) {
     return undefined;
@@ -58,6 +81,7 @@ const coerceArtifact = (value: unknown): SummaryArtifact | null => {
     dateConfidence: typeof value.dateConfidence === 'number' ? value.dateConfidence : undefined,
     sourceMetadata: normalizeSourceMetadata(value.sourceMetadata),
     sourcePreview: normalizeString(value.sourcePreview),
+    suggestedActions: normalizeSuggestedActions(value.suggestedActions),
     driveFolderId: typeof value.driveFolderId === 'string' ? value.driveFolderId : '',
     driveFileId: typeof value.driveFileId === 'string' ? value.driveFileId : '',
     driveWebViewLink: normalizeString(value.driveWebViewLink),

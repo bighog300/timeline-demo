@@ -20,6 +20,67 @@ describe('parseTimelineProviderOutput', () => {
     });
   });
 
+
+  it('accepts valid suggestedActions output', () => {
+    const parsed = parseTimelineProviderOutput(
+      JSON.stringify({
+        summary: 'Summary text',
+        highlights: ['h1'],
+        suggestedActions: [
+          { type: 'reminder', text: '  Follow up with PM  ', dueDateISO: null, confidence: 0.6 },
+        ],
+      }),
+    );
+
+    expect(parsed.suggestedActions).toEqual([
+      { type: 'reminder', text: 'Follow up with PM', dueDateISO: null, confidence: 0.6 },
+    ]);
+  });
+
+  it('throws bad_output for invalid suggestedActions confidence', () => {
+    expect(() =>
+      parseTimelineProviderOutput(
+        JSON.stringify({
+          summary: 'Summary text',
+          highlights: ['h1'],
+          suggestedActions: [{ type: 'task', text: 'Prepare report', confidence: 5 }],
+        }),
+      ),
+    ).toThrowError(ProviderError);
+
+    try {
+      parseTimelineProviderOutput(
+        JSON.stringify({
+          summary: 'Summary text',
+          highlights: ['h1'],
+          suggestedActions: [{ type: 'task', text: 'Prepare report', confidence: 5 }],
+        }),
+      );
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'bad_output', status: 502 });
+    }
+  });
+
+  it('dedupes and clamps suggestedActions to max 8', () => {
+    const parsed = parseTimelineProviderOutput(
+      JSON.stringify({
+        summary: 'Summary text',
+        highlights: [],
+        suggestedActions: [
+          { type: 'task', text: ' Draft recap ', dueDateISO: null },
+          { type: 'task', text: 'Draft recap', dueDateISO: null },
+          ...Array.from({ length: 20 }).map((_, index) => ({
+            type: 'reminder',
+            text: `Action ${index}`,
+          })),
+        ],
+      }),
+    );
+
+    expect(parsed.suggestedActions).toHaveLength(8);
+    expect(parsed.suggestedActions?.[0]).toMatchObject({ type: 'task', text: 'Draft recap' });
+  });
+
   it('accepts null contentDateISO', () => {
     const parsed = parseTimelineProviderOutput(
       JSON.stringify({

@@ -10,7 +10,7 @@ import {
 import type { TimelineProvider } from './types';
 
 const jsonOnlyInstruction =
-  'Return ONLY valid JSON with keys summary (string), highlights (string[]), evidence (array optional), dateConfidence (number 0..1 optional), and contentDateISO (string|null). No prose.';
+  'Return ONLY valid JSON with keys summary (string), highlights (string[]), evidence (array optional), dateConfidence (number 0..1 optional), and contentDateISO (string|null), and optional suggestedActions (array of {id?: string, type: "reminder"|"task"|"calendar", text: string, dueDateISO?: string|null, confidence?: number|null}). No prose.';
 
 const dateOnlyJsonInstruction =
   'Return ONLY valid JSON: {"contentDateISO": string|null}. Use null when no primary date is present. No prose.';
@@ -65,6 +65,8 @@ const buildUserPrompt = (
     `${highlightsPrompt}`,
     `${defaultContentDatePrompt}`,
     'Extract 3-5 evidence snippets as evidence[].excerpt with optional sourceId.',
+    'Optionally include suggestedActions grounded in explicit source details only. Keep practical and non-speculative.',
+    'Set suggestedActions[].dueDateISO only when the date/time is explicitly present in source text or metadata; otherwise omit it.',
     '',
     `Title: ${title}`,
     `Source: ${source}`,
@@ -182,6 +184,7 @@ export const geminiTimelineProvider: TimelineProvider = {
       dateConfidence: parsed.dateConfidence,
       contentDateISO: parsed.contentDateISO,
       model: settings.model,
+      suggestedActions: parsed.suggestedActions,
     };
   },
   timelineChat: async (input, settings) => {

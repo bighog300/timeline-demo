@@ -114,6 +114,7 @@ describe('POST /api/timeline/summarize', () => {
   });
 
   it('returns summary artifacts with selected provider model', async () => {
+
     mockGetGoogleSession.mockResolvedValue({
       driveFolderId: 'folder-1',
       user: { email: 'test@example.com' },
@@ -162,4 +163,47 @@ describe('POST /api/timeline/summarize', () => {
       expect.anything(),
     );
   });
+
+  it('persists suggestedActions with generated ids and proposed status', async () => {
+    mockGetGoogleSession.mockResolvedValue({ driveFolderId: 'folder-1', user: { email: 'test@example.com' } } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockCreateDriveClient.mockReturnValue({} as never);
+    mockCreateGmailClient.mockReturnValue({} as never);
+    mockFetchGmailMessageText.mockResolvedValue({ title: 'Demo', text: 'Please follow up and prepare tasks', metadata: {} });
+    mockGetTimelineProviderFromDrive.mockResolvedValue({
+      settings: { provider: 'stub', model: 'stub-model' },
+      provider: {
+        summarize: vi.fn().mockResolvedValue({
+          summary: 'Summary text',
+          highlights: ['Point A'],
+          suggestedActions: [
+            { type: 'reminder', text: 'Follow up with team' },
+            { id: 'provider-id', type: 'task', text: 'Prepare follow-up note', dueDateISO: null },
+          ],
+          model: 'stub-model',
+        }),
+      },
+    } as never);
+    mockWriteArtifactToDrive.mockResolvedValue({
+      markdownFileId: 'md-1',
+      markdownWebViewLink: 'https://drive.google.com/md-1',
+      jsonFileId: 'json-1',
+      jsonWebViewLink: 'https://drive.google.com/json-1',
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/timeline/summarize', {
+        method: 'POST',
+        body: JSON.stringify({ items: [{ source: 'gmail', id: 'id-1' }] }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(200);
+    const writtenArtifact = mockWriteArtifactToDrive.mock.calls.at(-1)?.[2] as { suggestedActions?: Array<{ id: string; status: string }> };
+    expect(writtenArtifact.suggestedActions).toBeDefined();
+    expect(writtenArtifact.suggestedActions?.[0].id).toMatch(/^act_/);
+    expect(writtenArtifact.suggestedActions?.[0].status).toBe('proposed');
+    expect(writtenArtifact.suggestedActions?.[1].id).toBe('provider-id');
+  });
+
 });

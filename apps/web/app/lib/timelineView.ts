@@ -35,6 +35,7 @@ export type TimelineEntry = {
   highlights?: string[];
   sourcePreview?: string;
   sourceMetadata?: SourceMetadata;
+  suggestedActions?: SummaryArtifact['suggestedActions'];
   metadata?: TimelineSelectionInput['metadata'];
 };
 
@@ -139,6 +140,7 @@ export const buildTimelineEntries = (
       highlights: artifact?.highlights,
       sourcePreview: artifact?.sourcePreview,
       sourceMetadata: artifact?.sourceMetadata,
+      suggestedActions: artifact?.suggestedActions,
       metadata: buildEntryMetadata(selection, artifact),
     };
   });

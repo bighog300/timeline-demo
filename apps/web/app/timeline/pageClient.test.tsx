@@ -1097,4 +1097,48 @@ describe('TimelinePageClient', () => {
       expect(scrollSpy).toHaveBeenCalled();
     });
   });
+
+  it('renders suggested actions and accepts an action', async () => {
+    setSelections();
+    const artifactWithActions = {
+      ...artifactWithMetadata,
+      suggestedActions: [
+        { id: 'act-1', type: 'task', text: 'Prepare notes', status: 'proposed' },
+      ],
+    };
+
+    mockFetch(withIndexGet((url, init) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url === '/api/timeline/summarize') {
+        return new Response(JSON.stringify({ artifacts: [artifactWithActions], failed: [] }), { status: 200 });
+      }
+      if (url === '/api/timeline/actions' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ ok: true, artifactId: 'file-1', actionId: 'act-1', status: 'accepted' }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /generate summaries/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /generate summaries/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Actions')).toBeInTheDocument();
+      expect(screen.getByText(/prepare notes/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Accept$/i }));
+
+    await waitFor(() => {
+      const calls = (global.fetch as unknown as { mock?: { calls?: unknown[][] } }).mock?.calls ?? [];
+      expect(calls.some((call) => call[0] === '/api/timeline/actions')).toBe(true);
+    });
+  });
+
 });

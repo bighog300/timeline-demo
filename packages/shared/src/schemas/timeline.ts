@@ -44,6 +44,22 @@ export const SummaryArtifactSchema = z
     dateConfidence: z.number().min(0).max(1).optional(),
     sourceMetadata: SourceMetadataSchema.optional(),
     sourcePreview: z.string().optional(),
+    suggestedActions: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1).optional(),
+            type: z.enum(['reminder', 'task', 'calendar']),
+            text: z.string().trim().min(3).max(240),
+            dueDateISO: z.union([isoDateString, z.null()]).optional(),
+            confidence: z.number().min(0).max(1).nullable().optional(),
+            status: z.enum(['proposed', 'accepted', 'dismissed']).optional(),
+            createdAtISO: isoDateString.optional(),
+            updatedAtISO: isoDateString.optional(),
+          })
+          .strict(),
+      )
+      .optional(),
     driveFolderId: z.string(),
     driveFileId: z.string(),
     driveWebViewLink: z.string().optional(),

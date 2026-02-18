@@ -98,6 +98,7 @@ type SearchError =
   | null;
 
 type IndexError = ApiSurfaceError;
+type ActionDecisionError = string | null;
 
 const GMAIL_KEY = 'timeline.gmailSelections';
 const DRIVE_KEY = 'timeline.driveSelections';
@@ -364,6 +365,8 @@ export default function TimelinePageClient() {
   const [isIndexLoading, setIsIndexLoading] = useState(false);
   const [isIndexRefreshing, setIsIndexRefreshing] = useState(false);
   const [indexError, setIndexError] = useState<IndexError>(null);
+  const [actionError, setActionError] = useState<ActionDecisionError>(null);
+  const [pendingActionKeys, setPendingActionKeys] = useState<Set<string>>(new Set());
   const [indexRequestId, setIndexRequestId] = useState<string | null>(null);
   const [indexMessage, setIndexMessage] = useState<string | null>(null);
   const timelineTopRef = useRef<HTMLDivElement | null>(null);
@@ -1246,6 +1249,72 @@ export default function TimelinePageClient() {
     void loadIndexStatus();
   }, [hasHydrated, loadIndexStatus]);
 
+
+  const updateArtifactActionsLocal = useCallback(
+    (entryKey: string, actionId: string, status: 'accepted' | 'dismissed') => {
+      const artifact = artifacts[entryKey];
+      if (!artifact?.suggestedActions?.length) {
+        return artifacts;
+      }
+
+      const nextArtifact: SummaryArtifact = {
+        ...artifact,
+        suggestedActions: artifact.suggestedActions.map((action) =>
+          action.id === actionId
+            ? {
+                ...action,
+                status,
+                updatedAtISO: new Date().toISOString(),
+              }
+            : action,
+        ),
+      };
+
+      const nextArtifacts = { ...artifacts, [entryKey]: nextArtifact };
+      window.localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(nextArtifacts));
+      return nextArtifacts;
+    },
+    [artifacts],
+  );
+
+  const handleActionDecision = useCallback(
+    async (entryKey: string, artifactDriveFileId: string, actionId: string, decision: 'accept' | 'dismiss') => {
+      const optimisticStatus = decision === 'accept' ? 'accepted' : 'dismissed';
+      setActionError(null);
+      const pendingKey = `${entryKey}:${actionId}`;
+      const prevArtifacts = artifacts;
+
+      setPendingActionKeys((prev) => new Set(prev).add(pendingKey));
+      setArtifacts(updateArtifactActionsLocal(entryKey, actionId, optimisticStatus));
+
+      try {
+        const response = await fetch('/api/timeline/actions', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ artifactId: artifactDriveFileId, actionId, decision }),
+        });
+
+        if (!response.ok) {
+          setArtifacts(prevArtifacts);
+          window.localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(prevArtifacts));
+          const apiError = await parseApiError(response);
+          setActionError(apiError?.message ?? 'Unable to update action status.');
+        }
+      } catch {
+        setArtifacts(prevArtifacts);
+        window.localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(prevArtifacts));
+        setActionError('Unable to update action status.');
+      } finally {
+        setPendingActionKeys((prev) => {
+          const next = new Set(prev);
+          next.delete(pendingKey);
+          return next;
+        });
+      }
+    },
+    [artifacts, updateArtifactActionsLocal],
+  );
+
   const handleAutoSyncToggle = (checked: boolean) => {
     setAutoSyncOnOpen(checked);
     window.localStorage.setItem(AUTO_SYNC_KEY, checked ? 'true' : 'false');
@@ -1847,6 +1916,7 @@ export default function TimelinePageClient() {
         </div>
       ) : null}
       {syncMessage ? <div className={styles.noticeSuccess}>{syncMessage}</div> : null}
+      {actionError ? <div className={styles.notice}>{actionError}</div> : null}
 
       <Card className={styles.selectionPanel}>
         <div className={styles.selectionHeader}>
@@ -2311,6 +2381,73 @@ export default function TimelinePageClient() {
                                   </div>
                                 </details>
                               ) : null}
+
+                              {entry.suggestedActions?.length ? (
+                                <div className={styles.actionsBlock}>
+                                  <h4>Actions</h4>
+                                  {(() => {
+                                    const proposed = entry.suggestedActions.filter((action) => (action.status ?? 'proposed') === 'proposed');
+                                    const resolved = entry.suggestedActions.filter((action) => (action.status ?? 'proposed') !== 'proposed');
+                                    return (
+                                      <>
+                                        <ul className={styles.actionsList}>
+                                          {proposed.map((action) => {
+                                            const key = `${entry.key}:${action.id ?? action.text}`;
+                                            const pending = pendingActionKeys.has(key);
+                                            return (
+                                              <li key={key} className={styles.actionItem}>
+                                                <div>
+                                                  <strong>{action.type}</strong>: {action.text}
+                                                </div>
+                                                <div className={styles.actionButtons}>
+                                                  <Button
+                                                    variant="secondary"
+                                                    disabled={pending || !action.id || !artifacts[entry.key]?.driveFileId}
+                                                    onClick={() =>
+                                                      action.id &&
+                                                      artifacts[entry.key]?.driveFileId &&
+                                                      void handleActionDecision(entry.key, artifacts[entry.key]?.driveFileId ?? '', action.id, 'accept')
+                                                    }
+                                                  >
+                                                    Accept
+                                                  </Button>
+                                                  <Button
+                                                    variant="ghost"
+                                                    disabled={pending || !action.id || !artifacts[entry.key]?.driveFileId}
+                                                    onClick={() =>
+                                                      action.id &&
+                                                      artifacts[entry.key]?.driveFileId &&
+                                                      void handleActionDecision(entry.key, artifacts[entry.key]?.driveFileId ?? '', action.id, 'dismiss')
+                                                    }
+                                                  >
+                                                    Dismiss
+                                                  </Button>
+                                                </div>
+                                              </li>
+                                            );
+                                          })}
+                                        </ul>
+                                        {resolved.length ? (
+                                          <details>
+                                            <summary>Accepted / dismissed</summary>
+                                            <ul className={styles.actionsList}>
+                                              {resolved.map((action) => (
+                                                <li key={`${entry.key}:${action.id ?? action.text}`} className={styles.actionItemMuted}>
+                                                  <span>
+                                                    <strong>{action.type}</strong>: {action.text}
+                                                  </span>
+                                                  <span>{action.status}</span>
+                                                </li>
+                                              ))}
+                                            </ul>
+                                          </details>
+                                        ) : null}
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+                              ) : null}
+
                               <div className={styles.summaryActions}>
                                 <Button variant="ghost" onClick={() => toggleExpanded(entry.key)}>
                                   {isExpanded ? 'Collapse' : 'Expand'}
