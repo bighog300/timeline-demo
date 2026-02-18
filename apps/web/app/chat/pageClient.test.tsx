@@ -212,15 +212,6 @@ describe('ChatPageClient', () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            reply: 'Done.',
-            suggested_actions: [],
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-      )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
             fileId: 'file-1',
             name: 'Recent 8 (all)',
             webViewLink: 'https://drive.google.com/file-1',
@@ -233,7 +224,7 @@ describe('ChatPageClient', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<ChatPageClient />);
 
-    const button = screen.getByRole('button', { name: /save as saved selection/i });
+    const button = screen.getByRole('button', { name: /save as new saved selection/i });
     expect(button).toBeInTheDocument();
 
     fireEvent.click(button);
@@ -263,6 +254,68 @@ describe('ChatPageClient', () => {
       'href',
       '/saved-selections',
     );
+  });
+
+
+
+  it('renders Add to existing..., loads list, posts merge route, and shows success', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [
+              { fileId: 'sel-1', name: 'Selection One' },
+              { fileId: 'sel-2', name: 'Selection Two' },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            fileId: 'sel-2',
+            name: 'Selection Two',
+            count: 10,
+            added: 3,
+            skippedDuplicates: 1,
+            webViewLink: 'https://drive.google.com/sel-2',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      );
+
+    vi.stubGlobal('fetch', fetchMock);
+    render(<ChatPageClient />);
+
+    fireEvent.click(screen.getByRole('button', { name: /add to existing\.\.\./i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/timeline/selections/list');
+    });
+
+    const picker = await screen.findByLabelText(/saved selection/i);
+    fireEvent.change(picker, { target: { value: 'sel-2' } });
+    fireEvent.click(screen.getByRole('button', { name: /^add$/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/timeline/selections/sel-2/add-from-context',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    const postCall = fetchMock.mock.calls[1];
+    const payload = JSON.parse(String(postCall?.[1]?.body)) as {
+      context: { mode: string; recentCount: number; sourceFilter: string };
+    };
+    expect(payload).toEqual({
+      context: { mode: 'recent', recentCount: 8, sourceFilter: 'all' },
+    });
+
+    expect(await screen.findByText(/added 3 items to 'selection two' \(1 duplicates skipped\)\./i)).toBeInTheDocument();
+    expect(mockRouterRefresh).toHaveBeenCalledTimes(1);
   });
 
   it.each([
