@@ -254,11 +254,91 @@ export const ArtifactIndexEntrySchema = z
   .object({
     id: z.string().min(1),
     driveFileId: z.string().min(1),
+    kind: z.enum(['summary', 'synthesis']).optional(),
     title: z.string().optional(),
     contentDateISO: isoDateString.optional(),
     tags: z.array(z.string()).optional(),
     participants: z.array(z.string()).optional(),
     updatedAtISO: isoDateString.optional(),
+  })
+  .strict();
+
+export const SynthesisModeSchema = z.enum([
+  'briefing',
+  'status_report',
+  'decision_log',
+  'open_loops',
+]);
+
+export const SynthesisRequestSchema = z
+  .object({
+    mode: SynthesisModeSchema,
+    title: z.string().trim().min(3).max(120).optional(),
+    artifactIds: z.array(z.string().min(1)).max(50).optional(),
+    dateFromISO: isoDateString.optional(),
+    dateToISO: isoDateString.optional(),
+    tags: z.array(z.string().trim().min(1)).max(10).optional(),
+    participants: z.array(z.string().trim().min(1)).max(10).optional(),
+    includeEvidence: z.boolean().default(false),
+    saveToTimeline: z.boolean().default(true),
+    limit: z.number().int().min(1).max(30).default(15),
+  })
+  .strict();
+
+export const SynthesisCitationSchema = z
+  .object({
+    artifactId: z.string().min(1),
+    excerpt: z.string().trim().min(1),
+    contentDateISO: isoDateString.optional(),
+    title: z.string().optional(),
+  })
+  .strict();
+
+export const SynthesisOutputSchema = z
+  .object({
+    synthesisId: z.string().min(1),
+    mode: SynthesisModeSchema,
+    title: z.string().trim().min(1),
+    createdAtISO: isoDateString,
+    content: z.string().trim().min(1),
+    keyPoints: z.array(z.string().trim().min(1)).max(20).optional(),
+    decisions: z.array(z.string().trim().min(1)).max(20).optional(),
+    risks: z.array(z.string().trim().min(1)).max(20).optional(),
+    openLoops: z.array(z.string().trim().min(1)).max(30).optional(),
+  })
+  .strict();
+
+export const SynthesisResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    synthesis: SynthesisOutputSchema,
+    citations: z.array(SynthesisCitationSchema),
+    usedArtifactIds: z.array(z.string()),
+    savedArtifactId: z.string().optional(),
+  })
+  .strict();
+
+export const SynthesisArtifactSchema = z
+  .object({
+    kind: z.literal('synthesis'),
+    id: z.string().min(1),
+    title: z.string().trim().min(1),
+    mode: SynthesisModeSchema,
+    createdAtISO: isoDateString,
+    contentDateISO: isoDateString.optional(),
+    sourceArtifactIds: z.array(z.string().min(1)).max(50),
+    content: z.string().trim().min(1),
+    citations: z.array(
+      z
+        .object({
+          artifactId: z.string().min(1),
+          excerpt: z.string().trim().min(1),
+        })
+        .strict(),
+    ),
+    summary: z.string().optional(),
+    tags: z.array(z.string()).optional(),
+    participants: z.array(z.string()).optional(),
   })
   .strict();
 
@@ -304,3 +384,8 @@ export type SummarizeResponse = z.infer<typeof SummarizeResponseSchema>;
 export type ApiError = z.infer<typeof ApiErrorSchema>;
 export type ArtifactIndexEntry = z.infer<typeof ArtifactIndexEntrySchema>;
 export type ArtifactIndex = z.infer<typeof ArtifactIndexSchema>;
+export type SynthesisMode = z.infer<typeof SynthesisModeSchema>;
+export type SynthesisRequest = z.infer<typeof SynthesisRequestSchema>;
+export type SynthesisOutput = z.infer<typeof SynthesisOutputSchema>;
+export type SynthesisResponse = z.infer<typeof SynthesisResponseSchema>;
+export type SynthesisArtifact = z.infer<typeof SynthesisArtifactSchema>;

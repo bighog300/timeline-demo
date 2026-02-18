@@ -39,6 +39,34 @@ const ProviderDateOnlyOutputSchema = z
   })
   .strict();
 
+const TimelineSynthesisProviderOutputSchema = z
+  .object({
+    synthesis: z
+      .object({
+        synthesisId: z.string().optional(),
+        mode: z.enum(['briefing', 'status_report', 'decision_log', 'open_loops']).optional(),
+        title: z.string().optional(),
+        createdAtISO: z.union([isoDateString, z.null()]).optional(),
+        content: z.string(),
+        keyPoints: z.array(z.string()).optional(),
+        decisions: z.array(z.string()).optional(),
+        risks: z.array(z.string()).optional(),
+        openLoops: z.array(z.string()).optional(),
+      })
+      .passthrough(),
+    citations: z
+      .array(
+        z
+          .object({
+            artifactId: z.string(),
+            excerpt: z.string(),
+          })
+          .strict(),
+      )
+      .default([]),
+  })
+  .passthrough();
+
 const TimelineChatProviderOutputSchema = z
   .object({
     answer: z.string(),
@@ -83,6 +111,7 @@ const normalizeWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim()
 
 
 const MAX_SUGGESTED_ACTIONS = 8;
+const MAX_SYNTHESIS_ITEMS = 30;
 
 const normalizeSuggestedActions = (actions: z.infer<typeof SuggestedActionProviderSchema>[]) =>
   Array.from(
@@ -150,6 +179,13 @@ export const normalizeTimelineCitations = (
     ).values(),
   ).slice(0, maxCitations);
 };
+
+
+const normalizeStringList = (values: string[] | undefined, maxItems: number) =>
+  Array.from(new Set((values ?? []).map((value) => normalizeWhitespace(value)).filter(Boolean))).slice(
+    0,
+    maxItems,
+  );
 
 export const parseTimelineProviderOutput = (rawText: string): ParsedOutput => {
   let parsedJson: unknown;
@@ -256,5 +292,64 @@ export const parseTimelineChatProviderOutput = (rawText: string) => {
     answer,
     citations,
     ...(usedArtifactIds.length ? { usedArtifactIds } : {}),
+  };
+};
+
+
+export const parseTimelineSynthesisProviderOutput = (
+  rawText: string,
+  options: { mode: 'briefing' | 'status_report' | 'decision_log' | 'open_loops'; title: string; nowISO: string },
+) => {
+  let parsedJson: unknown;
+  try {
+    parsedJson = JSON.parse(rawText);
+  } catch {
+    throw new ProviderError({
+      code: 'bad_output',
+      status: 502,
+      provider: 'timeline',
+      message: 'Provider response was not valid JSON.',
+    });
+  }
+
+  const parsed = TimelineSynthesisProviderOutputSchema.safeParse(parsedJson);
+  if (!parsed.success) {
+    throw badOutput();
+  }
+
+  const content = normalizeWhitespace(parsed.data.synthesis.content);
+  if (!content) {
+    throw badOutput();
+  }
+
+  const synthesisId = normalizeWhitespace(parsed.data.synthesis.synthesisId ?? '') || 'synthesis';
+  const mode = parsed.data.synthesis.mode ?? options.mode;
+  const title = normalizeWhitespace(parsed.data.synthesis.title ?? '') || options.title;
+  const createdAtISO = parsed.data.synthesis.createdAtISO?.trim() || options.nowISO;
+
+  return {
+    synthesis: {
+      synthesisId,
+      mode,
+      title,
+      createdAtISO,
+      content,
+      ...(normalizeStringList(parsed.data.synthesis.keyPoints, 20).length
+        ? { keyPoints: normalizeStringList(parsed.data.synthesis.keyPoints, 20) }
+        : {}),
+      ...(normalizeStringList(parsed.data.synthesis.decisions, 20).length
+        ? { decisions: normalizeStringList(parsed.data.synthesis.decisions, 20) }
+        : {}),
+      ...(normalizeStringList(parsed.data.synthesis.risks, 20).length
+        ? { risks: normalizeStringList(parsed.data.synthesis.risks, 20) }
+        : {}),
+      ...(normalizeStringList(parsed.data.synthesis.openLoops, MAX_SYNTHESIS_ITEMS).length
+        ? { openLoops: normalizeStringList(parsed.data.synthesis.openLoops, MAX_SYNTHESIS_ITEMS) }
+        : {}),
+    },
+    citations: normalizeTimelineCitations(parsed.data.citations, {
+      maxCitations: 15,
+      maxExcerptChars: 300,
+    }),
   };
 };

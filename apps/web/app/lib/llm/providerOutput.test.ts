@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import { ProviderError } from './providerErrors';
-import { normalizeTimelineCitations, parseTimelineChatProviderOutput, parseTimelineProviderOutput } from './providerOutput';
+import {
+  normalizeTimelineCitations,
+  parseTimelineChatProviderOutput,
+  parseTimelineProviderOutput,
+  parseTimelineSynthesisProviderOutput,
+} from './providerOutput';
 
 describe('parseTimelineProviderOutput', () => {
   it('returns normalized summary/highlights/contentDateISO when valid', () => {
@@ -176,5 +181,41 @@ describe('normalizeTimelineCitations', () => {
     );
 
     expect(normalized).toHaveLength(10);
+  });
+});
+
+
+describe('parseTimelineSynthesisProviderOutput', () => {
+  it('normalizes synthesis fields and citations', () => {
+    const parsed = parseTimelineSynthesisProviderOutput(
+      JSON.stringify({
+        synthesis: {
+          content: '  consolidated narrative  ',
+          keyPoints: [' One ', 'One', 'Two'],
+          openLoops: Array.from({ length: 40 }).map((_, i) => ` loop ${i} `),
+        },
+        citations: [
+          { artifactId: ' a1 ', excerpt: '  Evidence excerpt  ' },
+          { artifactId: 'a1', excerpt: 'Evidence excerpt' },
+        ],
+      }),
+      { mode: 'briefing', title: 'Fallback title', nowISO: '2026-01-01T00:00:00Z' },
+    );
+
+    expect(parsed.synthesis.content).toBe('consolidated narrative');
+    expect(parsed.synthesis.mode).toBe('briefing');
+    expect(parsed.synthesis.title).toBe('Fallback title');
+    expect(parsed.synthesis.keyPoints).toEqual(['One', 'Two']);
+    expect(parsed.synthesis.openLoops).toHaveLength(30);
+    expect(parsed.citations).toEqual([{ artifactId: 'a1', excerpt: 'Evidence excerpt' }]);
+  });
+
+  it('throws bad_output when content is blank', () => {
+    expect(() =>
+      parseTimelineSynthesisProviderOutput(
+        JSON.stringify({ synthesis: { content: '   ' }, citations: [] }),
+        { mode: 'briefing', title: 'Title', nowISO: '2026-01-01T00:00:00Z' },
+      ),
+    ).toThrowError(ProviderError);
   });
 });

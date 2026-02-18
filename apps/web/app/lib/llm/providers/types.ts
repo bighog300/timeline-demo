@@ -49,7 +49,46 @@ export type TimelineChatOutput = {
   usedArtifactIds?: string[];
 };
 
+
+
+export type TimelineSynthesisCitation = {
+  artifactId: string;
+  excerpt: string;
+};
+
+export type TimelineSynthesisInputArtifact = {
+  artifactId: string;
+  title: string;
+  contentDateISO?: string;
+  summary: string;
+  highlights: string[];
+  evidence?: Array<{ sourceId?: string; excerpt: string }>;
+};
+
+export type TimelineSynthesizeInput = {
+  mode: 'briefing' | 'status_report' | 'decision_log' | 'open_loops';
+  title?: string;
+  includeEvidence: boolean;
+  artifacts: TimelineSynthesisInputArtifact[];
+};
+
+export type TimelineSynthesizeOutput = {
+  synthesis: {
+    synthesisId: string;
+    mode: 'briefing' | 'status_report' | 'decision_log' | 'open_loops';
+    title: string;
+    createdAtISO: string;
+    content: string;
+    keyPoints?: string[];
+    decisions?: string[];
+    risks?: string[];
+    openLoops?: string[];
+  };
+  citations: TimelineSynthesisCitation[];
+};
+
 export interface TimelineProvider {
   summarize(input: SummarizeInput, settings: AdminSettings): Promise<SummarizeOutput>;
   timelineChat(input: TimelineChatInput, settings: AdminSettings): Promise<TimelineChatOutput>;
+  timelineSynthesize(input: TimelineSynthesizeInput, settings: AdminSettings): Promise<TimelineSynthesizeOutput>;
 }

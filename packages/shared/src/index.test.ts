@@ -5,6 +5,9 @@ import {
   SelectionSetSchema,
   SourceType,
   SummaryArtifactSchema,
+  SynthesisArtifactSchema,
+  SynthesisRequestSchema,
+  SynthesisResponseSchema,
 } from './index.js';
 
 describe('shared schemas', () => {
@@ -379,4 +382,62 @@ describe('shared schemas', () => {
 
     expect(result.success).toBe(true);
   });
+
+  it('accepts valid synthesis request and defaults', () => {
+    const result = SynthesisRequestSchema.safeParse({
+      mode: 'briefing',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.success && result.data.includeEvidence).toBe(false);
+    expect(result.success && result.data.saveToTimeline).toBe(true);
+    expect(result.success && result.data.limit).toBe(15);
+  });
+
+  it('rejects invalid synthesis request bounds', () => {
+    const result = SynthesisRequestSchema.safeParse({
+      mode: 'open_loops',
+      title: 'x',
+      artifactIds: Array.from({ length: 51 }).map((_, i) => `a${i}`),
+      limit: 31,
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('accepts synthesis response payload', () => {
+    const result = SynthesisResponseSchema.safeParse({
+      ok: true,
+      synthesis: {
+        synthesisId: 'syn-1',
+        mode: 'status_report',
+        title: 'Weekly status',
+        createdAtISO: '2026-01-01T00:00:00Z',
+        content: 'Overall status summary',
+        keyPoints: ['Point 1'],
+      },
+      citations: [{ artifactId: 'a1', excerpt: 'Evidence excerpt' }],
+      usedArtifactIds: ['a1'],
+      savedArtifactId: 'syn-1',
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('accepts synthesis artifact schema for persisted entries', () => {
+    const result = SynthesisArtifactSchema.safeParse({
+      kind: 'synthesis',
+      id: 'syn-1',
+      title: 'Decision synthesis',
+      mode: 'decision_log',
+      createdAtISO: '2026-01-01T00:00:00Z',
+      contentDateISO: '2026-01-01T00:00:00Z',
+      sourceArtifactIds: ['a1', 'a2'],
+      content: 'Consolidated decision notes',
+      citations: [{ artifactId: 'a1', excerpt: 'A cited excerpt' }],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
 });
