@@ -11,7 +11,7 @@ import type { LogContext } from '../logger';
 import { time } from '../logger';
 
 export const ARTIFACT_INDEX_FILENAME = 'artifacts_index.json';
-const MAX_RETRIES = 2;
+const MAX_CONFLICT_RETRIES = 3;
 
 const defaultArtifactIndex = (): ArtifactIndex => ({
   version: 1,
@@ -32,6 +32,23 @@ const parseJson = (data: unknown): unknown => {
 
 const sanitizeArray = (values?: string[]) =>
   Array.from(new Set((values ?? []).map((value) => value.trim()).filter(Boolean))).slice(0, 20);
+
+const isWriteConflictError = (error: unknown) => {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const record = error as { code?: unknown; status?: unknown; message?: unknown; errors?: unknown };
+  const code = typeof record.code === 'number' ? record.code : undefined;
+  const status = typeof record.status === 'number' ? record.status : undefined;
+  const message = typeof record.message === 'string' ? record.message.toLowerCase() : '';
+
+  if (code === 409 || code === 412 || status === 409 || status === 412) {
+    return true;
+  }
+
+  return message.includes('etag') || message.includes('precondition') || message.includes('conflict');
+};
 
 export const artifactToIndexEntry = (artifact: SummaryArtifact): ArtifactIndexEntry => ({
   id: artifact.artifactId,
@@ -181,18 +198,20 @@ export const upsertArtifactIndex = async (
   artifact: SummaryArtifact,
   ctx?: LogContext,
 ): Promise<void> => {
-  let attempt = 0;
-  let lastError: unknown;
-  while (attempt <= MAX_RETRIES) {
+  const entry = artifactToIndexEntry(artifact);
+
+  for (let attempt = 0; attempt <= MAX_CONFLICT_RETRIES; attempt += 1) {
+    const loaded = await loadArtifactIndex(drive, folderId, ctx);
+    const next = upsertArtifactIndexEntry(loaded.index, entry);
+
     try {
-      const loaded = await loadArtifactIndex(drive, folderId, ctx);
-      const next = upsertArtifactIndexEntry(loaded.index, artifactToIndexEntry(artifact));
       await saveArtifactIndex(drive, folderId, loaded.fileId, next, ctx);
       return;
     } catch (error) {
-      lastError = error;
-      attempt += 1;
+      const shouldRetry = isWriteConflictError(error) && attempt < MAX_CONFLICT_RETRIES;
+      if (!shouldRetry) {
+        throw error;
+      }
     }
   }
-  throw lastError;
 };

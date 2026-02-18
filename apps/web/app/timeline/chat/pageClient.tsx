@@ -14,6 +14,7 @@ export default function TimelineChatPageClient() {
   const [query, setQuery] = useState('');
   const [answer, setAnswer] = useState<string | null>(null);
   const [citations, setCitations] = useState<Citation[]>([]);
+  const [usedArtifactIds, setUsedArtifactIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,6 +37,7 @@ export default function TimelineChatPageClient() {
       const payload = (await response.json()) as {
         answer?: string;
         citations?: Citation[];
+        usedArtifactIds?: string[];
         error?: { message?: string };
       };
 
@@ -46,12 +48,15 @@ export default function TimelineChatPageClient() {
 
       setAnswer(payload.answer ?? '');
       setCitations(Array.isArray(payload.citations) ? payload.citations : []);
+      setUsedArtifactIds(Array.isArray(payload.usedArtifactIds) ? payload.usedArtifactIds : []);
     } catch {
       setError('Unable to chat with timeline artifacts.');
     } finally {
       setLoading(false);
     }
   };
+
+  const showNoMatches = Boolean(answer && citations.length === 0 && usedArtifactIds.length === 0);
 
   return (
     <section style={{ maxWidth: 900, margin: '0 auto', padding: '1.5rem' }}>
@@ -75,16 +80,23 @@ export default function TimelineChatPageClient() {
         <article style={{ marginTop: 20 }}>
           <h2>Answer</h2>
           <p>{answer}</p>
-          <h3>Citations</h3>
-          <ul>
-            {citations.map((citation) => (
-              <li key={`${citation.artifactId}-${citation.excerpt}`} style={{ marginBottom: 12 }}>
-                <strong>{citation.title ?? citation.artifactId}</strong>
-                {citation.contentDateISO ? ` (${new Date(citation.contentDateISO).toLocaleDateString()})` : ''}
-                <div>{citation.excerpt}</div>
-              </li>
-            ))}
-          </ul>
+          <p>Used artifacts: {usedArtifactIds.length}</p>
+          {showNoMatches ? (
+            <p style={{ color: '#666' }}>No matches were found for that query.</p>
+          ) : (
+            <>
+              <h3>Citations</h3>
+              <ul>
+                {citations.map((citation) => (
+                  <li key={`${citation.artifactId}-${citation.excerpt}`} style={{ marginBottom: 12 }}>
+                    <strong>{citation.title ?? citation.artifactId}</strong>
+                    {citation.contentDateISO ? ` (${new Date(citation.contentDateISO).toLocaleDateString()})` : ''}
+                    <div>{citation.excerpt}</div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
         </article>
       ) : null}
     </section>
