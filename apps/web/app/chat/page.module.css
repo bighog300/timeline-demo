@@ -234,6 +234,28 @@
   margin-bottom: 8px;
 }
 
+.contextHeaderRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.savePrompt {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fafbff;
+}
+
+.promptActions {
+  display: flex;
+  gap: 8px;
+}
+
 .successMeta {
   margin: 0;
   color: #0b7a35;
