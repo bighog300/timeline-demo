@@ -1,6 +1,24 @@
 import { summarizeDeterministic } from '../../summarize';
 import type { TimelineProvider } from './types';
 
+
+
+export const extractContentDateWithStub = async (
+  input: { sourceMetadata?: unknown },
+): Promise<{ contentDateISO?: string }> => {
+  const metadataDateISO =
+    input.sourceMetadata && typeof input.sourceMetadata === 'object'
+      ? (input.sourceMetadata as { dateISO?: unknown }).dateISO
+      : undefined;
+
+  const contentDateISO =
+    typeof metadataDateISO === 'string' && !Number.isNaN(Date.parse(metadataDateISO))
+      ? metadataDateISO
+      : undefined;
+
+  return contentDateISO ? { contentDateISO } : {};
+};
+
 export const stubTimelineProvider: TimelineProvider = {
   summarize: async (input, settings) => {
     const result = summarizeDeterministic({
@@ -8,19 +26,11 @@ export const stubTimelineProvider: TimelineProvider = {
       text: input.text,
     });
 
-    const metadataDateISO =
-      input.sourceMetadata && typeof input.sourceMetadata === 'object'
-        ? (input.sourceMetadata as { dateISO?: unknown }).dateISO
-        : undefined;
-
-    const contentDateISO =
-      typeof metadataDateISO === 'string' && !Number.isNaN(Date.parse(metadataDateISO))
-        ? metadataDateISO
-        : undefined;
+    const dateResult = await extractContentDateWithStub(input);
 
     return {
       ...result,
-      ...(contentDateISO ? { contentDateISO } : {}),
+      ...dateResult,
       model: settings.model || 'stub',
     };
   },

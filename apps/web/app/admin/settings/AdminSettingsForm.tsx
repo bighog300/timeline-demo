@@ -17,6 +17,24 @@ type TestResult = {
   timings: { ms: number };
 };
 
+type BackfillStatusItem = {
+  fileId: string;
+  title: string;
+  before: string | null;
+  after: string | null;
+  status: 'updated' | 'skipped' | 'no_date';
+};
+
+type BackfillResult = {
+  dryRun: boolean;
+  limit: number;
+  scanned: number;
+  updated: number;
+  skippedAlreadyHasDate: number;
+  noDateFound: number;
+  items: BackfillStatusItem[];
+};
+
 const defaultSettings: AdminSettings = {
   ...DEFAULT_ADMIN_SETTINGS,
   updatedAtISO: new Date(0).toISOString(),
@@ -40,6 +58,11 @@ export default function AdminSettingsForm() {
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
+  const [enableBackfill, setEnableBackfill] = useState(false);
+  const [backfillDryRun, setBackfillDryRun] = useState(true);
+  const [backfillLimit, setBackfillLimit] = useState<10 | 25>(10);
+  const [isRunningBackfill, setIsRunningBackfill] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<BackfillResult | null>(null);
 
   const validation = useMemo(() => {
     const errors: string[] = [];
@@ -181,6 +204,38 @@ export default function AdminSettingsForm() {
     }
   };
 
+
+  const handleBackfill = async () => {
+    if (!enableBackfill) {
+      setErrorMessage('Enable maintenance backfill before running.');
+      return;
+    }
+
+    setIsRunningBackfill(true);
+    setBackfillResult(null);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch('/api/timeline/artifacts/backfill-content-dates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ limit: backfillLimit, dryRun: backfillDryRun }),
+      });
+
+      if (!response.ok) {
+        const apiError = await parseApiError(response);
+        setErrorMessage(apiError?.message ?? 'Failed to run backfill.');
+        return;
+      }
+
+      setBackfillResult((await response.json()) as BackfillResult);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Failed to run backfill.');
+    } finally {
+      setIsRunningBackfill(false);
+    }
+  };
+
   if (status === 'loading') {
     return <p className={styles.notice}>Loading settings…</p>;
   }
@@ -313,6 +368,63 @@ export default function AdminSettingsForm() {
           ) : null}
         </div>
       ) : null}
+
+      <section className={styles.maintenanceSection}>
+        <h3 className={styles.maintenanceTitle}>Maintenance</h3>
+        <label className={styles.inlineField}>
+          <input
+            type="checkbox"
+            checked={enableBackfill}
+            onChange={(event) => setEnableBackfill(event.target.checked)}
+          />
+          <span>Backfill content dates for existing summaries</span>
+        </label>
+
+        <div className={styles.maintenanceControls}>
+          <label className={styles.inlineField}>
+            <input
+              type="checkbox"
+              checked={backfillDryRun}
+              onChange={(event) => setBackfillDryRun(event.target.checked)}
+            />
+            <span>Dry run</span>
+          </label>
+
+          <label className={styles.inlineField}>
+            <span>Limit</span>
+            <select
+              value={backfillLimit}
+              onChange={(event) => setBackfillLimit(Number(event.target.value) as 10 | 25)}
+            >
+              <option value={10}>10</option>
+              <option value={25}>25</option>
+            </select>
+          </label>
+
+          <button type="button" onClick={handleBackfill} disabled={isRunningBackfill || !enableBackfill}>
+            {isRunningBackfill ? 'Running…' : 'Run backfill'}
+          </button>
+        </div>
+
+        {backfillResult ? (
+          <div className={styles.result}>
+            <p>
+              scanned: {backfillResult.scanned} · updated: {backfillResult.updated} · skipped:{' '}
+              {backfillResult.skippedAlreadyHasDate} · no date found: {backfillResult.noDateFound}
+            </p>
+            <ul>
+              {backfillResult.items.slice(0, 10).map((item) => (
+                <li key={item.fileId}>
+                  <a href={`https://drive.google.com/file/d/${item.fileId}/view`} target="_blank" rel="noreferrer">
+                    {item.title}
+                  </a>{' '}
+                  — {item.status} ({item.before ?? 'none'} → {item.after ?? 'none'})
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </section>
     </div>
   );
 }
