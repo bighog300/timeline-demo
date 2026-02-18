@@ -1,0 +1,45 @@
+.page {
+  padding: 1.5rem;
+}
+
+.subtext {
+  color: var(--muted-text, #666);
+}
+
+.searchLabel {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 1rem 0;
+}
+
+.search {
+  min-width: 20rem;
+  padding: 0.5rem;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  padding: 0.5rem;
+  border-bottom: 1px solid #ddd;
+  text-align: left;
+  vertical-align: top;
+}
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.success {
+  color: #0a7a1a;
+}
+
+.error {
+  color: #b00020;
+}
