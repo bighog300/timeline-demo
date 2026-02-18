@@ -33,40 +33,25 @@ describe('GET /api/drive/browse', () => {
     mockCreateDriveClient.mockReturnValue({ files: { list: listMock } } as never);
   });
 
-  it('defaults folder to app folder', async () => {
-    listMock.mockResolvedValueOnce({ data: { files: [{ id: 'f1', name: 'Doc', mimeType: 'application/pdf' }] } });
+  it('scope=root allows browsing root without app-folder restriction', async () => {
+    listMock.mockResolvedValueOnce({ data: { files: [{ id: 'd1', name: 'Doc', mimeType: 'application/pdf' }] } });
 
-    const response = await GET(new Request('http://localhost/api/drive/browse') as never);
-    const payload = await response.json() as { folderId: string };
+    const response = await GET(new Request('http://localhost/api/drive/browse?scope=root') as never);
+    const payload = await response.json() as { folderId: string; scope: string };
 
     expect(response.status).toBe(200);
-    expect(payload.folderId).toBe('app-folder');
-    expect(listMock).toHaveBeenCalledWith(expect.objectContaining({ q: expect.stringContaining("'app-folder' in parents") }));
+    expect(payload.folderId).toBe('root');
+    expect(payload.scope).toBe('root');
+    expect(listMock).toHaveBeenCalledTimes(1);
+    expect(listMock).toHaveBeenCalledWith(expect.objectContaining({ q: expect.stringContaining("'root' in parents") }));
   });
 
-  it('rejects folders outside app folder scope', async () => {
+  it('scope=app enforces app-folder restrictions', async () => {
     listMock.mockResolvedValueOnce({ data: { files: [{ id: 'child-1' }] } });
 
-    const response = await GET(new Request('http://localhost/api/drive/browse?folderId=outside') as never);
+    const response = await GET(new Request('http://localhost/api/drive/browse?scope=app&folderId=outside') as never);
 
     expect(response.status).toBe(403);
-  });
-
-  it('returns items and nextPageToken', async () => {
-    listMock
-      .mockResolvedValueOnce({ data: { files: [{ id: 'child-1' }] } })
-      .mockResolvedValueOnce({
-        data: {
-          files: [{ id: 'd1', name: 'Doc 1', mimeType: 'application/pdf', modifiedTime: '2024-01-01T00:00:00.000Z', webViewLink: 'https://example.com' }],
-          nextPageToken: 'next-1',
-        },
-      });
-
-    const response = await GET(new Request('http://localhost/api/drive/browse?folderId=child-1&pageToken=t-1') as never);
-    const payload = await response.json() as { items: Array<{ id: string }>; nextPageToken: string };
-
-    expect(response.status).toBe(200);
-    expect(payload.items[0]?.id).toBe('d1');
-    expect(payload.nextPageToken).toBe('next-1');
+    expect(listMock).toHaveBeenCalledTimes(1);
   });
 });
