@@ -1,12 +1,21 @@
+import { isoDateString } from '@timeline/shared';
+import { z } from 'zod';
+
 import { ProviderError } from './providerErrors';
+
+const ProviderOutputSchema = z
+  .object({
+    summary: z.string(),
+    highlights: z.array(z.string()).default([]),
+    contentDateISO: z.union([isoDateString, z.null()]).optional(),
+  })
+  .passthrough();
 
 type ParsedOutput = {
   summary: string;
   highlights: string[];
+  contentDateISO?: string;
 };
-
-const isObject = (value: unknown): value is Record<string, unknown> =>
-  Boolean(value) && typeof value === 'object';
 
 export const parseTimelineProviderOutput = (rawText: string): ParsedOutput => {
   let parsedJson: unknown;
@@ -21,7 +30,8 @@ export const parseTimelineProviderOutput = (rawText: string): ParsedOutput => {
     });
   }
 
-  if (!isObject(parsedJson)) {
+  const parsed = ProviderOutputSchema.safeParse(parsedJson);
+  if (!parsed.success) {
     throw new ProviderError({
       code: 'bad_output',
       status: 502,
@@ -30,12 +40,9 @@ export const parseTimelineProviderOutput = (rawText: string): ParsedOutput => {
     });
   }
 
-  const summary = typeof parsedJson.summary === 'string' ? parsedJson.summary.trim() : '';
-  const highlightsRaw = Array.isArray(parsedJson.highlights) ? parsedJson.highlights : [];
-  const highlights = highlightsRaw
-    .filter((value): value is string => typeof value === 'string')
-    .map((value) => value.trim())
-    .filter(Boolean);
+  const summary = parsed.data.summary.trim();
+  const highlights = parsed.data.highlights.map((value) => value.trim()).filter(Boolean);
+  const contentDateISO = parsed.data.contentDateISO?.trim();
 
   if (!summary) {
     throw new ProviderError({
@@ -46,5 +53,9 @@ export const parseTimelineProviderOutput = (rawText: string): ParsedOutput => {
     });
   }
 
-  return { summary, highlights };
+  return {
+    summary,
+    highlights,
+    ...(contentDateISO ? { contentDateISO } : {}),
+  };
 };

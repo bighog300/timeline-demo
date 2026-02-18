@@ -10,6 +10,7 @@ export type SummarizeInput = {
 export type SummarizeOutput = {
   summary: string;
   highlights: string[];
+  contentDateISO?: string;
   model: string;
 };
 

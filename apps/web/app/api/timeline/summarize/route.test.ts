@@ -128,6 +128,7 @@ describe('POST /api/timeline/summarize', () => {
         summarize: vi.fn().mockResolvedValue({
           summary: 'Summary text',
           highlights: ['Point A'],
+          contentDateISO: '2024-04-15T10:30:00Z',
           model: 'stub-model',
         }),
       },
@@ -149,5 +150,12 @@ describe('POST /api/timeline/summarize', () => {
 
     expect(response.status).toBe(200);
     expect(payload.artifacts[0].model).toBe('stub-model');
+    expect(payload.artifacts[0].contentDateISO).toBe('2024-04-15T10:30:00Z');
+    expect(mockWriteArtifactToDrive).toHaveBeenCalledWith(
+      expect.anything(),
+      'folder-1',
+      expect.objectContaining({ contentDateISO: '2024-04-15T10:30:00Z' }),
+      expect.anything(),
+    );
   });
 });

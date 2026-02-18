@@ -32,6 +32,43 @@ describe('shared schemas', () => {
   });
 
 
+  it('accepts contentDateISO when valid', () => {
+    const result = SummaryArtifactSchema.safeParse({
+      artifactId: 'artifact-1',
+      source: 'gmail',
+      sourceId: 'source-1',
+      title: 'A title',
+      createdAtISO: '2026-01-01T12:00:00Z',
+      contentDateISO: '2025-12-31T00:00:00Z',
+      summary: 'Summary text',
+      highlights: ['One'],
+      driveFolderId: 'folder-1',
+      driveFileId: 'file-1',
+      model: 'test-model',
+      version: 1,
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid contentDateISO when present', () => {
+    const result = SummaryArtifactSchema.safeParse({
+      artifactId: 'artifact-1',
+      source: 'gmail',
+      sourceId: 'source-1',
+      title: 'A title',
+      createdAtISO: '2026-01-01T12:00:00Z',
+      contentDateISO: 'not-an-iso-date',
+      summary: 'Summary text',
+      highlights: ['One'],
+      driveFolderId: 'folder-1',
+      driveFileId: 'file-1',
+      model: 'test-model',
+      version: 1,
+    });
+
+    expect(result.success).toBe(false);
+  });
 
   it('accepts admin settings without optional prompt fields', () => {
     const result = AdminSettingsSchema.safeParse({

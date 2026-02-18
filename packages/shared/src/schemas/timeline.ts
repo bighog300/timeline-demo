@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const SourceType = z.enum(['gmail', 'drive']);
 
-const isoDateString = z
+export const isoDateString = z
   .string()
   .refine((s) => !Number.isNaN(Date.parse(s)), 'Invalid ISO date string');
 
@@ -28,6 +28,7 @@ export const SummaryArtifactSchema = z
     sourceId: z.string(),
     title: z.string(),
     createdAtISO: isoDateString,
+    contentDateISO: isoDateString.optional(),
     summary: z.string(),
     highlights: z.array(z.string()),
     sourceMetadata: SourceMetadataSchema.optional(),
