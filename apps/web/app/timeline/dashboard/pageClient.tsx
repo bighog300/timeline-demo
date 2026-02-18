@@ -10,7 +10,8 @@ type QueueKind = 'all' | 'summary' | 'synthesis';
 
 type DashboardPayload = {
   ok: true;
-  summary: { totalArtifacts: number; totalSyntheses: number; proposedActions: number };
+  summary: { totalArtifacts: number; totalSyntheses: number; proposedActions: number; openLoopsOpenCount: number; highRisksCount: number; decisionsRecentCount: number };
+  topEntities: Array<{ name: string; type?: string; count: number }>;
   syntheses: Array<{ artifactId: string; title: string; mode?: string; createdAtISO?: string; contentDateISO?: string }>;
   actionQueue: Array<{
     artifactId: string;
@@ -152,6 +153,24 @@ export default function TimelineDashboardPageClient() {
             Artifacts: {data.summary.totalArtifacts} · Syntheses: {data.summary.totalSyntheses} · Proposed actions:{' '}
             {data.summary.proposedActions}
           </p>
+
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, marginBottom: 16 }}>
+            <div style={{ border: '1px solid #ddd', padding: 10 }}>
+              <h3>Top entities</h3>
+              <ul>{(data.topEntities ?? []).slice(0, 10).map((entity) => <li key={`${entity.name}-${entity.type ?? ''}`}>{entity.name}{entity.type ? ` (${entity.type})` : ''} · {entity.count}</li>)}</ul>
+            </div>
+            <div style={{ border: '1px solid #ddd', padding: 10 }}>
+              <h3>Open loops</h3>
+              <p>{data.summary.openLoopsOpenCount}</p>
+              <Link href="/timeline">Open timeline filters</Link>
+            </div>
+            <div style={{ border: '1px solid #ddd', padding: 10 }}>
+              <h3>High risks</h3>
+              <p>{data.summary.highRisksCount}</p>
+              <Link href="/timeline">Open timeline filters</Link>
+            </div>
+          </div>
 
           <h2>Recent Syntheses</h2>
           <ul>

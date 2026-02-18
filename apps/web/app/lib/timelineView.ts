@@ -36,6 +36,11 @@ export type TimelineEntry = {
   sourcePreview?: string;
   sourceMetadata?: SourceMetadata;
   suggestedActions?: SummaryArtifact['suggestedActions'];
+  entities?: SummaryArtifact['entities'];
+  decisions?: SummaryArtifact['decisions'];
+  openLoops?: SummaryArtifact['openLoops'];
+  risks?: SummaryArtifact['risks'];
+  participants?: SummaryArtifact['participants'];
   metadata?: TimelineSelectionInput['metadata'];
 };
 
@@ -45,6 +50,10 @@ export type TimelineFilters = {
   kind: 'all' | TimelineEntryKind;
   tag: 'all' | string;
   text: string;
+  entity: string;
+  hasOpenLoops: boolean;
+  hasRisks: boolean;
+  hasDecisions: boolean;
   dateFromISO?: string;
   dateToISO?: string;
 };
@@ -141,6 +150,11 @@ export const buildTimelineEntries = (
       sourcePreview: artifact?.sourcePreview,
       sourceMetadata: artifact?.sourceMetadata,
       suggestedActions: artifact?.suggestedActions,
+      entities: artifact?.entities,
+      decisions: artifact?.decisions,
+      openLoops: artifact?.openLoops,
+      risks: artifact?.risks,
+      participants: artifact?.participants,
       metadata: buildEntryMetadata(selection, artifact),
     };
   });
@@ -191,6 +205,21 @@ export const filterEntries = (entries: TimelineEntry[], filters: TimelineFilters
             return false;
           }
         }
+      }
+    }
+    if (filters.hasOpenLoops && !(entry.openLoops?.some((loop) => (loop.status ?? 'open') === 'open'))) {
+      return false;
+    }
+    if (filters.hasRisks && !(entry.risks?.length)) {
+      return false;
+    }
+    if (filters.hasDecisions && !(entry.decisions?.length)) {
+      return false;
+    }
+    if (filters.entity.trim()) {
+      const q = filters.entity.trim().toLowerCase();
+      if (!(entry.entities ?? []).some((entity) => entity.name.toLowerCase().includes(q))) {
+        return false;
       }
     }
     if (query) {

@@ -33,6 +33,16 @@ const buildStubSynthesisActions = (mode: 'briefing' | 'status_report' | 'decisio
   return [{ type: 'reminder' as const, text: 'Share synthesis follow-up with owners', confidence: 0.7 }];
 };
 
+
+const buildStructuredFromText = (text: string) => {
+  const lower = text.toLowerCase();
+  const entities = [{ name: 'Project Atlas', type: 'project' as const }];
+  const decisions = lower.includes('decid') ? [{ text: 'Proceed with Project Atlas pilot', confidence: 0.74 }] : [];
+  const openLoops = [{ text: 'Confirm launch date with stakeholders', status: 'open' as const, confidence: 0.62 }];
+  const risks = lower.includes('risk') ? [{ text: 'Delivery timeline may slip', severity: 'medium' as const, confidence: 0.6 }] : [];
+  return { entities, decisions, openLoops, risks, participants: ['team@example.com'], tags: ['timeline'], topics: ['planning'] };
+};
+
 const buildStubSuggestedActions = (text: string) => {
   const normalized = text.toLowerCase();
   if (!normalized.includes('follow up') && !normalized.includes('todo') && !normalized.includes('task')) {
@@ -66,6 +76,7 @@ export const stubTimelineProvider: TimelineProvider = {
       dateConfidence: dateResult.contentDateISO ? 0.95 : 0.2,
       model: settings.model || 'stub',
       suggestedActions: buildStubSuggestedActions(input.text),
+      ...buildStructuredFromText(input.text),
     };
   },
   timelineChat: async (input) => {
@@ -101,6 +112,7 @@ export const stubTimelineProvider: TimelineProvider = {
         content,
         keyPoints: top ? [top.highlights[0] ?? top.summary.slice(0, 120)] : [],
         suggestedActions: buildStubSynthesisActions(input.mode),
+        ...buildStructuredFromText(content),
       },
       citations: top
         ? [

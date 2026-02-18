@@ -18,7 +18,17 @@ const MAX_ARTIFACT_FETCHES = 60;
 const DashboardResponseSchema = z
   .object({
     ok: z.literal(true),
-    summary: z.object({ totalArtifacts: z.number(), totalSyntheses: z.number(), proposedActions: z.number() }).strict(),
+    summary: z
+      .object({
+        totalArtifacts: z.number(),
+        totalSyntheses: z.number(),
+        proposedActions: z.number(),
+        openLoopsOpenCount: z.number(),
+        highRisksCount: z.number(),
+        decisionsRecentCount: z.number(),
+      })
+      .strict(),
+    topEntities: z.array(z.object({ name: z.string(), type: z.string().optional(), count: z.number() }).strict()).default([]),
     syntheses: z
       .array(
         z
@@ -150,6 +160,23 @@ export const GET = async (request: NextRequest) => {
   const actionProposed: z.infer<typeof DashboardResponseSchema>['actionQueue'] = [];
   const actionResolved: z.infer<typeof DashboardResponseSchema>['actionQueue'] = [];
   let fetchCount = 0;
+  let openLoopsOpenCount = 0;
+  let highRisksCount = 0;
+  let decisionsRecentCount = 0;
+  const entityCounts = new Map<string, { name: string; type?: string; count: number }>();
+  const recentCutoff = Date.now() - 14 * 24 * 60 * 60 * 1000;
+
+  sorted.forEach((entry) => {
+    openLoopsOpenCount += entry.openLoopsCount ?? 0;
+    if (entry.entities?.length) {
+      entry.entities.forEach((entity) => {
+        const key = `${entity.name.toLowerCase()}:${entity.type ?? ''}`;
+        const existing = entityCounts.get(key);
+        if (existing) existing.count += 1;
+        else entityCounts.set(key, { name: entity.name, ...(entity.type ? { type: entity.type } : {}), count: 1 });
+      });
+    }
+  });
 
   for (const entry of sorted) {
     if (fetchCount >= MAX_ARTIFACT_FETCHES) break;
@@ -164,6 +191,17 @@ export const GET = async (request: NextRequest) => {
       if (!synthesis.success && !(summary && summary.success)) {
         continue;
       }
+
+      const riskRows = synthesis.success ? synthesis.data.risks ?? [] : summary?.success ? summary.data.risks ?? [] : [];
+      const decisionRows = synthesis.success ? synthesis.data.decisions ?? [] : summary?.success ? summary.data.decisions ?? [] : [];
+      const openRows = synthesis.success ? synthesis.data.openLoops ?? [] : summary?.success ? summary.data.openLoops ?? [] : [];
+      highRisksCount += riskRows.filter((risk) => risk.severity === 'high').length;
+      openLoopsOpenCount += openRows.filter((loop) => (loop.status ?? 'open') === 'open').length;
+      decisionsRecentCount += decisionRows.filter((decision) => {
+        if (!decision.dateISO) return false;
+        const ts = new Date(decision.dateISO).getTime();
+        return Number.isFinite(ts) && ts >= recentCutoff;
+      }).length;
 
       const artifactKind: 'summary' | 'synthesis' = synthesis.success ? 'synthesis' : 'summary';
       let actions: SuggestedAction[] = [];
@@ -209,7 +247,11 @@ export const GET = async (request: NextRequest) => {
       totalArtifacts: loadedIndex.index.artifacts.length,
       totalSyntheses: loadedIndex.index.artifacts.filter((entry) => entry.kind === 'synthesis').length,
       proposedActions: actionProposed.length,
+      openLoopsOpenCount,
+      highRisksCount,
+      decisionsRecentCount,
     },
+    topEntities: Array.from(entityCounts.values()).sort((a, b) => b.count - a.count).slice(0, 10),
     syntheses,
     actionQueue: [...actionProposed, ...actionResolved],
   });

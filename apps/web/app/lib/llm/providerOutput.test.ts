@@ -192,7 +192,7 @@ describe('parseTimelineSynthesisProviderOutput', () => {
         synthesis: {
           content: '  consolidated narrative  ',
           keyPoints: [' One ', 'One', 'Two'],
-          openLoops: Array.from({ length: 40 }).map((_, i) => ` loop ${i} `),
+          openLoops: Array.from({ length: 40 }).map((_, i) => ({ text: ` loop ${i} `, status: 'open' })),
         },
         citations: [
           { artifactId: ' a1 ', excerpt: '  Evidence excerpt  ' },
@@ -206,7 +206,7 @@ describe('parseTimelineSynthesisProviderOutput', () => {
     expect(parsed.synthesis.mode).toBe('briefing');
     expect(parsed.synthesis.title).toBe('Fallback title');
     expect(parsed.synthesis.keyPoints).toEqual(['One', 'Two']);
-    expect(parsed.synthesis.openLoops).toHaveLength(30);
+    expect(parsed.synthesis.openLoops).toHaveLength(40);
     expect(parsed.citations).toEqual([{ artifactId: 'a1', excerpt: 'Evidence excerpt' }]);
   });
 
@@ -255,3 +255,47 @@ describe('parseTimelineSynthesisProviderOutput', () => {
     ).toThrowError(ProviderError);
   });
 });
+
+
+  it('normalizes structured summarize fields with dedupe and clamp', () => {
+    const parsed = parseTimelineProviderOutput(JSON.stringify({
+      summary: 'Summary',
+      highlights: [],
+      entities: [{ name: ' Alice ', type: 'person' }, { name: 'alice', type: 'person' }],
+      decisions: [{ text: ' Approve launch plan ', confidence: 0.7 }],
+      openLoops: [{ text: ' Follow up with legal ', status: 'open', confidence: 0.6 }],
+      risks: [{ text: ' Vendor delay risk ', severity: 'high', confidence: 0.8 }],
+      participants: [' alice@example.com ', 'alice@example.com'],
+    }));
+
+    expect(parsed.entities).toEqual([{ name: 'alice', type: 'person' }]);
+    expect(parsed.decisions?.[0].text).toBe('Approve launch plan');
+    expect(parsed.openLoops?.[0].text).toBe('Follow up with legal');
+    expect(parsed.risks?.[0].severity).toBe('high');
+    expect(parsed.participants).toEqual(['alice@example.com']);
+  });
+
+  it('throws bad_output on invalid structured enums/confidence', () => {
+    expect(() =>
+      parseTimelineSynthesisProviderOutput(
+        JSON.stringify({
+          synthesis: {
+            content: 'valid content',
+            risks: [{ text: 'Risk', severity: 'critical' }],
+          },
+          citations: [],
+        }),
+        { mode: 'briefing', title: 'Fallback title', nowISO: '2026-01-01T00:00:00Z' },
+      ),
+    ).toThrowError(ProviderError);
+
+    expect(() =>
+      parseTimelineProviderOutput(
+        JSON.stringify({
+          summary: 'Summary text',
+          highlights: ['h1'],
+          decisions: [{ text: 'Decide now', confidence: 1.2 }],
+        }),
+      ),
+    ).toThrowError(ProviderError);
+  });

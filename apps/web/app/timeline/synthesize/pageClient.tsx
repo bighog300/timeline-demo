@@ -12,6 +12,10 @@ type Citation = {
   title?: string;
 };
 
+type StructuredDecision = { text: string; dateISO?: string | null; owner?: string | null; confidence?: number | null };
+type StructuredOpenLoop = { text: string; owner?: string | null; dueDateISO?: string | null; status?: 'open' | 'closed'; confidence?: number | null };
+type StructuredRisk = { text: string; severity?: 'low' | 'medium' | 'high'; likelihood?: 'low' | 'medium' | 'high'; owner?: string | null; mitigation?: string | null; confidence?: number | null };
+
 type SynthesisResponse = {
   ok: true;
   synthesis: {
@@ -21,9 +25,10 @@ type SynthesisResponse = {
     createdAtISO: string;
     content: string;
     keyPoints?: string[];
-    decisions?: string[];
-    risks?: string[];
-    openLoops?: string[];
+    entities?: Array<{ name: string; type?: string }>;
+    decisions?: StructuredDecision[];
+    risks?: StructuredRisk[];
+    openLoops?: StructuredOpenLoop[];
   };
   citations: Citation[];
   usedArtifactIds: string[];
@@ -156,22 +161,28 @@ export default function TimelineSynthesizePageClient() {
               <ul>{result.synthesis.keyPoints.map((item) => <li key={item}>{item}</li>)}</ul>
             </>
           ) : null}
+          {result.synthesis.entities?.length ? (
+            <>
+              <h3>Entities</h3>
+              <ul>{result.synthesis.entities.map((item, idx) => <li key={`entity-${idx}`}>{item.name}{item.type ? ` (${item.type})` : ''}</li>)}</ul>
+            </>
+          ) : null}
           {result.synthesis.decisions?.length ? (
             <>
               <h3>Decisions</h3>
-              <ul>{result.synthesis.decisions.map((item) => <li key={item}>{item}</li>)}</ul>
+              <ul>{result.synthesis.decisions.map((item, idx) => <li key={`dec-${idx}`}>{item.text}</li>)}</ul>
             </>
           ) : null}
           {result.synthesis.risks?.length ? (
             <>
               <h3>Risks</h3>
-              <ul>{result.synthesis.risks.map((item) => <li key={item}>{item}</li>)}</ul>
+              <ul>{result.synthesis.risks.map((item, idx) => <li key={`risk-${idx}`}>{item.text}</li>)}</ul>
             </>
           ) : null}
           {result.synthesis.openLoops?.length ? (
             <>
               <h3>Open loops</h3>
-              <ul>{result.synthesis.openLoops.map((item) => <li key={item}>{item}</li>)}</ul>
+              <ul>{result.synthesis.openLoops.map((item, idx) => <li key={`loop-${idx}`}>{item.text}</li>)}</ul>
             </>
           ) : null}
 

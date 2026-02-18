@@ -66,6 +66,47 @@ export const SuggestedActionSchema = z
   })
   .strict();
 
+const structuredText = z.string().trim().min(3).max(240);
+const structuredOwner = z.string().trim().min(1).max(120).nullable().optional();
+const structuredConfidence = z.number().min(0).max(1).nullable().optional();
+
+export const EntitySchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    type: z.enum(['person', 'org', 'project', 'product', 'place', 'other']).optional(),
+  })
+  .strict();
+
+export const DecisionSchema = z
+  .object({
+    text: structuredText,
+    dateISO: z.union([isoDateString, z.null()]).optional(),
+    owner: structuredOwner,
+    confidence: structuredConfidence,
+  })
+  .strict();
+
+export const OpenLoopSchema = z
+  .object({
+    text: structuredText,
+    owner: structuredOwner,
+    dueDateISO: z.union([isoDateString, z.null()]).optional(),
+    status: z.enum(['open', 'closed']).default('open').optional(),
+    confidence: structuredConfidence,
+  })
+  .strict();
+
+export const RiskSchema = z
+  .object({
+    text: structuredText,
+    severity: z.enum(['low', 'medium', 'high']).optional(),
+    likelihood: z.enum(['low', 'medium', 'high']).optional(),
+    owner: structuredOwner,
+    mitigation: z.string().trim().max(240).nullable().optional(),
+    confidence: structuredConfidence,
+  })
+  .strict();
+
 export const SummaryArtifactSchema = z
   .object({
     artifactId: z.string(),
@@ -90,6 +131,13 @@ export const SummaryArtifactSchema = z
     sourceMetadata: SourceMetadataSchema.optional(),
     sourcePreview: z.string().optional(),
     suggestedActions: z.array(SuggestedActionSchema).optional(),
+    entities: z.array(EntitySchema).max(30).optional(),
+    decisions: z.array(DecisionSchema).max(30).optional(),
+    openLoops: z.array(OpenLoopSchema).max(50).optional(),
+    risks: z.array(RiskSchema).max(30).optional(),
+    participants: z.array(z.string().trim().min(1)).max(30).optional(),
+    tags: z.array(z.string().trim().min(1)).max(20).optional(),
+    topics: z.array(z.string().trim().min(1)).max(20).optional(),
     driveFolderId: z.string(),
     driveFileId: z.string(),
     driveWebViewLink: z.string().optional(),
@@ -256,7 +304,12 @@ export const ArtifactIndexEntrySchema = z
     title: z.string().optional(),
     contentDateISO: isoDateString.optional(),
     tags: z.array(z.string()).optional(),
+    topics: z.array(z.string()).optional(),
     participants: z.array(z.string()).optional(),
+    entities: z.array(EntitySchema).max(10).optional(),
+    decisionsCount: z.number().int().min(0).optional(),
+    openLoopsCount: z.number().int().min(0).optional(),
+    risksCount: z.number().int().min(0).optional(),
     updatedAtISO: isoDateString.optional(),
   })
   .strict();
@@ -300,9 +353,13 @@ export const SynthesisOutputSchema = z
     createdAtISO: isoDateString,
     content: z.string().trim().min(1),
     keyPoints: z.array(z.string().trim().min(1)).max(20).optional(),
-    decisions: z.array(z.string().trim().min(1)).max(20).optional(),
-    risks: z.array(z.string().trim().min(1)).max(20).optional(),
-    openLoops: z.array(z.string().trim().min(1)).max(30).optional(),
+    decisions: z.array(DecisionSchema).max(30).optional(),
+    risks: z.array(RiskSchema).max(30).optional(),
+    openLoops: z.array(OpenLoopSchema).max(50).optional(),
+    entities: z.array(EntitySchema).max(30).optional(),
+    participants: z.array(z.string().trim().min(1)).max(30).optional(),
+    tags: z.array(z.string().trim().min(1)).max(20).optional(),
+    topics: z.array(z.string().trim().min(1)).max(20).optional(),
     suggestedActions: z.array(SuggestedActionSchema).optional(),
   })
   .strict();
@@ -337,7 +394,12 @@ export const SynthesisArtifactSchema = z
     ),
     summary: z.string().optional(),
     tags: z.array(z.string()).optional(),
+    topics: z.array(z.string()).optional(),
     participants: z.array(z.string()).optional(),
+    entities: z.array(EntitySchema).max(30).optional(),
+    decisions: z.array(DecisionSchema).max(30).optional(),
+    openLoops: z.array(OpenLoopSchema).max(50).optional(),
+    risks: z.array(RiskSchema).max(30).optional(),
     suggestedActions: z.array(SuggestedActionSchema).optional(),
   })
   .strict();

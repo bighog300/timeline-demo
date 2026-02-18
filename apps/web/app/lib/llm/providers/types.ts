@@ -15,6 +15,35 @@ export type SuggestedActionOutput = {
   confidence?: number | null;
 };
 
+export type StructuredEntityOutput = {
+  name: string;
+  type?: 'person' | 'org' | 'project' | 'product' | 'place' | 'other';
+};
+
+export type StructuredDecisionOutput = {
+  text: string;
+  dateISO?: string | null;
+  owner?: string | null;
+  confidence?: number | null;
+};
+
+export type StructuredOpenLoopOutput = {
+  text: string;
+  owner?: string | null;
+  dueDateISO?: string | null;
+  status?: 'open' | 'closed';
+  confidence?: number | null;
+};
+
+export type StructuredRiskOutput = {
+  text: string;
+  severity?: 'low' | 'medium' | 'high';
+  likelihood?: 'low' | 'medium' | 'high';
+  owner?: string | null;
+  mitigation?: string | null;
+  confidence?: number | null;
+};
+
 export type SummarizeOutput = {
   summary: string;
   highlights: string[];
@@ -23,6 +52,13 @@ export type SummarizeOutput = {
   contentDateISO?: string;
   model: string;
   suggestedActions?: SuggestedActionOutput[];
+  entities?: StructuredEntityOutput[];
+  decisions?: StructuredDecisionOutput[];
+  openLoops?: StructuredOpenLoopOutput[];
+  risks?: StructuredRiskOutput[];
+  participants?: string[];
+  tags?: string[];
+  topics?: string[];
 };
 
 export type TimelineChatCitation = {
@@ -80,9 +116,13 @@ export type TimelineSynthesizeOutput = {
     createdAtISO: string;
     content: string;
     keyPoints?: string[];
-    decisions?: string[];
-    risks?: string[];
-    openLoops?: string[];
+    entities?: StructuredEntityOutput[];
+    decisions?: StructuredDecisionOutput[];
+    openLoops?: StructuredOpenLoopOutput[];
+    risks?: StructuredRiskOutput[];
+    participants?: string[];
+    tags?: string[];
+    topics?: string[];
     suggestedActions?: SuggestedActionOutput[];
   };
   citations: TimelineSynthesisCitation[];
