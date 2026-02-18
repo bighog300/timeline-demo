@@ -2,6 +2,11 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
 
 import { jsonError } from '../../../lib/apiErrors';
+import {
+  buildMimeFilter,
+  escapeDriveQueryValue,
+  SCOPE_SCHEMA,
+} from '../../../lib/driveBrowseSelection';
 import { getGoogleAccessToken, getGoogleSession } from '../../../lib/googleAuth';
 import { createDriveClient } from '../../../lib/googleDrive';
 import { logGoogleError, mapGoogleError } from '../../../lib/googleRequest';
@@ -11,35 +16,8 @@ const QuerySchema = z.object({
   q: z.string().trim().max(200).optional(),
   pageToken: z.string().trim().min(1).optional(),
   mimeGroup: z.enum(['docs', 'pdf', 'all']).optional(),
+  scope: SCOPE_SCHEMA.optional(),
 });
-
-const escapeDriveQueryValue = (value: string) => value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-
-const DOC_MIME_TYPES = [
-  'application/vnd.google-apps.document',
-  'application/vnd.google-apps.spreadsheet',
-  'application/vnd.google-apps.presentation',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'application/msword',
-  'application/vnd.ms-excel',
-  'application/vnd.ms-powerpoint',
-  'text/plain',
-];
-
-const buildMimeFilter = (mimeGroup: 'docs' | 'pdf' | 'all') => {
-  if (mimeGroup === 'all') {
-    return '';
-  }
-
-  if (mimeGroup === 'pdf') {
-    return " and (mimeType = 'application/vnd.google-apps.folder' or mimeType = 'application/pdf')";
-  }
-
-  const docsQuery = DOC_MIME_TYPES.map((mime) => `mimeType = '${mime}'`).join(' or ');
-  return ` and (mimeType = 'application/vnd.google-apps.folder' or ${docsQuery})`;
-};
 
 const listDirectChildFolderIds = async (driveFolderId: string, accessToken: string) => {
   const drive = createDriveClient(accessToken);
@@ -79,17 +57,19 @@ export const GET = async (request: NextRequest) => {
     q: url.searchParams.get('q') ?? undefined,
     pageToken: url.searchParams.get('pageToken') ?? undefined,
     mimeGroup: url.searchParams.get('mimeGroup') ?? undefined,
+    scope: url.searchParams.get('scope') ?? undefined,
   });
 
   if (!parsedQuery.success) {
     return jsonError(400, 'bad_request', 'Invalid query parameters.', parsedQuery.error.flatten());
   }
 
-  const folderId = parsedQuery.data.folderId ?? session.driveFolderId;
+  const scope = parsedQuery.data.scope ?? 'app';
+  const folderId = parsedQuery.data.folderId ?? (scope === 'root' ? 'root' : session.driveFolderId);
   const mimeGroup = parsedQuery.data.mimeGroup ?? 'all';
 
   try {
-    if (folderId !== session.driveFolderId) {
+    if (scope === 'app' && folderId !== session.driveFolderId) {
       const childFolderIds = await listDirectChildFolderIds(session.driveFolderId, accessToken);
       if (!childFolderIds.has(folderId)) {
         return jsonError(403, 'forbidden', 'Folder is outside the app Drive scope.');
@@ -126,6 +106,7 @@ export const GET = async (request: NextRequest) => {
 
     return NextResponse.json({
       folderId,
+      scope,
       items,
       nextPageToken: response.data.nextPageToken ?? null,
     });
