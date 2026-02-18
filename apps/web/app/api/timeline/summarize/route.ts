@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import {
   SummarizeRequestSchema,
@@ -22,6 +23,26 @@ import { upsertArtifactIndex } from '../../../lib/timeline/artifactIndex';
 
 const MAX_ITEMS = 10;
 const PREVIEW_CHARS = 600;
+
+
+const buildSuggestedActionId = (type: string, text: string, dueDateISO?: string | null) =>
+  `act_${createHash('sha256').update(`${type}|${text}|${dueDateISO ?? ''}`).digest('hex').slice(0, 12)}`;
+
+const normalizeSuggestedActionsForArtifact = (
+  actions: Array<{ id?: string; type: 'reminder' | 'task' | 'calendar'; text: string; dueDateISO?: string | null; confidence?: number | null }> | undefined,
+  nowISO: string,
+) =>
+  actions?.map((action) => ({
+    id: action.id?.trim() || buildSuggestedActionId(action.type, action.text, action.dueDateISO),
+    type: action.type,
+    text: action.text,
+    ...(typeof action.dueDateISO === 'string' ? { dueDateISO: action.dueDateISO } : action.dueDateISO === null ? { dueDateISO: null } : {}),
+    ...(typeof action.confidence === 'number' ? { confidence: action.confidence } : action.confidence === null ? { confidence: null } : {}),
+    status: 'proposed' as const,
+    createdAtISO: nowISO,
+    updatedAtISO: nowISO,
+  }));
+
 
 export const POST = async (request: NextRequest) => {
   const ctx = createCtx(request, '/api/timeline/summarize');
@@ -111,7 +132,7 @@ export const POST = async (request: NextRequest) => {
           ? await fetchGmailMessageText(gmail, item.id, ctx)
           : await fetchDriveFileText(drive, item.id, driveFolderId, ctx);
 
-      const { summary, highlights, evidence, dateConfidence, contentDateISO, model } = await time(ctx, 'summarize', async () =>
+      const { summary, highlights, evidence, dateConfidence, contentDateISO, model, suggestedActions } = await time(ctx, 'summarize', async () =>
         timelineProvider.summarize(
           {
             title: content.title,
@@ -124,6 +145,7 @@ export const POST = async (request: NextRequest) => {
       );
 
       const createdAtISO = new Date().toISOString();
+      const normalizedSuggestedActions = normalizeSuggestedActionsForArtifact(suggestedActions, createdAtISO);
       const sourcePreview =
         content.text.length > PREVIEW_CHARS
           ? `${content.text.slice(0, PREVIEW_CHARS).trimEnd()}…`
@@ -139,6 +161,7 @@ export const POST = async (request: NextRequest) => {
         ...(contentDateISO ? { contentDateISO } : {}),
         ...(evidence?.length ? { evidence } : {}),
         ...(typeof dateConfidence === 'number' ? { dateConfidence } : {}),
+        ...(normalizedSuggestedActions?.length ? { suggestedActions: normalizedSuggestedActions } : {}),
         sourceMetadata: content.metadata,
         sourcePreview,
         driveFolderId,

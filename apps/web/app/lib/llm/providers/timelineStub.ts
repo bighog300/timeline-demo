@@ -19,6 +19,18 @@ export const extractContentDateWithStub = async (
   return contentDateISO ? { contentDateISO } : {};
 };
 
+const buildStubSuggestedActions = (text: string) => {
+  const normalized = text.toLowerCase();
+  if (!normalized.includes('follow up') && !normalized.includes('todo') && !normalized.includes('task')) {
+    return [];
+  }
+
+  return [
+    { type: 'reminder' as const, text: 'Follow up on the discussed item', confidence: 0.72 },
+    { type: 'task' as const, text: 'Draft the requested next-step summary', confidence: 0.66 },
+  ];
+};
+
 export const stubTimelineProvider: TimelineProvider = {
   summarize: async (input, settings) => {
     const result = summarizeDeterministic({
@@ -39,6 +51,7 @@ export const stubTimelineProvider: TimelineProvider = {
       ],
       dateConfidence: dateResult.contentDateISO ? 0.95 : 0.2,
       model: settings.model || 'stub',
+      suggestedActions: buildStubSuggestedActions(input.text),
     };
   },
   timelineChat: async (input) => {

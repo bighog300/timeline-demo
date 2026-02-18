@@ -7,6 +7,14 @@ export type SummarizeInput = {
   sourceMetadata?: unknown;
 };
 
+export type SuggestedActionOutput = {
+  id?: string;
+  type: 'reminder' | 'task' | 'calendar';
+  text: string;
+  dueDateISO?: string | null;
+  confidence?: number | null;
+};
+
 export type SummarizeOutput = {
   summary: string;
   highlights: string[];
@@ -14,6 +22,7 @@ export type SummarizeOutput = {
   dateConfidence?: number;
   contentDateISO?: string;
   model: string;
+  suggestedActions?: SuggestedActionOutput[];
 };
 
 export type TimelineChatCitation = {

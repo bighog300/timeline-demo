@@ -3,6 +3,16 @@ import { z } from 'zod';
 
 import { ProviderError } from './providerErrors';
 
+const SuggestedActionProviderSchema = z
+  .object({
+    id: z.string().optional(),
+    type: z.enum(['reminder', 'task', 'calendar']),
+    text: z.string(),
+    dueDateISO: z.union([isoDateString, z.null()]).optional(),
+    confidence: z.number().min(0).max(1).nullable().optional(),
+  })
+  .strict();
+
 const ProviderOutputSchema = z
   .object({
     summary: z.string(),
@@ -19,6 +29,7 @@ const ProviderOutputSchema = z
       .optional(),
     dateConfidence: z.number().min(0).max(1).optional(),
     contentDateISO: z.union([isoDateString, z.null()]).optional(),
+    suggestedActions: z.array(SuggestedActionProviderSchema).optional(),
   })
   .passthrough();
 
@@ -51,6 +62,13 @@ type ParsedOutput = {
   evidence?: Array<{ sourceId?: string; excerpt: string }>;
   dateConfidence?: number;
   contentDateISO?: string;
+  suggestedActions?: Array<{
+    id?: string;
+    type: 'reminder' | 'task' | 'calendar';
+    text: string;
+    dueDateISO?: string | null;
+    confidence: number | null;
+  }>;
 };
 
 const badOutput = () =>
@@ -62,6 +80,45 @@ const badOutput = () =>
   });
 
 const normalizeWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+
+const MAX_SUGGESTED_ACTIONS = 8;
+
+const normalizeSuggestedActions = (actions: z.infer<typeof SuggestedActionProviderSchema>[]) =>
+  Array.from(
+    new Map(
+      actions
+        .map((action) => {
+          const text = normalizeWhitespace(action.text);
+          const id = action.id?.trim();
+          if (!text || text.length < 3 || text.length > 240) {
+            return null;
+          }
+          const dueDateISO = action.dueDateISO === null ? null : action.dueDateISO?.trim();
+          const confidence =
+            typeof action.confidence === 'number' && Number.isFinite(action.confidence)
+              ? action.confidence
+              : null;
+          if (confidence !== null && (confidence < 0 || confidence > 1)) {
+            throw badOutput();
+          }
+
+          return {
+            ...(id ? { id } : {}),
+            type: action.type,
+            text,
+            dueDateISO,
+            confidence,
+          };
+        })
+        .filter((action): action is NonNullable<typeof action> => Boolean(action))
+        .map((action) => [
+          `${action.type}:${action.text.toLowerCase()}:${action.dueDateISO ?? ''}`,
+          action,
+        ]),
+    ).values(),
+  ).slice(0, MAX_SUGGESTED_ACTIONS);
+
 
 export const normalizeTimelineCitations = (
   citations: Array<{ artifactId: string; excerpt: string }>,
@@ -122,6 +179,9 @@ export const parseTimelineProviderOutput = (rawText: string): ParsedOutput => {
     .filter((item) => item.excerpt)
     .slice(0, 5);
   const contentDateISO = parsed.data.contentDateISO?.trim();
+  const suggestedActions = parsed.data.suggestedActions
+    ? normalizeSuggestedActions(parsed.data.suggestedActions)
+    : undefined;
 
   if (!summary) {
     throw badOutput();
@@ -135,6 +195,7 @@ export const parseTimelineProviderOutput = (rawText: string): ParsedOutput => {
       ? { dateConfidence: Math.max(0, Math.min(1, parsed.data.dateConfidence)) }
       : {}),
     ...(contentDateISO ? { contentDateISO } : {}),
+    ...(suggestedActions?.length ? { suggestedActions } : {}),
   };
 };
 
