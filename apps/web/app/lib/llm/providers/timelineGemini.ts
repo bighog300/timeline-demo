@@ -2,19 +2,49 @@ import type { AdminSettings } from '../../adminSettings';
 import type { DateExtractionInput } from '../contentDateExtraction';
 import { renderTemplate } from '../promptTemplate';
 import { ProviderError, normalizeProviderHttpError } from '../providerErrors';
-import { parseDateOnlyProviderOutput, parseTimelineProviderOutput } from '../providerOutput';
+import {
+  parseDateOnlyProviderOutput,
+  parseTimelineChatProviderOutput,
+  parseTimelineProviderOutput,
+} from '../providerOutput';
 import type { TimelineProvider } from './types';
 
 const jsonOnlyInstruction =
-  'Return ONLY valid JSON with keys summary (string), highlights (string[]), and contentDateISO (string|null). No prose.';
+  'Return ONLY valid JSON with keys summary (string), highlights (string[]), evidence (array optional), dateConfidence (number 0..1 optional), and contentDateISO (string|null). No prose.';
 
 const dateOnlyJsonInstruction =
   'Return ONLY valid JSON: {"contentDateISO": string|null}. Use null when no primary date is present. No prose.';
+
+const timelineChatJsonInstruction =
+  'Return ONLY valid JSON: {"answer": string, "citations": [{"artifactId": string, "excerpt": string}], "usedArtifactIds": string[]}. Use only provided artifacts and do not hallucinate sources.';
 
 const defaultSummaryPrompt = 'Create a concise summary of the source.';
 const defaultHighlightsPrompt = 'Extract key highlights as short bullet-friendly phrases.';
 const defaultContentDatePrompt =
   'If the content describes a specific date/time (e.g., event date), set contentDateISO to that date/time in ISO 8601. If multiple dates exist, choose the primary one. If no meaningful date, set null.';
+
+const buildTimelineChatPrompt = (
+  query: string,
+  artifacts: Array<{ artifactId: string; title: string; contentDateISO?: string; summary: string; highlights: string[] }>,
+) =>
+  [
+    'Answer the user query using ONLY the provided artifact snippets.',
+    'Citations must reference artifactId values from snippets and include short excerpts.',
+    'If evidence is insufficient, say so.',
+    '',
+    `User query: ${query}`,
+    '',
+    'Artifacts:',
+    ...artifacts.map((artifact) =>
+      [
+        `ArtifactId: ${artifact.artifactId}`,
+        `Title: ${artifact.title}`,
+        `ContentDateISO: ${artifact.contentDateISO ?? 'unknown'}`,
+        `Summary: ${artifact.summary}`,
+        `Highlights: ${artifact.highlights.join(' | ') || '(none)'}`,
+      ].join('\n'),
+    ),
+  ].join('\n\n');
 
 const buildUserPrompt = (
   title: string,
@@ -34,6 +64,7 @@ const buildUserPrompt = (
     `${summaryPrompt}`,
     `${highlightsPrompt}`,
     `${defaultContentDatePrompt}`,
+    'Extract 3-5 evidence snippets as evidence[].excerpt with optional sourceId.',
     '',
     `Title: ${title}`,
     `Source: ${source}`,
@@ -147,8 +178,18 @@ export const geminiTimelineProvider: TimelineProvider = {
     return {
       summary: parsed.summary,
       highlights: parsed.highlights,
+      evidence: parsed.evidence,
+      dateConfidence: parsed.dateConfidence,
       contentDateISO: parsed.contentDateISO,
       model: settings.model,
     };
+  },
+  timelineChat: async (input, settings) => {
+    const rawText = await callGemini(
+      settings,
+      buildTimelineChatPrompt(input.query, input.artifacts),
+      timelineChatJsonInstruction,
+    );
+    return parseTimelineChatProviderOutput(rawText);
   },
 };

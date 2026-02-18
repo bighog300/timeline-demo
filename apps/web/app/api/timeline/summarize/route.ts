@@ -14,10 +14,11 @@ import { fetchDriveFileText, fetchGmailMessageText } from '../../../lib/fetchSou
 import { checkRateLimit, getRateLimitKey } from '../../../lib/rateLimit';
 import { PayloadLimitError } from '../../../lib/driveSafety';
 import { writeArtifactToDrive } from '../../../lib/writeArtifactToDrive';
-import { hashUserHint, logError, logInfo, safeError, time } from '../../../lib/logger';
+import { hashUserHint, logError, logInfo, logWarn, safeError, time } from '../../../lib/logger';
 import { createCtx, withRequestId } from '../../../lib/requestContext';
 import { ProviderError } from '../../../lib/llm/providerErrors';
 import { getTimelineProviderFromDrive } from '../../../lib/llm/providerRouter';
+import { upsertArtifactIndex } from '../../../lib/timeline/artifactIndex';
 
 const MAX_ITEMS = 10;
 const PREVIEW_CHARS = 600;
@@ -110,7 +111,7 @@ export const POST = async (request: NextRequest) => {
           ? await fetchGmailMessageText(gmail, item.id, ctx)
           : await fetchDriveFileText(drive, item.id, driveFolderId, ctx);
 
-      const { summary, highlights, contentDateISO, model } = await time(ctx, 'summarize', async () =>
+      const { summary, highlights, evidence, dateConfidence, contentDateISO, model } = await time(ctx, 'summarize', async () =>
         timelineProvider.summarize(
           {
             title: content.title,
@@ -136,6 +137,8 @@ export const POST = async (request: NextRequest) => {
         summary,
         highlights,
         ...(contentDateISO ? { contentDateISO } : {}),
+        ...(evidence?.length ? { evidence } : {}),
+        ...(typeof dateConfidence === 'number' ? { dateConfidence } : {}),
         sourceMetadata: content.metadata,
         sourcePreview,
         driveFolderId,
@@ -147,11 +150,18 @@ export const POST = async (request: NextRequest) => {
 
       const driveResult = await writeArtifactToDrive(drive, driveFolderId, artifact, ctx);
 
-      artifacts.push({
+      const persistedArtifact = {
         ...artifact,
         driveFileId: driveResult.jsonFileId,
         driveWebViewLink: driveResult.jsonWebViewLink,
-      });
+      };
+
+      artifacts.push(persistedArtifact);
+      try {
+        await upsertArtifactIndex(drive, driveFolderId, persistedArtifact, ctx);
+      } catch (indexError) {
+        logWarn(ctx, 'artifact_index_upsert_failed', { error: safeError(indexError) });
+      }
     } catch (error) {
       if (error instanceof ProviderError) {
         if (error.code === 'bad_output') {

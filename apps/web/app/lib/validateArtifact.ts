@@ -42,9 +42,20 @@ const coerceArtifact = (value: unknown): SummaryArtifact | null => {
     title: value.title,
     createdAtISO: value.createdAtISO,
     summary: value.summary,
+    contentDateISO: normalizeString(value.contentDateISO),
     highlights: Array.isArray(value.highlights)
       ? value.highlights.filter((item) => typeof item === 'string')
       : [],
+    evidence: Array.isArray(value.evidence)
+      ? value.evidence
+          .filter((item) => item && typeof item === 'object')
+          .map((item) => ({
+            sourceId: normalizeString((item as { sourceId?: unknown }).sourceId),
+            excerpt: normalizeString((item as { excerpt?: unknown }).excerpt) ?? '',
+          }))
+          .filter((item) => item.excerpt)
+      : undefined,
+    dateConfidence: typeof value.dateConfidence === 'number' ? value.dateConfidence : undefined,
     sourceMetadata: normalizeSourceMetadata(value.sourceMetadata),
     sourcePreview: normalizeString(value.sourcePreview),
     driveFolderId: typeof value.driveFolderId === 'string' ? value.driveFolderId : '',

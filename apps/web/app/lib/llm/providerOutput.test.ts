@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { ProviderError } from './providerErrors';
-import { parseTimelineProviderOutput } from './providerOutput';
+import { parseTimelineChatProviderOutput, parseTimelineProviderOutput } from './providerOutput';
 
 describe('parseTimelineProviderOutput', () => {
   it('returns normalized summary/highlights/contentDateISO when valid', () => {
@@ -54,5 +54,31 @@ describe('parseTimelineProviderOutput', () => {
     } catch (error) {
       expect(error).toMatchObject({ code: 'bad_output', status: 502 });
     }
+  });
+});
+
+
+describe('parseTimelineChatProviderOutput', () => {
+  it('normalizes and deduplicates citations', () => {
+    const parsed = parseTimelineChatProviderOutput(JSON.stringify({
+      answer: '  grounded answer ',
+      citations: [
+        { artifactId: ' a1 ', excerpt: '  Excerpt 1  ' },
+        { artifactId: 'a1', excerpt: 'Excerpt 1' },
+      ],
+      usedArtifactIds: ['a1', ' a2 ', 'a1'],
+    }));
+
+    expect(parsed).toEqual({
+      answer: 'grounded answer',
+      citations: [{ artifactId: 'a1', excerpt: 'Excerpt 1' }],
+      usedArtifactIds: ['a1', 'a2'],
+    });
+  });
+
+  it('throws bad_output on empty answer', () => {
+    expect(() =>
+      parseTimelineChatProviderOutput(JSON.stringify({ answer: '   ', citations: [] })),
+    ).toThrowError(ProviderError);
   });
 });

@@ -10,10 +10,37 @@ export type SummarizeInput = {
 export type SummarizeOutput = {
   summary: string;
   highlights: string[];
+  evidence?: Array<{ sourceId?: string; excerpt: string }>;
+  dateConfidence?: number;
   contentDateISO?: string;
   model: string;
 };
 
+export type TimelineChatCitation = {
+  artifactId: string;
+  excerpt: string;
+};
+
+export type TimelineChatInputArtifact = {
+  artifactId: string;
+  title: string;
+  contentDateISO?: string;
+  summary: string;
+  highlights: string[];
+};
+
+export type TimelineChatInput = {
+  query: string;
+  artifacts: TimelineChatInputArtifact[];
+};
+
+export type TimelineChatOutput = {
+  answer: string;
+  citations: TimelineChatCitation[];
+  usedArtifactIds?: string[];
+};
+
 export interface TimelineProvider {
   summarize(input: SummarizeInput, settings: AdminSettings): Promise<SummarizeOutput>;
+  timelineChat(input: TimelineChatInput, settings: AdminSettings): Promise<TimelineChatOutput>;
 }
