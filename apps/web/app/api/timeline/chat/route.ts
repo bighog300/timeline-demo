@@ -10,9 +10,10 @@ import {
 import { getGoogleAccessToken, getGoogleSession } from '../../../lib/googleAuth';
 import { createDriveClient } from '../../../lib/googleDrive';
 import { mapGoogleError } from '../../../lib/googleRequest';
+import { normalizeTimelineCitations } from '../../../lib/llm/providerOutput';
 import { ProviderError } from '../../../lib/llm/providerErrors';
 import { getTimelineProviderFromDrive } from '../../../lib/llm/providerRouter';
-import { hashUserHint, logError, logInfo, safeError } from '../../../lib/logger';
+import { hashUserHint, logError, logInfo, logWarn, safeError } from '../../../lib/logger';
 import { checkRateLimit, getRateLimitKey } from '../../../lib/rateLimit';
 import { createCtx, withRequestId } from '../../../lib/requestContext';
 import { loadArtifactIndex } from '../../../lib/timeline/artifactIndex';
@@ -45,19 +46,78 @@ const ResponseSchema = z
   })
   .strict();
 
+const STOPWORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'are',
+  'as',
+  'at',
+  'be',
+  'by',
+  'for',
+  'from',
+  'in',
+  'is',
+  'it',
+  'of',
+  'on',
+  'or',
+  'that',
+  'the',
+  'to',
+  'was',
+  'were',
+  'with',
+]);
+
+const MAX_EXCERPT = 300;
+const MAX_TOTAL_CHARS = 24000;
+const MAX_EXCERPT_CHARS = 1200;
+const MAX_SUMMARY_CHARS = 2000;
+
 const tokenize = (value: string) =>
   value
     .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .map((t) => t.trim())
-    .filter((t) => t.length > 1);
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map((token) => token.trim())
+    .filter((token) => token.length > 1 && !STOPWORDS.has(token));
 
-const scoreArtifact = (query: string, fields: string[]) => {
-  const q = tokenize(query);
-  if (q.length === 0) return 0;
-  const haystack = tokenize(fields.join(' '));
-  const hayset = new Set(haystack);
-  return q.reduce((acc, token) => acc + (hayset.has(token) ? 1 : 0), 0);
+const toTimestamp = (value?: string) => {
+  if (!value) {
+    return Number.NEGATIVE_INFINITY;
+  }
+  const ts = new Date(value).getTime();
+  return Number.isFinite(ts) ? ts : Number.NEGATIVE_INFINITY;
+};
+
+const scoreArtifact = (
+  queryTokens: string[],
+  fields: { title?: string; summary?: string; highlights?: string[] },
+) => {
+  if (!queryTokens.length) {
+    return 0;
+  }
+
+  const title = new Set(tokenize(fields.title ?? ''));
+  const summary = new Set(tokenize(fields.summary ?? ''));
+  const highlights = new Set(tokenize((fields.highlights ?? []).join(' ')));
+
+  return queryTokens.reduce((score, token) => {
+    if (title.has(token)) {
+      return score + 5;
+    }
+    if (summary.has(token)) {
+      return score + 3;
+    }
+    if (highlights.has(token)) {
+      return score + 1;
+    }
+    return score;
+  }, 0);
 };
 
 const isWithinDateRange = (value: string | undefined, from?: string, to?: string) => {
@@ -69,7 +129,36 @@ const isWithinDateRange = (value: string | undefined, from?: string, to?: string
   return true;
 };
 
-const MAX_EXCERPT = 300;
+const noMatchResponse = (answer: string) =>
+  NextResponse.json(
+    ResponseSchema.parse({
+      answer,
+      citations: [],
+      usedArtifactIds: [],
+    }),
+  );
+
+const estimateArtifactChars = (artifact: {
+  title?: string;
+  summary?: string;
+  highlights?: string[];
+  evidence?: Array<{ excerpt: string }>;
+}) => {
+  const evidenceChars = (artifact.evidence ?? []).reduce((acc, item) => acc + item.excerpt.length, 0);
+  return (
+    (artifact.title?.length ?? 0) +
+    (artifact.summary?.length ?? 0) +
+    (artifact.highlights ?? []).reduce((acc, item) => acc + item.length, 0) +
+    evidenceChars
+  );
+};
+
+const trimTo = (value: string | undefined, maxChars: number) => {
+  if (!value) {
+    return undefined;
+  }
+  return value.length <= maxChars ? value : value.slice(0, maxChars);
+};
 
 export const POST = async (request: NextRequest) => {
   const ctx = createCtx(request, '/api/timeline/chat');
@@ -144,74 +233,180 @@ export const POST = async (request: NextRequest) => {
 
   if (filtered.length === 0) {
     return respond(
-      NextResponse.json(
-        ResponseSchema.parse({
-          answer:
-            'No matching timeline artifacts were found. Try broadening filters, summarizing more sources, or asking a different question.',
-          citations: [],
-          usedArtifactIds: [],
-        }),
+      noMatchResponse(
+        'No matching timeline artifacts were found. Try broadening filters, summarizing more sources, or asking a different question.',
       ),
     );
   }
 
-  const scored = filtered
-    .map((artifact) => ({
-      artifact,
-      score: scoreArtifact(body.query, [artifact.title ?? '', ...(artifact.tags ?? []), ...(artifact.participants ?? [])]),
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, body.limit);
-
   const artifactMap = new Map(index.artifacts.map((entry) => [entry.id, entry]));
-  const loadedArtifacts = [] as z.infer<typeof SummaryArtifactSchema>[];
+  const loadedCandidates = [] as Array<{ entry: (typeof filtered)[number]; artifact: z.infer<typeof SummaryArtifactSchema> }>;
 
-  for (const item of scored) {
+  for (const entry of filtered) {
     try {
       const response = await drive.files.get(
-        { fileId: item.artifact.driveFileId, alt: 'media' },
+        { fileId: entry.driveFileId, alt: 'media' },
         { responseType: 'json' },
       );
       const parsed = SummaryArtifactSchema.safeParse(typeof response.data === 'string' ? JSON.parse(response.data) : response.data);
       if (parsed.success) {
-        loadedArtifacts.push(parsed.data);
+        loadedCandidates.push({ entry, artifact: parsed.data });
       }
     } catch (error) {
       logError(ctx, 'artifact_read_failed', { error: safeError(error) });
     }
   }
 
-  if (loadedArtifacts.length === 0) {
+  if (loadedCandidates.length === 0) {
     return respond(
-      NextResponse.json(
-        ResponseSchema.parse({
-          answer: 'No matching timeline artifacts were readable. Please retry after syncing.',
-          citations: [],
-          usedArtifactIds: [],
-        }),
+      noMatchResponse('No matching timeline artifacts were readable. Please retry after syncing.'),
+    );
+  }
+
+  const queryTokens = tokenize(body.query);
+  const ranked = loadedCandidates
+    .map((candidate) => ({
+      ...candidate,
+      score: scoreArtifact(queryTokens, {
+        title: candidate.entry.title ?? candidate.artifact.title,
+        summary: candidate.artifact.summary,
+        highlights: candidate.artifact.highlights,
+      }),
+    }))
+    .sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
+      const byContentDate = toTimestamp(b.entry.contentDateISO ?? b.artifact.contentDateISO) - toTimestamp(a.entry.contentDateISO ?? a.artifact.contentDateISO);
+      if (byContentDate !== 0) {
+        return byContentDate;
+      }
+      return toTimestamp(b.entry.updatedAtISO) - toTimestamp(a.entry.updatedAtISO);
+    });
+
+  const meaningfulQuery = queryTokens.length > 0;
+  const hasMatches = ranked.some((item) => item.score > 0);
+  logInfo(ctx, 'timeline_chat_retrieval', {
+    candidateCount: filtered.length,
+    selectedCount: Math.min(body.limit, ranked.length),
+    queryTokensCount: queryTokens.length,
+  });
+
+  if (!hasMatches) {
+    return respond(
+      noMatchResponse(
+        meaningfulQuery
+          ? 'No timeline artifacts matched that query. Try different keywords, broader filters, or summarize more sources first.'
+          : 'No meaningful query terms found. Add specific keywords (names, topics, or dates) to search your artifacts.',
       ),
     );
   }
+
+  const topRanked = ranked.slice(0, body.limit);
+  const payloadArtifacts: Array<{
+    artifactId: string;
+    title: string;
+    contentDateISO?: string;
+    summary: string;
+    highlights: string[];
+    evidence?: Array<{ sourceId?: string; excerpt: string }>;
+  }> = [];
+  let runningTotalChars = 0;
+  let truncatedFields = 0;
+
+  for (const candidate of topRanked) {
+    const trimmedSummary = trimTo(candidate.artifact.summary, MAX_SUMMARY_CHARS) ?? '';
+    if (trimmedSummary.length < candidate.artifact.summary.length) {
+      truncatedFields += 1;
+    }
+
+    const baseArtifact = {
+      artifactId: candidate.artifact.artifactId,
+      title: candidate.artifact.title,
+      contentDateISO: candidate.artifact.contentDateISO,
+      summary: trimmedSummary,
+      highlights: candidate.artifact.highlights,
+    };
+
+    const evidence = (candidate.artifact.evidence ?? [])
+      .map((item) => ({
+        ...(item.sourceId ? { sourceId: item.sourceId } : {}),
+        excerpt: trimTo(item.excerpt, MAX_EXCERPT_CHARS) ?? '',
+      }))
+      .filter((item) => item.excerpt);
+
+    if ((candidate.artifact.evidence ?? []).length !== evidence.length) {
+      truncatedFields += 1;
+    }
+    if (evidence.some((item, idx) => item.excerpt.length < (candidate.artifact.evidence?.[idx]?.excerpt.length ?? 0))) {
+      truncatedFields += 1;
+    }
+
+    const nextArtifact = {
+      ...baseArtifact,
+      ...(evidence.length ? { evidence } : {}),
+    };
+    const nextArtifactChars = estimateArtifactChars(nextArtifact);
+
+    if (runningTotalChars + nextArtifactChars > MAX_TOTAL_CHARS && payloadArtifacts.length > 0) {
+      break;
+    }
+
+    payloadArtifacts.push(nextArtifact);
+    runningTotalChars += nextArtifactChars;
+
+    if (runningTotalChars >= MAX_TOTAL_CHARS) {
+      break;
+    }
+  }
+
+  if (payloadArtifacts.length === 0 && topRanked.length > 0) {
+    const first = topRanked[0].artifact;
+    payloadArtifacts.push({
+      artifactId: first.artifactId,
+      title: first.title,
+      contentDateISO: first.contentDateISO,
+      summary: trimTo(first.summary, Math.min(MAX_SUMMARY_CHARS, 500)) ?? '',
+      highlights: first.highlights.slice(0, 2),
+    });
+    runningTotalChars = estimateArtifactChars(payloadArtifacts[0]);
+    truncatedFields += 1;
+  }
+
+  const usedArtifactIds = payloadArtifacts.map((artifact) => artifact.artifactId);
+
+  logInfo(ctx, 'timeline_chat_budget', {
+    totalChars: runningTotalChars,
+    truncatedFields,
+    finalArtifactCount: payloadArtifacts.length,
+  });
 
   try {
     const { provider, settings } = await getTimelineProviderFromDrive(drive, driveFolderId, ctx);
     const providerOutput = await provider.timelineChat(
       {
         query: body.query,
-        artifacts: loadedArtifacts.map((artifact) => ({
-          artifactId: artifact.artifactId,
-          title: artifact.title,
-          contentDateISO: artifact.contentDateISO,
-          summary: artifact.summary,
-          highlights: artifact.highlights,
-        })),
+        artifacts: payloadArtifacts,
       },
       settings,
     );
 
-    const citations = providerOutput.citations.slice(0, 10).map((citation) => ({
+    const normalizedCitations = normalizeTimelineCitations(providerOutput.citations, {
+      allowedArtifactIds: usedArtifactIds,
+      maxCitations: 10,
+      maxExcerptChars: MAX_EXCERPT,
+    });
+
+    if (providerOutput.citations.length > 0 && normalizedCitations.length === 0) {
+      logWarn(ctx, 'timeline_chat_citations_filtered_out', {
+        providerCitationCount: providerOutput.citations.length,
+        usedArtifactCount: usedArtifactIds.length,
+      });
+    }
+
+    const citations = normalizedCitations.map((citation) => ({
       artifactId: citation.artifactId,
-      excerpt: citation.excerpt.slice(0, MAX_EXCERPT),
+      excerpt: citation.excerpt,
       ...(artifactMap.get(citation.artifactId)?.contentDateISO
         ? { contentDateISO: artifactMap.get(citation.artifactId)?.contentDateISO }
         : {}),
@@ -223,9 +418,7 @@ export const POST = async (request: NextRequest) => {
     const responsePayload = ResponseSchema.parse({
       answer: providerOutput.answer,
       citations,
-      usedArtifactIds: providerOutput.usedArtifactIds?.length
-        ? providerOutput.usedArtifactIds.slice(0, body.limit)
-        : Array.from(new Set(citations.map((citation) => citation.artifactId))),
+      usedArtifactIds,
     });
 
     return respond(NextResponse.json(responsePayload));

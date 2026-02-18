@@ -61,6 +61,39 @@ const badOutput = () =>
     message: 'Provider response format was invalid.',
   });
 
+const normalizeWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+export const normalizeTimelineCitations = (
+  citations: Array<{ artifactId: string; excerpt: string }>,
+  options?: { allowedArtifactIds?: string[]; maxCitations?: number; maxExcerptChars?: number },
+) => {
+  const allowedArtifactIds = options?.allowedArtifactIds?.length
+    ? new Set(options.allowedArtifactIds.map((value) => value.trim()).filter(Boolean))
+    : null;
+  const maxCitations = options?.maxCitations ?? 10;
+  const maxExcerptChars = options?.maxExcerptChars ?? 300;
+
+  return Array.from(
+    new Map(
+      citations
+        .map((citation) => ({
+          artifactId: citation.artifactId.trim(),
+          excerpt: normalizeWhitespace(citation.excerpt).slice(0, maxExcerptChars),
+        }))
+        .filter((citation) => {
+          if (!citation.artifactId || !citation.excerpt) {
+            return false;
+          }
+          if (!allowedArtifactIds) {
+            return true;
+          }
+          return allowedArtifactIds.has(citation.artifactId);
+        })
+        .map((citation) => [`${citation.artifactId}:${citation.excerpt}`, citation]),
+    ).values(),
+  ).slice(0, maxCitations);
+};
+
 export const parseTimelineProviderOutput = (rawText: string): ParsedOutput => {
   let parsedJson: unknown;
   try {
@@ -150,21 +183,13 @@ export const parseTimelineChatProviderOutput = (rawText: string) => {
     throw badOutput();
   }
 
-  const citations = Array.from(
-    new Map(
-      parsed.data.citations
-        .map((citation) => ({
-          artifactId: citation.artifactId.trim(),
-          excerpt: citation.excerpt.trim().slice(0, 300),
-        }))
-        .filter((citation) => citation.artifactId && citation.excerpt)
-        .map((citation) => [`${citation.artifactId}:${citation.excerpt}`, citation]),
-    ).values(),
-  ).slice(0, 10);
-
   const usedArtifactIds = Array.from(
     new Set((parsed.data.usedArtifactIds ?? []).map((value) => value.trim()).filter(Boolean)),
   ).slice(0, 15);
+
+  const citations = normalizeTimelineCitations(parsed.data.citations, {
+    allowedArtifactIds: usedArtifactIds.length ? usedArtifactIds : undefined,
+  });
 
   return {
     answer,
