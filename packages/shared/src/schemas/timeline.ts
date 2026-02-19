@@ -547,6 +547,9 @@ const NotificationConfigSchema = z
     includeReportAttachment: z.boolean().default(false).optional(),
     includeLinks: z.boolean().default(true).optional(),
     sendWhenEmpty: z.boolean().default(false).optional(),
+    generatePerRouteReport: z.boolean().default(false),
+    maxPerRouteReportsPerRun: z.number().int().min(1).max(25).default(5),
+    reportTitleTemplate: z.string().trim().min(0).max(120).optional(),
   })
   .superRefine((value, ctx) => {
     const mode = value.mode ?? 'broadcast';
@@ -555,6 +558,13 @@ const NotificationConfigSchema = z
     }
     if (mode === 'routes' && (!value.routes?.length)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['routes'], message: 'Route notifications require at least one route.' });
+    }
+    if (mode !== 'routes' && value.generatePerRouteReport) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['generatePerRouteReport'],
+        message: 'Per-route report generation requires notify.mode="routes".',
+      });
     }
   });
 

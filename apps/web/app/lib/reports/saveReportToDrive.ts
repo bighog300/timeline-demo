@@ -9,20 +9,22 @@ export const saveReportToDrive = async ({
   folderId,
   title,
   markdown,
+  fileName,
 }: {
   drive: drive_v3.Drive;
   folderId: string;
   title: string;
   markdown: string;
+  fileName?: string;
 }) => {
   const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const fileName = `report_${datePart}_${slugify(title)}.md`;
+  const resolvedFileName = fileName ?? `report_${datePart}_${slugify(title)}.md`;
   const created = await withRetry((signal) =>
     withTimeout(
       (timeoutSignal) =>
         drive.files.create(
           {
-            requestBody: { name: fileName, parents: [folderId], mimeType: 'text/markdown' },
+            requestBody: { name: resolvedFileName, parents: [folderId], mimeType: 'text/markdown' },
             media: { mimeType: 'text/markdown', body: markdown },
             fields: 'id,name',
           },
@@ -34,5 +36,5 @@ export const saveReportToDrive = async ({
     ),
   );
 
-  return { driveFileId: created.data.id, driveFileName: created.data.name ?? fileName };
+  return { driveFileId: created.data.id, driveFileName: created.data.name ?? resolvedFileName };
 };

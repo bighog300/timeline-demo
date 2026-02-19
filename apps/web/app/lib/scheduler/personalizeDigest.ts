@@ -74,7 +74,7 @@ export const buildPersonalizedDigest = async ({
 }: {
   jobType: 'week_in_review' | 'alerts';
   profile: RecipientProfile;
-  jobOutput: Record<string, unknown>;
+  jobOutput: Record<string, unknown> & { perProfileReportDriveFileId?: string };
   drive: drive_v3.Drive;
   driveFolderId: string;
   accessToken?: string;
@@ -170,7 +170,9 @@ export const buildPersonalizedDigest = async ({
     ...(hasContent ? [] : ['No updates in your scope this run.', '']),
     'Links',
     `- Timeline: ${timelineLink(filters)}`,
-    ...(typeof jobOutput.reportDriveFileId === 'string' ? [`- Report: https://drive.google.com/file/d/${jobOutput.reportDriveFileId}/view`] : []),
+    ...(typeof jobOutput.perProfileReportDriveFileId === 'string'
+      ? [`- Report link: https://drive.google.com/file/d/${jobOutput.perProfileReportDriveFileId}/view`]
+      : (typeof jobOutput.reportDriveFileId === 'string' ? [`- Report: https://drive.google.com/file/d/${jobOutput.reportDriveFileId}/view`] : [])),
     ...(typeof jobOutput.noticeDriveFileId === 'string' ? [`- Notice: https://drive.google.com/file/d/${jobOutput.noticeDriveFileId}/view`] : []),
   ].join('\n');
 
