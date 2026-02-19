@@ -1,6 +1,7 @@
 import { isAdminSession } from '../../lib/adminAuth';
 import { getGoogleSession } from '../../lib/googleAuth';
 
+import AdminNav from '../AdminNav';
 import SubscriptionsPageClient from './pageClient';
 
 export default async function AdminSubscriptionsPage() {
@@ -9,6 +10,7 @@ export default async function AdminSubscriptionsPage() {
     return (
       <div>
         <h1>Admin subscriptions</h1>
+        <AdminNav />
         <p>Not authorized.</p>
       </div>
     );
@@ -17,6 +19,7 @@ export default async function AdminSubscriptionsPage() {
   return (
     <div>
       <h1>Admin subscriptions</h1>
+      <AdminNav />
       <SubscriptionsPageClient />
     </div>
   );

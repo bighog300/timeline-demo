@@ -1,0 +1,23 @@
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+
+.link {
+  display: inline-block;
+  padding: 6px 10px;
+  border: 1px solid #d6dbe5;
+  border-radius: 999px;
+  color: #2f3a4c;
+  text-decoration: none;
+  font-size: 14px;
+}
+
+.active {
+  background: #2f5bff;
+  border-color: #2f5bff;
+  color: #fff;
+}

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import { useCallback } from 'react';
 
 import type { OpsStatus } from '../../lib/ops/schemas';
 import { getAuthRemediation } from '../../lib/ops/remediationText';
@@ -9,18 +10,35 @@ export default function OpsPageClient() {
   const [status, setStatus] = useState<OpsStatus | null>(null);
   const [running, setRunning] = useState(false);
   const [unmutingKey, setUnmutingKey] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
-    const response = await fetch('/api/admin/ops/status');
-    const json = await response.json();
-    if (response.ok) setStatus(json as OpsStatus);
+  const setUnauthorized = () => {
+    setError('Not authorized / Admin only.');
   };
 
-  useEffect(() => { load(); }, []);
+  const load = useCallback(async () => {
+    const response = await fetch('/api/admin/ops/status');
+    if (response.status === 401 || response.status === 403) {
+      setUnauthorized();
+      return;
+    }
+    const json = await response.json();
+    if (response.ok) {
+      setError(null);
+      setStatus(json as OpsStatus);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
 
   const onRunNow = async () => {
     setRunning(true);
-    await fetch('/api/admin/ops/run-now', { method: 'POST' });
+    const response = await fetch('/api/admin/ops/run-now', { method: 'POST' });
+    if (response.status === 401 || response.status === 403) {
+      setUnauthorized();
+      setRunning(false);
+      return;
+    }
     await load();
     setRunning(false);
   };
@@ -29,11 +47,16 @@ export default function OpsPageClient() {
   const onUnmute = async (target: { channel: 'email' | 'slack' | 'webhook'; targetKey?: string; recipientKey?: string }) => {
     const key = `${target.channel}:${target.targetKey ?? target.recipientKey ?? ''}`;
     setUnmutingKey(key);
-    await fetch('/api/admin/ops/targets', {
+    const response = await fetch('/api/admin/ops/targets', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ action: 'unmute', channel: target.channel, targetKey: target.targetKey, recipientKey: target.recipientKey }),
     });
+    if (response.status === 401 || response.status === 403) {
+      setUnauthorized();
+      setUnmutingKey(null);
+      return;
+    }
     await load();
     setUnmutingKey(null);
   };
@@ -43,7 +66,7 @@ export default function OpsPageClient() {
 
   return (
     <div>
-      <h1>Ops Dashboard</h1>
+      {error ? <p>{error}</p> : null}
       <section>
         <h2>Scheduler Health</h2>
         <p>Lock held: {status?.scheduler.lock.held ? 'Yes' : 'No'}</p>
