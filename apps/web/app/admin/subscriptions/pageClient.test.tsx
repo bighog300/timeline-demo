@@ -108,4 +108,40 @@ describe('SubscriptionsPageClient', () => {
     fireEvent.change(screen.getByLabelText('notify mode week'), { target: { value: 'broadcast' } });
     expect(screen.getByLabelText('To emails')).toBeInTheDocument();
   });
+
+  it('enabling slack targets updates config payload', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ config: baseConfig }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ config: baseConfig }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<SubscriptionsPageClient />);
+    await screen.findByRole('heading', { name: 'p1' });
+    fireEvent.click(screen.getByRole('button', { name: 'Job Routing & Notify Settings' }));
+    fireEvent.click(screen.getByLabelText('Slack enabled'));
+    fireEvent.change(screen.getByLabelText('Slack targets (comma separated keys)'), { target: { value: 'team_a' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    const putBody = JSON.parse((fetchMock.mock.calls[1]?.[1] as { body: string }).body);
+    expect(putBody.jobs[0].notify.channels.slack.targets).toEqual(['TEAM_A']);
+  });
+
+  it('invalid target key blocks save', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ config: baseConfig }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<SubscriptionsPageClient />);
+    await screen.findByRole('heading', { name: 'p1' });
+    fireEvent.click(screen.getByRole('button', { name: 'Job Routing & Notify Settings' }));
+    fireEvent.click(screen.getByLabelText('Slack enabled'));
+    fireEvent.change(screen.getByLabelText('Slack targets (comma separated keys)'), { target: { value: 'ops-team' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByText('Webhook target keys must match A-Z0-9_.')).toBeInTheDocument();
+  });
 });

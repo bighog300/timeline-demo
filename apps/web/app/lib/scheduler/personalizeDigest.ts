@@ -64,6 +64,8 @@ const timelineLink = (filters: ProfileFilters) => {
 
 const highlights = (items: string[]) => items.slice(0, 5).map((item) => `- ${item}`);
 
+const clampText = (value: string, max = 240) => value.trim().slice(0, max);
+
 export const buildPersonalizedDigest = async ({
   jobType,
   profile,
@@ -108,6 +110,10 @@ export const buildPersonalizedDigest = async ({
     loops: [] as string[],
     decisions: [] as string[],
     actions: [] as string[],
+    topRisks: [] as Array<{ text: string; severity?: string; owner?: string; dueDateISO?: string }>,
+    topOpenLoops: [] as Array<{ text: string; owner?: string; dueDateISO?: string; status?: string }>,
+    topDecisions: [] as Array<{ text: string; dateISO?: string; owner?: string }>,
+    topActions: [] as Array<{ type: string; text: string; dueDateISO?: string }>,
     entities: new Map<string, number>(),
   };
 
@@ -130,11 +136,19 @@ export const buildPersonalizedDigest = async ({
         merged.entities.set(key, (merged.entities.get(key) ?? 0) + 1);
       });
       (row.matches.openLoops ?? []).forEach((item) => merged.loops.push(item.text));
+      (row.matches.openLoops ?? []).forEach((item) => merged.topOpenLoops.push({
+        text: clampText(item.text),
+        owner: item.owner ?? undefined,
+        dueDateISO: item.dueDateISO ?? undefined,
+        status: item.status ?? undefined,
+      }));
       (row.matches.decisions ?? []).forEach((item) => merged.decisions.push(item.text));
+      (row.matches.decisions ?? []).forEach((item) => merged.topDecisions.push({ text: clampText(item.text), dateISO: item.dateISO ?? undefined, owner: item.owner ?? undefined }));
       (row.matches.risks ?? []).forEach((item) => {
         const sev = item.severity ?? 'low';
         if (!filters.riskSeverityMin || severityRanks[sev] >= severityRanks[filters.riskSeverityMin]) {
           merged.risks.push(`[${sev}] ${item.text}`);
+          merged.topRisks.push({ text: clampText(item.text), severity: sev, owner: item.owner ?? undefined });
         }
       });
     }
@@ -187,6 +201,19 @@ export const buildPersonalizedDigest = async ({
       actions: merged.actions.length,
       topEntities,
       riskSeverityAllowed: riskSeverities(filters.riskSeverityMin),
+    },
+    links: {
+      drilldownUrl: timelineLink(filters),
+      reportUrl: typeof jobOutput.perProfileReportDriveFileId === 'string'
+        ? `https://drive.google.com/file/d/${jobOutput.perProfileReportDriveFileId}/view`
+        : (typeof jobOutput.reportDriveFileId === 'string' ? `https://drive.google.com/file/d/${jobOutput.reportDriveFileId}/view` : undefined),
+      synthesisUrl: typeof jobOutput.synthesisArtifactId === 'string' ? `/timeline?artifactId=${encodeURIComponent(jobOutput.synthesisArtifactId)}` : undefined,
+    },
+    top: {
+      risks: merged.topRisks.slice(0, 20),
+      openLoops: merged.topOpenLoops.slice(0, 20),
+      decisions: merged.topDecisions.slice(0, 20),
+      actions: merged.topActions.slice(0, 20),
     },
   };
 };
