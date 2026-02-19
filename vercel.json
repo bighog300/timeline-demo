@@ -8,18 +8,9 @@
     {
       "source": "/api/:path*",
       "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "no-store, must-revalidate"
-        }
+        { "key": "Cache-Control", "value": "no-store, must-revalidate" }
       ]
     }
   ],
-  "outputDirectory": "apps/web/.next",
-  "crons": [
-    {
-      "path": "/api/cron/run",
-      "schedule": "*/5 * * * *"
-    }
-  ]
+  "outputDirectory": "apps/web/.next"
 }
