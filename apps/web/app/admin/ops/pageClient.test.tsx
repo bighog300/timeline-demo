@@ -25,7 +25,7 @@ describe('OpsPageClient', () => {
   it('renders status payload', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => statusPayload }));
     render(<OpsPageClient />);
-    await waitFor(() => expect(screen.getByText('Ops Dashboard')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Scheduler Health')).toBeInTheDocument());
     expect(screen.getByText(/Missing Slack keys/)).toHaveTextContent('MISSING');
     expect(screen.getByText(/Muted targets/)).toBeInTheDocument();
   });
@@ -40,5 +40,11 @@ describe('OpsPageClient', () => {
     await waitFor(() => screen.getAllByText('Run now').length > 0);
     fireEvent.click(screen.getAllByText('Run now')[0]);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith('/api/admin/ops/run-now', { method: 'POST' }));
+  });
+
+  it('shows authorization banner for 403 responses', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 403, ok: false, json: async () => ({}) }));
+    render(<OpsPageClient />);
+    expect(await screen.findByText('Not authorized / Admin only.')).toBeInTheDocument();
   });
 });
