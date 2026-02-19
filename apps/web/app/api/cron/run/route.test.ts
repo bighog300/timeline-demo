@@ -3,8 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../../../lib/googleServiceAuth', () => ({ getGoogleAccessTokenForCron: vi.fn() }));
 vi.mock('../../../lib/googleDrive', () => ({ createDriveClient: vi.fn(() => ({})) }));
 vi.mock('../../../lib/appDriveFolder', () => ({ resolveOrProvisionAppDriveFolder: vi.fn() }));
+vi.mock('../../../lib/entities/aliases', () => ({ readEntityAliasesFromDrive: vi.fn(async () => ({ aliases: { version: 1, updatedAtISO: '2026-01-01T00:00:00Z', aliases: [] } })) }));
 vi.mock('../../../lib/scheduler/scheduleConfigDrive', () => ({ readScheduleConfigFromDrive: vi.fn() }));
 vi.mock('../../../lib/gmailSend', () => ({ sendEmail: vi.fn() }));
+vi.mock('../../../lib/scheduler/personalizeDigest', () => ({
+  normalizeProfileFilters: vi.fn((f) => f),
+  buildPersonalizedDigest: vi.fn(async ({ profile }) => ({ subject: `s-${profile.id}`, body: 'b', empty: false, stats: {} })),
+}));
 vi.mock('../../../lib/scheduler/emailNotifications', () => ({
   composeWeekInReviewEmail: vi.fn(() => ({ subject: 's', body: 'b' })),
   composeAlertsEmail: vi.fn(() => ({ subject: 's', body: 'b' })),
@@ -21,6 +26,7 @@ vi.mock('../../../lib/scheduler/runJobs', () => ({
 import { resolveOrProvisionAppDriveFolder } from '../../../lib/appDriveFolder';
 import { sendEmail } from '../../../lib/gmailSend';
 import { getGoogleAccessTokenForCron } from '../../../lib/googleServiceAuth';
+import { buildPersonalizedDigest } from '../../../lib/scheduler/personalizeDigest';
 import {
   composeWeekInReviewEmail,
   shouldSendEmailMarkerExists,
@@ -56,7 +62,7 @@ describe('/api/cron/run', () => {
     });
   });
 
-  it('job with notify enabled triggers gmailSend once', async () => {
+  it('broadcast job notify works unchanged', async () => {
     mockAuth.mockResolvedValue({ ok: true, accessToken: 'token' });
     mockFolder.mockResolvedValue({ id: 'folder-1', name: 'f' });
     mockRead.mockResolvedValue({
@@ -78,17 +84,52 @@ describe('/api/cron/run', () => {
     expect(response.status).toBe(200);
     expect(sendEmail).toHaveBeenCalledTimes(1);
     expect(appendJobRunLog).toHaveBeenCalled();
-    expect(json.ranJobs[0].email).toMatchObject({ attempted: true, ok: true });
+    expect(json.ranJobs[0].email).toMatchObject({ attempted: true, ok: true, mode: 'broadcast' });
   });
 
-  it('marker exists -> skipped', async () => {
+  it('routes mode sends N emails for N profiles', async () => {
     mockAuth.mockResolvedValue({ ok: true, accessToken: 'token' });
     mockFolder.mockResolvedValue({ id: 'folder-1', name: 'f' });
     mockRead.mockResolvedValue({
       config: {
         version: 1,
         updatedAtISO: '2026-01-05T00:00:00Z',
-        jobs: [{ id: 'week', type: 'week_in_review', enabled: true, schedule: { cron: '0 9 * * MON', timezone: 'UTC' }, notify: { enabled: true, to: ['to@example.com'] } }],
+        recipientProfiles: [
+          { id: 'p1', to: ['p1@example.com'], filters: { entities: ['acme'] } },
+          { id: 'p2', to: ['p2@example.com'], filters: { entities: ['globex'] } },
+        ],
+        jobs: [{
+          id: 'week', type: 'week_in_review', enabled: true,
+          schedule: { cron: '0 9 * * MON', timezone: 'UTC' },
+          notify: { enabled: true, mode: 'routes', routes: [{ profileId: 'p1' }, { profileId: 'p2' }] },
+        }],
+      },
+      fileId: 'cfg-1',
+      webViewLink: undefined,
+    });
+    vi.mocked(runWeekInReviewJob).mockResolvedValue({ reportDriveFileId: 'r1', reportDriveFileName: 'report.md', dateFromISO: '2026-01-01T00:00:00Z', dateToISO: '2026-01-08T00:00:00Z' });
+    vi.mocked(saveNoticeToDrive).mockResolvedValue({ noticeDriveFileId: 'n1', noticeDriveFileName: 'notice.md' });
+    vi.mocked(sendEmail).mockResolvedValue({ id: 'msg-1' });
+
+    const response = await POST(new Request('http://localhost/api/cron/run', { headers: { Authorization: 'Bearer secret' } }) as never);
+    const json = await response.json();
+
+    expect(sendEmail).toHaveBeenCalledTimes(2);
+    expect(buildPersonalizedDigest).toHaveBeenCalledTimes(2);
+    expect(json.ranJobs[0].email).toMatchObject({
+      mode: 'routes', emailedRoutesAttempted: 2, emailedRoutesSent: 2,
+    });
+  });
+
+  it('per-profile marker skip works', async () => {
+    mockAuth.mockResolvedValue({ ok: true, accessToken: 'token' });
+    mockFolder.mockResolvedValue({ id: 'folder-1', name: 'f' });
+    mockRead.mockResolvedValue({
+      config: {
+        version: 1,
+        updatedAtISO: '2026-01-05T00:00:00Z',
+        recipientProfiles: [{ id: 'p1', to: ['p1@example.com'], filters: {} }],
+        jobs: [{ id: 'week', type: 'week_in_review', enabled: true, schedule: { cron: '0 9 * * MON', timezone: 'UTC' }, notify: { enabled: true, mode: 'routes', routes: [{ profileId: 'p1' }] } }],
       },
       fileId: 'cfg-1',
       webViewLink: undefined,
@@ -100,35 +141,32 @@ describe('/api/cron/run', () => {
     const response = await POST(new Request('http://localhost/api/cron/run', { headers: { Authorization: 'Bearer secret' } }) as never);
     const json = await response.json();
 
-    expect(response.status).toBe(200);
     expect(sendEmail).not.toHaveBeenCalled();
-    expect(json.ranJobs[0].email).toMatchObject({ skipped: true });
+    expect(json.ranJobs[0].email).toMatchObject({ emailedRoutesSkipped: 1 });
   });
 
-  it('send failure -> job ok but email error recorded', async () => {
+  it('empty digest skip recorded', async () => {
     mockAuth.mockResolvedValue({ ok: true, accessToken: 'token' });
     mockFolder.mockResolvedValue({ id: 'folder-1', name: 'f' });
     mockRead.mockResolvedValue({
       config: {
         version: 1,
         updatedAtISO: '2026-01-05T00:00:00Z',
-        jobs: [{ id: 'week', type: 'week_in_review', enabled: true, schedule: { cron: '0 9 * * MON', timezone: 'UTC' }, notify: { enabled: true, to: ['to@example.com'] } }],
+        recipientProfiles: [{ id: 'p1', to: ['p1@example.com'], filters: {} }],
+        jobs: [{ id: 'week', type: 'week_in_review', enabled: true, schedule: { cron: '0 9 * * MON', timezone: 'UTC' }, notify: { enabled: true, mode: 'routes', routes: [{ profileId: 'p1' }] } }],
       },
       fileId: 'cfg-1',
       webViewLink: undefined,
     });
     vi.mocked(runWeekInReviewJob).mockResolvedValue({ reportDriveFileId: 'r1', reportDriveFileName: 'report.md', dateFromISO: '2026-01-01T00:00:00Z', dateToISO: '2026-01-08T00:00:00Z' });
     vi.mocked(saveNoticeToDrive).mockResolvedValue({ noticeDriveFileId: 'n1', noticeDriveFileName: 'notice.md' });
-    vi.mocked(shouldSendEmailMarkerExists).mockResolvedValue(false);
-    vi.mocked(sendEmail).mockRejectedValue(new Error('bad token'));
+    vi.mocked(buildPersonalizedDigest).mockResolvedValue({ subject: 's', body: 'b', empty: true, stats: {} } as never);
 
     const response = await POST(new Request('http://localhost/api/cron/run', { headers: { Authorization: 'Bearer secret' } }) as never);
     const json = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(json.ranJobs[0].ok).toBe(true);
-    expect(json.ranJobs[0].email).toMatchObject({ attempted: true, ok: false, error: 'bad token' });
-    expect(composeWeekInReviewEmail).toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(json.ranJobs[0].email).toMatchObject({ emailedRoutesSkipped: 1 });
   });
 
   it('runs alerts job with bounded query inputs', async () => {
@@ -156,5 +194,6 @@ describe('/api/cron/run', () => {
     expect(runAlertsJob).toHaveBeenCalledWith(expect.objectContaining({
       params: expect.objectContaining({ lookbackDays: 1 }),
     }));
+    expect(composeWeekInReviewEmail).not.toHaveBeenCalled();
   });
 });

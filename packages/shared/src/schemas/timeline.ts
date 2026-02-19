@@ -514,11 +514,71 @@ const ScheduleSchema = z
 const NotificationConfigSchema = z
   .object({
     enabled: z.boolean(),
-    to: z.array(z.string().email()).min(1).max(10),
+    mode: z.enum(['broadcast', 'routes']).default('broadcast').optional(),
+    to: z.array(z.string().email()).min(1).max(10).optional(),
     cc: z.array(z.string().email()).max(10).optional(),
+    routes: z
+      .array(
+        z
+          .object({
+            profileId: z.string().min(1).max(40),
+            subjectPrefix: z.string().max(60).optional(),
+            filtersOverride: z
+              .object({
+                entities: z.array(z.string().trim().min(1)).max(20).optional(),
+                tags: z.array(z.string().trim().min(1)).max(20).optional(),
+                participants: z.array(z.string().trim().min(1)).max(20).optional(),
+                kind: z.array(z.enum(['summary', 'synthesis'])).max(2).optional(),
+                riskSeverityMin: z.enum(['low', 'medium', 'high']).optional(),
+                includeOpenLoops: z.boolean().default(true).optional(),
+                includeRisks: z.boolean().default(true).optional(),
+                includeDecisions: z.boolean().default(true).optional(),
+                includeActions: z.boolean().default(true).optional(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(30)
+      .optional(),
     subjectPrefix: z.string().max(60).optional(),
     includeReportAttachment: z.boolean().default(false).optional(),
     includeLinks: z.boolean().default(true).optional(),
+    sendWhenEmpty: z.boolean().default(false).optional(),
+  })
+  .superRefine((value, ctx) => {
+    const mode = value.mode ?? 'broadcast';
+    if (mode === 'broadcast' && (!value.to?.length)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['to'], message: 'Broadcast notifications require at least one recipient.' });
+    }
+    if (mode === 'routes' && (!value.routes?.length)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['routes'], message: 'Route notifications require at least one route.' });
+    }
+  });
+
+const RecipientProfileFiltersSchema = z
+  .object({
+    entities: z.array(z.string().trim().min(1)).max(20).optional(),
+    tags: z.array(z.string().trim().min(1)).max(20).optional(),
+    participants: z.array(z.string().trim().min(1)).max(20).optional(),
+    kind: z.array(z.enum(['summary', 'synthesis'])).max(2).optional(),
+    riskSeverityMin: z.enum(['low', 'medium', 'high']).optional(),
+    includeOpenLoops: z.boolean().default(true).optional(),
+    includeRisks: z.boolean().default(true).optional(),
+    includeDecisions: z.boolean().default(true).optional(),
+    includeActions: z.boolean().default(true).optional(),
+  })
+  .strict();
+
+const RecipientProfileSchema = z
+  .object({
+    id: z.string().trim().min(1).max(40),
+    name: z.string().max(80).optional(),
+    to: z.array(z.string().email()).min(1).max(10),
+    cc: z.array(z.string().email()).max(10).optional(),
+    filters: RecipientProfileFiltersSchema,
   })
   .strict();
 
@@ -564,9 +624,33 @@ export const ScheduleConfigSchema = z
   .object({
     version: z.literal(1),
     updatedAtISO: isoDateString,
+    recipientProfiles: z.array(RecipientProfileSchema).max(100).optional(),
     jobs: z.array(z.discriminatedUnion('type', [WeekInReviewJobSchema, AlertsJobSchema])),
   })
-  .strict();
+  .superRefine((value, ctx) => {
+    const profiles = new Set((value.recipientProfiles ?? []).map((profile) => profile.id));
+    value.jobs.forEach((job, jobIndex) => {
+      const notify = job.notify as z.infer<typeof NotificationConfigSchema> | undefined;
+      if (!notify || (notify.mode ?? 'broadcast') !== 'routes') return;
+      if (!value.recipientProfiles?.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['recipientProfiles'],
+          message: 'Route notifications require recipientProfiles.',
+        });
+        return;
+      }
+      notify.routes?.forEach((route, routeIndex) => {
+        if (!profiles.has(route.profileId)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['jobs', jobIndex, 'notify', 'routes', routeIndex, 'profileId'],
+            message: `Unknown recipient profile: ${route.profileId}`,
+          });
+        }
+      });
+    });
+  });
 
 export const ApiErrorSchema = z
   .object({
