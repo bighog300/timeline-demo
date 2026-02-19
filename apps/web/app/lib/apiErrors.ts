@@ -1,26 +1,30 @@
 import { NextResponse } from 'next/server';
 
+export const API_ERROR_CODES = {
+  reconnectRequired: 'reconnect_required',
+  driveNotProvisioned: 'drive_not_provisioned',
+  forbiddenOutsideFolder: 'forbidden_outside_folder',
+  queryTooShort: 'query_too_short',
+  rateLimited: 'rate_limited',
+  upstreamTimeout: 'upstream_timeout',
+  upstreamError: 'upstream_error',
+  invalidRequest: 'invalid_request',
+  tooManyItems: 'too_many_items',
+  providerNotConfigured: 'provider_not_configured',
+  providerBadOutput: 'provider_bad_output',
+  forbidden: 'forbidden',
+  badRequest: 'bad_request',
+  notFound: 'not_found',
+  internalError: 'internal_error',
+  urlNotAllowed: 'url_not_allowed',
+  unsupportedContentType: 'unsupported_content_type',
+  contentTooLarge: 'content_too_large',
+  insufficientText: 'insufficient_text',
+  fetchTimeout: 'fetch_timeout',
+} as const;
+
 export type ApiErrorCode =
-  | 'reconnect_required'
-  | 'drive_not_provisioned'
-  | 'forbidden_outside_folder'
-  | 'query_too_short'
-  | 'rate_limited'
-  | 'upstream_timeout'
-  | 'upstream_error'
-  | 'invalid_request'
-  | 'too_many_items'
-  | 'provider_not_configured'
-  | 'provider_bad_output'
-  | 'forbidden'
-  | 'bad_request'
-  | 'not_found'
-  | 'internal_error'
-  | 'url_not_allowed'
-  | 'unsupported_content_type'
-  | 'content_too_large'
-  | 'insufficient_text'
-  | 'fetch_timeout';
+  (typeof API_ERROR_CODES)[keyof typeof API_ERROR_CODES];
 
 export type ApiErrorPayload = {
   error: {
