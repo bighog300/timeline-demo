@@ -1,7 +1,26 @@
 import ConnectPageClient from './pageClient';
-import { getGoogleScopeStatus, isAuthConfigured } from '../lib/googleAuth';
+import { getGoogleScopeStatus, getGoogleSession, isAuthConfigured } from '../lib/googleAuth';
 
-export default function ConnectPage() {
+type ConnectInitialState = {
+  isConfigured: boolean;
+  signedIn: boolean;
+  email: string | null;
+  scopes: string[];
+  driveFolderId: string | null;
+};
+
+export default async function ConnectPage() {
+  const configured = isAuthConfigured();
   const scopeStatus = getGoogleScopeStatus();
-  return <ConnectPageClient isConfigured={isAuthConfigured()} scopeStatus={scopeStatus} />;
+  const session = configured ? await getGoogleSession() : null;
+
+  const initial: ConnectInitialState = {
+    isConfigured: configured,
+    signedIn: Boolean(session),
+    email: session?.user?.email ?? null,
+    scopes: session?.scopes ?? [],
+    driveFolderId: session?.driveFolderId ?? null,
+  };
+
+  return <ConnectPageClient initial={initial} scopeStatus={scopeStatus} />;
 }
