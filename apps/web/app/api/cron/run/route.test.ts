@@ -16,6 +16,10 @@ vi.mock('../../../lib/scheduler/emailNotifications', () => ({
   shouldSendEmailMarkerExists: vi.fn(() => false),
   writeEmailSentMarker: vi.fn(),
 }));
+vi.mock('../../../lib/scheduler/perProfileReports', () => ({
+  maybeGeneratePerProfileReport: vi.fn(async () => ({ skipped: true, reason: 'disabled' })),
+  resetPerProfileReportCounter: vi.fn(),
+}));
 vi.mock('../../../lib/scheduler/runJobs', () => ({
   runWeekInReviewJob: vi.fn(),
   runAlertsJob: vi.fn(),
@@ -32,6 +36,7 @@ import {
   shouldSendEmailMarkerExists,
 } from '../../../lib/scheduler/emailNotifications';
 import { appendJobRunLog, runAlertsJob, runWeekInReviewJob, saveNoticeToDrive } from '../../../lib/scheduler/runJobs';
+import { maybeGeneratePerProfileReport } from '../../../lib/scheduler/perProfileReports';
 import { readScheduleConfigFromDrive } from '../../../lib/scheduler/scheduleConfigDrive';
 import { POST } from './route';
 
@@ -46,6 +51,8 @@ describe('/api/cron/run', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-05T09:00:00Z'));
     vi.clearAllMocks();
+    vi.mocked(shouldSendEmailMarkerExists).mockResolvedValue(false);
+    vi.mocked(maybeGeneratePerProfileReport).mockResolvedValue({ skipped: true, reason: 'disabled' } as never);
   });
 
   it('rejects invalid secret', async () => {
@@ -77,6 +84,9 @@ describe('/api/cron/run', () => {
     vi.mocked(runWeekInReviewJob).mockResolvedValue({ reportDriveFileId: 'r1', reportDriveFileName: 'report.md', dateFromISO: '2026-01-01T00:00:00Z', dateToISO: '2026-01-08T00:00:00Z' });
     vi.mocked(saveNoticeToDrive).mockResolvedValue({ noticeDriveFileId: 'n1', noticeDriveFileName: 'notice.md' });
     vi.mocked(sendEmail).mockResolvedValue({ id: 'msg-1' });
+    vi.mocked(maybeGeneratePerProfileReport)
+      .mockResolvedValueOnce({ report: { driveFileId: 'rep-1', driveFileName: 'r1.md' } } as never)
+      .mockResolvedValueOnce({ skipped: true, reason: 'cap_reached' } as never);
 
     const response = await POST(new Request('http://localhost/api/cron/run', { headers: { Authorization: 'Bearer secret' } }) as never);
     const json = await response.json();
@@ -101,7 +111,7 @@ describe('/api/cron/run', () => {
         jobs: [{
           id: 'week', type: 'week_in_review', enabled: true,
           schedule: { cron: '0 9 * * MON', timezone: 'UTC' },
-          notify: { enabled: true, mode: 'routes', routes: [{ profileId: 'p1' }, { profileId: 'p2' }] },
+          notify: { enabled: true, mode: 'routes', generatePerRouteReport: true, maxPerRouteReportsPerRun: 1, routes: [{ profileId: 'p1' }, { profileId: 'p2' }] },
         }],
       },
       fileId: 'cfg-1',
@@ -110,15 +120,20 @@ describe('/api/cron/run', () => {
     vi.mocked(runWeekInReviewJob).mockResolvedValue({ reportDriveFileId: 'r1', reportDriveFileName: 'report.md', dateFromISO: '2026-01-01T00:00:00Z', dateToISO: '2026-01-08T00:00:00Z' });
     vi.mocked(saveNoticeToDrive).mockResolvedValue({ noticeDriveFileId: 'n1', noticeDriveFileName: 'notice.md' });
     vi.mocked(sendEmail).mockResolvedValue({ id: 'msg-1' });
+    vi.mocked(maybeGeneratePerProfileReport)
+      .mockResolvedValueOnce({ report: { driveFileId: 'rep-1', driveFileName: 'r1.md' } } as never)
+      .mockResolvedValueOnce({ skipped: true, reason: 'cap_reached' } as never);
 
     const response = await POST(new Request('http://localhost/api/cron/run', { headers: { Authorization: 'Bearer secret' } }) as never);
     const json = await response.json();
 
     expect(sendEmail).toHaveBeenCalledTimes(2);
-    expect(buildPersonalizedDigest).toHaveBeenCalledTimes(2);
+    expect(buildPersonalizedDigest).toHaveBeenCalledTimes(4);
     expect(json.ranJobs[0].email).toMatchObject({
       mode: 'routes', emailedRoutesAttempted: 2, emailedRoutesSent: 2,
+      perRouteReportsAttempted: 2, perRouteReportsSaved: 1, perRouteReportsSkipped: 1,
     });
+    expect(JSON.stringify(vi.mocked(buildPersonalizedDigest).mock.calls)).toContain('perProfileReportDriveFileId');
   });
 
   it('per-profile marker skip works', async () => {
@@ -168,6 +183,8 @@ describe('/api/cron/run', () => {
     expect(sendEmail).not.toHaveBeenCalled();
     expect(json.ranJobs[0].email).toMatchObject({ emailedRoutesSkipped: 1 });
   });
+
+
 
   it('runs alerts job with bounded query inputs', async () => {
     mockAuth.mockResolvedValue({ ok: true, accessToken: 'token' });

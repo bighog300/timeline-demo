@@ -786,6 +786,56 @@ describe('phase 5 schemas', () => {
     expect(result.success).toBe(false);
   });
 
+  it('parses per-route report generation config with defaults', () => {
+    const result = ScheduleConfigSchema.safeParse({
+      version: 1,
+      updatedAtISO: '2026-01-01T00:00:00Z',
+      recipientProfiles: [{ id: 'p1', to: ['p1@example.com'], filters: {} }],
+      jobs: [{
+        id: 'weekly',
+        type: 'week_in_review',
+        enabled: true,
+        schedule: { cron: '0 9 * * MON', timezone: 'UTC' },
+        notify: {
+          enabled: true,
+          mode: 'routes',
+          routes: [{ profileId: 'p1' }],
+          generatePerRouteReport: true,
+        },
+      }],
+    });
+
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.jobs[0].notify?.generatePerRouteReport).toBe(true);
+      expect(result.data.jobs[0].notify?.maxPerRouteReportsPerRun).toBe(5);
+    }
+  });
+
+  it('rejects per-route report max above bounds', () => {
+    const result = ScheduleConfigSchema.safeParse({
+      version: 1,
+      updatedAtISO: '2026-01-01T00:00:00Z',
+      recipientProfiles: [{ id: 'p1', to: ['p1@example.com'], filters: {} }],
+      jobs: [{
+        id: 'weekly',
+        type: 'week_in_review',
+        enabled: true,
+        schedule: { cron: '0 9 * * MON', timezone: 'UTC' },
+        notify: {
+          enabled: true,
+          mode: 'routes',
+          routes: [{ profileId: 'p1' }],
+          generatePerRouteReport: true,
+          maxPerRouteReportsPerRun: 26,
+        },
+      }],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+
   it('rejects notify config with invalid recipient email', () => {
     const result = ScheduleConfigSchema.safeParse({
       version: 1,

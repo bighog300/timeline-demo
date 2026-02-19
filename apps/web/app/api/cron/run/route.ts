@@ -13,6 +13,7 @@ import {
   writeEmailSentMarker,
 } from '../../../lib/scheduler/emailNotifications';
 import { buildPersonalizedDigest, normalizeProfileFilters } from '../../../lib/scheduler/personalizeDigest';
+import { maybeGeneratePerProfileReport, resetPerProfileReportCounter } from '../../../lib/scheduler/perProfileReports';
 import {
   appendJobRunLog,
   runAlertsJob,
@@ -101,6 +102,12 @@ const run = async (request: NextRequest) => {
       emailedRoutesSent?: number;
       emailedRoutesSkipped?: number;
       emailedRoutesFailed?: number;
+      perRouteReportsAttempted?: number;
+      perRouteReportsSaved?: number;
+      perRouteReportsReused?: number;
+      perRouteReportsSkipped?: number;
+      perRouteReportsFailed?: number;
+      routeReports?: Array<{ profileId: string; reportSaved: boolean; reportReused: boolean; reportSkippedReason?: string }>;
     };
   }> = [];
 
@@ -130,7 +137,14 @@ const run = async (request: NextRequest) => {
             let sent = 0;
             let skipped = 0;
             let failed = 0;
+            let perRouteReportsAttempted = 0;
+            let perRouteReportsSaved = 0;
+            let perRouteReportsReused = 0;
+            let perRouteReportsSkipped = 0;
+            let perRouteReportsFailed = 0;
+            const routeReports: Array<{ profileId: string; reportSaved: boolean; reportReused: boolean; reportSkippedReason?: string }> = [];
             const profiles = new Map((loaded.config.recipientProfiles ?? []).map((profile) => [profile.id, profile]));
+            resetPerProfileReportCounter(runKey);
             for (const route of job.notify.routes ?? []) {
               const profile = profiles.get(route.profileId);
               if (!profile) {
@@ -154,8 +168,41 @@ const run = async (request: NextRequest) => {
               attempted += 1;
               if (digest.empty && !job.notify.sendWhenEmpty) {
                 skipped += 1;
+                routeReports.push({ profileId: profile.id, reportSaved: false, reportReused: false, reportSkippedReason: 'digest_empty' });
                 continue;
               }
+
+              const report = job.notify.generatePerRouteReport
+                ? await maybeGeneratePerProfileReport({
+                enabled: job.notify.generatePerRouteReport,
+                reportTitleTemplate: job.notify.reportTitleTemplate,
+                maxPerRouteReportsPerRun: job.notify.maxPerRouteReportsPerRun,
+                jobType: 'week_in_review',
+                jobId: job.id,
+                runKey,
+                profile: effectiveProfile,
+                dateWindow: { dateFromISO: output.dateFromISO, dateToISO: output.dateToISO },
+                drive,
+                driveFolderId: folder.id,
+              })
+                : { skipped: true as const, reason: 'disabled' as const };
+              if (job.notify.generatePerRouteReport) perRouteReportsAttempted += 1;
+              if (job.notify.generatePerRouteReport) {
+                if (report.error) {
+                  perRouteReportsFailed += 1;
+                  routeReports.push({ profileId: profile.id, reportSaved: false, reportReused: false, reportSkippedReason: report.error });
+                } else if (report.reused) {
+                  perRouteReportsReused += 1;
+                  routeReports.push({ profileId: profile.id, reportSaved: false, reportReused: true });
+                } else if (report.report) {
+                  perRouteReportsSaved += 1;
+                  routeReports.push({ profileId: profile.id, reportSaved: true, reportReused: false });
+                } else {
+                  perRouteReportsSkipped += 1;
+                  routeReports.push({ profileId: profile.id, reportSaved: false, reportReused: false, reportSkippedReason: report.reason ?? 'skipped' });
+                }
+              }
+
               const recipientKey = profile.id;
               if (await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey })) {
                 skipped += 1;
@@ -169,7 +216,16 @@ const run = async (request: NextRequest) => {
                   to: profile.to,
                   cc: profile.cc,
                   subject: `${route.subjectPrefix?.trim() ?? ''}${route.subjectPrefix ? ' ' : ''}${digest.subject}`,
-                  textBody: digest.body,
+                  textBody: (await buildPersonalizedDigest({
+                    jobType: 'week_in_review',
+                    profile: effectiveProfile,
+                    jobOutput: { ...output, ...notice, ...(report.report ? { perProfileReportDriveFileId: report.report.driveFileId } : {}) },
+                    drive,
+                    driveFolderId: folder.id,
+                    accessToken: auth.accessToken,
+                    now,
+                    aliasMap: aliases.aliases,
+                  })).body,
                 });
                 await writeEmailSentMarker({
                   drive,
@@ -190,6 +246,12 @@ const run = async (request: NextRequest) => {
               emailedRoutesSent: sent,
               emailedRoutesSkipped: skipped,
               emailedRoutesFailed: failed,
+              perRouteReportsAttempted,
+              perRouteReportsSaved,
+              perRouteReportsReused,
+              perRouteReportsSkipped,
+              perRouteReportsFailed,
+              routeReports,
             };
           } else {
             const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey: 'broadcast' });
@@ -247,7 +309,14 @@ const run = async (request: NextRequest) => {
             let sent = 0;
             let skipped = 0;
             let failed = 0;
+            let perRouteReportsAttempted = 0;
+            let perRouteReportsSaved = 0;
+            let perRouteReportsReused = 0;
+            let perRouteReportsSkipped = 0;
+            let perRouteReportsFailed = 0;
+            const routeReports: Array<{ profileId: string; reportSaved: boolean; reportReused: boolean; reportSkippedReason?: string }> = [];
             const profiles = new Map((loaded.config.recipientProfiles ?? []).map((profile) => [profile.id, profile]));
+            resetPerProfileReportCounter(runKey);
             for (const route of job.notify.routes ?? []) {
               const profile = profiles.get(route.profileId);
               if (!profile) {
@@ -271,8 +340,41 @@ const run = async (request: NextRequest) => {
               attempted += 1;
               if (digest.empty && !job.notify.sendWhenEmpty) {
                 skipped += 1;
+                routeReports.push({ profileId: profile.id, reportSaved: false, reportReused: false, reportSkippedReason: 'digest_empty' });
                 continue;
               }
+
+              const report = job.notify.generatePerRouteReport
+                ? await maybeGeneratePerProfileReport({
+                enabled: job.notify.generatePerRouteReport,
+                reportTitleTemplate: job.notify.reportTitleTemplate,
+                maxPerRouteReportsPerRun: job.notify.maxPerRouteReportsPerRun,
+                jobType: 'alerts',
+                jobId: job.id,
+                runKey,
+                profile: effectiveProfile,
+                dateWindow: { dateFromISO: output.lookbackStartISO, dateToISO: output.nowISO },
+                drive,
+                driveFolderId: folder.id,
+              })
+                : { skipped: true as const, reason: 'disabled' as const };
+              if (job.notify.generatePerRouteReport) perRouteReportsAttempted += 1;
+              if (job.notify.generatePerRouteReport) {
+                if (report.error) {
+                  perRouteReportsFailed += 1;
+                  routeReports.push({ profileId: profile.id, reportSaved: false, reportReused: false, reportSkippedReason: report.error });
+                } else if (report.reused) {
+                  perRouteReportsReused += 1;
+                  routeReports.push({ profileId: profile.id, reportSaved: false, reportReused: true });
+                } else if (report.report) {
+                  perRouteReportsSaved += 1;
+                  routeReports.push({ profileId: profile.id, reportSaved: true, reportReused: false });
+                } else {
+                  perRouteReportsSkipped += 1;
+                  routeReports.push({ profileId: profile.id, reportSaved: false, reportReused: false, reportSkippedReason: report.reason ?? 'skipped' });
+                }
+              }
+
               const recipientKey = profile.id;
               if (await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey })) {
                 skipped += 1;
@@ -286,7 +388,16 @@ const run = async (request: NextRequest) => {
                   to: profile.to,
                   cc: profile.cc,
                   subject: `${route.subjectPrefix?.trim() ?? ''}${route.subjectPrefix ? ' ' : ''}${digest.subject}`,
-                  textBody: digest.body,
+                  textBody: (await buildPersonalizedDigest({
+                    jobType: 'alerts',
+                    profile: effectiveProfile,
+                    jobOutput: { ...output, ...(report.report ? { perProfileReportDriveFileId: report.report.driveFileId } : {}) },
+                    drive,
+                    driveFolderId: folder.id,
+                    accessToken: auth.accessToken,
+                    now,
+                    aliasMap: aliases.aliases,
+                  })).body,
                 });
                 await writeEmailSentMarker({
                   drive,
@@ -307,6 +418,12 @@ const run = async (request: NextRequest) => {
               emailedRoutesSent: sent,
               emailedRoutesSkipped: skipped,
               emailedRoutesFailed: failed,
+              perRouteReportsAttempted,
+              perRouteReportsSaved,
+              perRouteReportsReused,
+              perRouteReportsSkipped,
+              perRouteReportsFailed,
+              routeReports,
             };
           } else {
             const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey: 'broadcast' });
