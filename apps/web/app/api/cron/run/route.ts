@@ -1,9 +1,22 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
+import { getAdminEmailList } from '../../../lib/adminAuth';
 import { resolveOrProvisionAppDriveFolder } from '../../../lib/appDriveFolder';
+import { sendEmail } from '../../../lib/gmailSend';
 import { createDriveClient } from '../../../lib/googleDrive';
 import { getGoogleAccessTokenForCron } from '../../../lib/googleServiceAuth';
-import { appendJobRunLog, runAlertsJob, runWeekInReviewJob, saveNoticeToDrive } from '../../../lib/scheduler/runJobs';
+import {
+  composeAlertsEmail,
+  composeWeekInReviewEmail,
+  shouldSendEmailMarkerExists,
+  writeEmailSentMarker,
+} from '../../../lib/scheduler/emailNotifications';
+import {
+  appendJobRunLog,
+  runAlertsJob,
+  runWeekInReviewJob,
+  saveNoticeToDrive,
+} from '../../../lib/scheduler/runJobs';
 import { readScheduleConfigFromDrive } from '../../../lib/scheduler/scheduleConfigDrive';
 
 const isAuthorized = (request: NextRequest) => {
@@ -67,7 +80,15 @@ const run = async (request: NextRequest) => {
 
   const loaded = await readScheduleConfigFromDrive(drive, folder.id);
   const now = new Date();
-  const ranJobs: Array<{ jobId: string; type: string; ok: boolean; output?: unknown; error?: string }> = [];
+  const fromEmail = process.env.GOOGLE_SERVICE_FROM_EMAIL ?? getAdminEmailList()[0] ?? 'me';
+  const ranJobs: Array<{
+    jobId: string;
+    type: string;
+    ok: boolean;
+    output?: unknown;
+    error?: string;
+    email?: { attempted: boolean; ok?: boolean; skipped?: boolean; error?: string; recipientCount?: number };
+  }> = [];
 
   for (const job of loaded.config.jobs.filter((item) => item.enabled)) {
     if (!isJobDue(job.schedule.cron, job.schedule.timezone, now)) {
@@ -85,10 +106,118 @@ const run = async (request: NextRequest) => {
           now,
           markdown: `# Week in Review\n\nJob ${job.id} completed.\n\n- Report file: ${output.reportDriveFileName ?? 'not exported'}\n`,
         });
-        ranJobs.push({ jobId: job.id, type: job.type, ok: true, output: { ...output, ...notice } });
+
+        const result: (typeof ranJobs)[number] = { jobId: job.id, type: job.type, ok: true, output: { ...output, ...notice } };
+
+        if (job.notify?.enabled) {
+          const runKey = `${job.id}:${output.dateFromISO}:${output.dateToISO}`;
+          const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey });
+          if (markerExists) {
+            result.email = { attempted: false, skipped: true, recipientCount: job.notify.to.length };
+          } else {
+            try {
+              const message = composeWeekInReviewEmail({
+                job,
+                runOutput: { ...output, ...notice },
+                now,
+                driveFolderId: folder.id,
+              });
+              const sent = await sendEmail({
+                accessToken: auth.accessToken,
+                fromEmail,
+                to: job.notify.to,
+                cc: job.notify.cc,
+                subject: message.subject,
+                textBody: message.body,
+              });
+              result.email = { attempted: true, ok: true, recipientCount: job.notify.to.length + (job.notify.cc?.length ?? 0) };
+              try {
+                await writeEmailSentMarker({
+                  drive,
+                  folderId: folder.id,
+                  runKey,
+                  details: {
+                    runKey,
+                    sentAtISO: now.toISOString(),
+                    to: job.notify.to,
+                    subject: message.subject,
+                    gmailMessageId: sent.id,
+                  },
+                });
+              } catch (markerError) {
+                result.email = {
+                  ...result.email,
+                  error: `marker_write_failed:${markerError instanceof Error ? markerError.message : 'unknown'}`,
+                };
+              }
+            } catch (emailError) {
+              result.email = {
+                attempted: true,
+                ok: false,
+                recipientCount: job.notify.to.length + (job.notify.cc?.length ?? 0),
+                error: emailError instanceof Error ? emailError.message : 'email_send_failed',
+              };
+            }
+          }
+        }
+        ranJobs.push(result);
       } else {
         const output = await runAlertsJob({ drive, params: job.params, now, driveFolderId: folder.id, timezone: job.schedule.timezone });
-        ranJobs.push({ jobId: job.id, type: job.type, ok: true, output });
+        const result: (typeof ranJobs)[number] = { jobId: job.id, type: job.type, ok: true, output };
+
+        if (job.notify?.enabled) {
+          const runKey = `${job.id}:${output.lookbackStartISO}:${output.nowISO}`;
+          const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey });
+          if (markerExists) {
+            result.email = { attempted: false, skipped: true, recipientCount: job.notify.to.length };
+          } else {
+            try {
+              const message = composeAlertsEmail({
+                job,
+                runOutput: output,
+                now,
+                driveFolderId: folder.id,
+              });
+              const sent = await sendEmail({
+                accessToken: auth.accessToken,
+                fromEmail,
+                to: job.notify.to,
+                cc: job.notify.cc,
+                subject: message.subject,
+                textBody: message.body,
+              });
+              result.email = { attempted: true, ok: true, recipientCount: job.notify.to.length + (job.notify.cc?.length ?? 0) };
+              try {
+                await writeEmailSentMarker({
+                  drive,
+                  folderId: folder.id,
+                  runKey,
+                  details: {
+                    runKey,
+                    sentAtISO: now.toISOString(),
+                    to: job.notify.to,
+                    subject: message.subject,
+                    gmailMessageId: sent.id,
+                  },
+                });
+              } catch (markerError) {
+                result.email = {
+                  ...result.email,
+                  error: `marker_write_failed:${markerError instanceof Error ? markerError.message : 'unknown'}`,
+                };
+              }
+            } catch (emailError) {
+              result.email = {
+                attempted: true,
+                ok: false,
+                recipientCount: job.notify.to.length + (job.notify.cc?.length ?? 0),
+                error: emailError instanceof Error ? emailError.message : 'email_send_failed',
+              };
+            }
+          }
+        }
+
+        ranJobs.push(result);
       }
     } catch (error) {
       ranJobs.push({ jobId: job.id, type: job.type, ok: false, error: error instanceof Error ? error.message : 'job_failed' });
@@ -102,6 +231,7 @@ const run = async (request: NextRequest) => {
         jobId: job.id,
         type: job.type,
         ok: ranJobs[ranJobs.length - 1]?.ok ?? false,
+        email: ranJobs[ranJobs.length - 1]?.email,
         durationMs: Date.now() - started,
       },
     });

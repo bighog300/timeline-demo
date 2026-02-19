@@ -117,6 +117,7 @@ export const runWeekInReviewJob = async ({
     reportDriveFileName: report?.driveFileName,
     dateFromISO,
     dateToISO,
+    totals: queryResult.totals,
   };
 };
 
@@ -185,5 +186,5 @@ export const runAlertsJob = async ({
   const markdown = `# Alerts\n\nGenerated: ${now.toISOString()}\nTimezone: ${timezone}\n\n- New high risks: ${counts.new_high_risks}\n- Open loops due soon: ${counts.new_open_loops_due_7d}\n- New decisions: ${counts.new_decisions}\n`;
   const notice = await saveNoticeToDrive({ drive, folderId: driveFolderId, jobId: 'alerts', now, markdown });
 
-  return { ...notice, counts };
+  return { ...notice, counts, lookbackStartISO: fromISO, nowISO: now.toISOString() };
 };
