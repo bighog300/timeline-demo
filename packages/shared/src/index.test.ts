@@ -709,6 +709,12 @@ describe('phase 5 schemas', () => {
           enabled: true,
           schedule: { cron: '0 9 * * MON', timezone: 'Europe/London' },
           params: { includeEvidence: true, exportReport: true, saveToTimeline: false },
+          notify: {
+            enabled: true,
+            to: ['owner@example.com'],
+            cc: ['ops@example.com'],
+            subjectPrefix: '[Timeline]',
+          },
         },
         {
           id: 'alerts',
@@ -734,6 +740,24 @@ describe('phase 5 schemas', () => {
           enabled: true,
           schedule: { cron: '*/5 * * * *', timezone: 'UTC' },
           params: { alertTypes: ['new_decisions'], lookbackDays: 60 },
+        },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it('rejects notify config with invalid recipient email', () => {
+    const result = ScheduleConfigSchema.safeParse({
+      version: 1,
+      updatedAtISO: '2026-01-01T00:00:00Z',
+      jobs: [
+        {
+          id: 'weekly',
+          type: 'week_in_review',
+          enabled: true,
+          schedule: { cron: '0 9 * * MON', timezone: 'UTC' },
+          notify: { enabled: true, to: ['not-an-email'] },
         },
       ],
     });

@@ -511,6 +511,17 @@ const ScheduleSchema = z
   })
   .strict();
 
+const NotificationConfigSchema = z
+  .object({
+    enabled: z.boolean(),
+    to: z.array(z.string().email()).min(1).max(10),
+    cc: z.array(z.string().email()).max(10).optional(),
+    subjectPrefix: z.string().max(60).optional(),
+    includeReportAttachment: z.boolean().default(false).optional(),
+    includeLinks: z.boolean().default(true).optional(),
+  })
+  .strict();
+
 const WeekInReviewJobSchema = z
   .object({
     id: z.string().min(1),
@@ -525,6 +536,7 @@ const WeekInReviewJobSchema = z
       })
       .strict()
       .optional(),
+    notify: NotificationConfigSchema.optional(),
   })
   .strict();
 
@@ -544,6 +556,7 @@ const AlertsJobSchema = z
         dueInDays: z.number().int().min(1).max(30).default(7),
       })
       .strict(),
+    notify: NotificationConfigSchema.optional(),
   })
   .strict();
 

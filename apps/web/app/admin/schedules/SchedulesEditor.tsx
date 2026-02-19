@@ -46,6 +46,10 @@ export default function SchedulesEditor() {
       <div>
         <button type="button" onClick={onSave}>Save schedule config</button>
       </div>
+
+      <p>
+        Notify snippet example: <code>{`"notify": { "enabled": true, "to": ["ops@example.com"], "subjectPrefix": "[Timeline]", "includeLinks": true }`}</code>
+      </p>
       {saved ? <p>Saved.</p> : null}
       {error ? <p>{error}</p> : null}
     </div>
