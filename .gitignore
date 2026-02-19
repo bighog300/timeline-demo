@@ -13,3 +13,7 @@ build/
 coverage/
 *.tsbuildinfo
 .smoke-server.log
+
+# Allow tracked API route under app/api/meta/build
+!apps/web/app/api/meta/build/
+!apps/web/app/api/meta/build/**
