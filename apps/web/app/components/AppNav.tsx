@@ -19,6 +19,11 @@ const navItems: NavItem[] = [
     match: (pathname) => pathname.startsWith('/connect'),
   },
   {
+    href: '/getting-started',
+    label: 'Getting Started',
+    match: (pathname) => pathname.startsWith('/getting-started'),
+  },
+  {
     href: '/select/gmail',
     label: 'Select Gmail',
     match: (pathname) => pathname.startsWith('/select/gmail'),

@@ -1,0 +1,13 @@
+.page { display:flex; flex-direction:column; gap:20px; }
+.stepList { display:flex; flex-direction:column; gap:14px; }
+.stepCard { display:flex; flex-direction:column; gap:10px; }
+.stepHeader { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+.stepTitle { margin:0; }
+.stepActions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.linkButton { display:inline-flex; align-items:center; justify-content:center; border:1px solid var(--primary); background:var(--primary); color:#fff; border-radius:10px; padding:10px 14px; font-weight:600; transition:all .2s ease; }
+.linkButton:hover, .linkButton:focus-visible { background:var(--primary-dark); border-color:var(--primary-dark); }
+.linkButton[aria-disabled='true'] { opacity:.6; cursor:not-allowed; }
+.secondaryLink { color:var(--primary-dark); font-size:.92rem; text-decoration:underline; }
+.inlineError { color:var(--danger); font-size:.92rem; margin:0; }
+.inlineInfo { color:var(--muted); font-size:.9rem; margin:0; }
+.folderMeta { display:flex; gap:6px; flex-wrap:wrap; }
