@@ -2,6 +2,7 @@ import type { drive_v3 } from 'googleapis';
 
 import { renderMarkdownReport } from '../reports/renderMarkdownReport';
 import { saveReportToDrive } from '../reports/saveReportToDrive';
+import { appendJobRun } from './jobRunLogs';
 import { loadArtifactIndex } from '../timeline/artifactIndex';
 import { runStructuredQuery } from '../timeline/structuredQuery';
 
@@ -43,31 +44,10 @@ export const appendJobRunLog = async ({
   folderId: string;
   record: Record<string, unknown>;
 }) => {
-  const name = 'job_runs.jsonl';
-  const listed = await drive.files.list({
-    q: `'${folderId}' in parents and trashed=false and name='${name}'`,
-    pageSize: 1,
-    fields: 'files(id)',
-  });
-
-  const fileId = listed.data.files?.[0]?.id;
-  const line = `${JSON.stringify(record)}\n`;
-
-  if (!fileId) {
-    await drive.files.create({
-      requestBody: { name, parents: [folderId], mimeType: 'application/x-ndjson' },
-      media: { mimeType: 'application/x-ndjson', body: line },
-      fields: 'id',
-    });
-    return;
-  }
-
-  const existing = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'text' });
-  const next = `${typeof existing.data === 'string' ? existing.data : ''}${line}`;
-  await drive.files.update({
-    fileId,
-    media: { mimeType: 'application/x-ndjson', body: next },
-    fields: 'id',
+  await appendJobRun({
+    drive,
+    driveFolderId: folderId,
+    entry: record,
   });
 };
 

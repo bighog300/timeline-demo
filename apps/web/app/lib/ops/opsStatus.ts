@@ -1,26 +1,18 @@
-import { ScheduleConfigSchema } from '@timeline/shared';
+import { NotificationCircuitBreakerSchema, ScheduleConfigSchema } from '@timeline/shared';
 import type { drive_v3 } from 'googleapis';
 
-import { readScheduleConfigFromDrive } from '../scheduler/scheduleConfigDrive';
+import { loadCircuitBreakers } from '../notifications/circuitBreaker';
 import { readCronLock } from '../scheduler/cronLock';
+import { readJobRunsTail, readLegacyJobRuns } from '../scheduler/jobRunLogs';
+import { readScheduleConfigFromDrive } from '../scheduler/scheduleConfigDrive';
 import { resolveGenericWebhookUrl, resolveSlackWebhookUrl } from '../secrets/webhookTargets';
 import { OpsStatusSchema, type OpsStatus } from './schemas';
 
-const parseJsonLines = (value: string) => value.split('\n').map((line) => line.trim()).filter(Boolean).flatMap((line) => {
-  try {
-    return [JSON.parse(line) as Record<string, any>];
-  } catch {
-    return [];
-  }
-});
-
 const readJobRunLines = async (drive: drive_v3.Drive, folderId: string, limit = 500) => {
-  const listed = await drive.files.list({ q: `'${folderId}' in parents and trashed=false and name='job_runs.jsonl'`, pageSize: 1, fields: 'files(id)' });
-  const fileId = listed.data.files?.[0]?.id;
-  if (!fileId) return [] as Array<Record<string, any>>;
-  const data = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'text' });
-  const all = parseJsonLines(typeof data.data === 'string' ? data.data : '');
-  return all.slice(-limit);
+  const tail = await readJobRunsTail({ drive, driveFolderId: folderId, maxLines: limit });
+  if (tail.length > 0) return tail as Array<Record<string, any>>;
+  const legacy = await readLegacyJobRuns({ drive, driveFolderId: folderId, maxLines: limit });
+  return legacy as Array<Record<string, any>>;
 };
 
 export const readOpsStatus = async ({ drive, driveFolderId }: { drive: drive_v3.Drive; driveFolderId: string }): Promise<OpsStatus> => {
@@ -28,6 +20,7 @@ export const readOpsStatus = async ({ drive, driveFolderId }: { drive: drive_v3.
   const config = ScheduleConfigSchema.parse(loaded.config);
   const logs = await readJobRunLines(drive, driveFolderId);
   const lock = await readCronLock({ drive, driveFolderId }).catch(() => null);
+  const breakerState = NotificationCircuitBreakerSchema.parse(await loadCircuitBreakers(drive, driveFolderId));
 
   const missingEnvTargets = { slack: [] as string[], webhook: [] as string[] };
   for (const job of config.jobs) {
@@ -59,12 +52,11 @@ export const readOpsStatus = async ({ drive, driveFolderId }: { drive: drive_v3.
 
   const jobs = config.jobs.map((job) => {
     const latest = [...logs].reverse().find((row) => row.jobId === job.id);
-    const jobFailures = recentFailures.filter((f) => f.jobId === job.id);
     const issues = [
       ...(uniqueMissing.slack.length || uniqueMissing.webhook.length ? ['missing_env_targets' as const] : []),
       ...(missingRefreshToken ? ['missing_refresh_token' as const] : []),
       ...(insufficientScope ? ['insufficient_scope' as const] : []),
-      ...(jobFailures.length ? ['recent_failures' as const] : []),
+      ...((latest?.failures?.length ?? 0) ? ['recent_failures' as const] : []),
     ];
 
     return {
@@ -136,6 +128,16 @@ export const readOpsStatus = async ({ drive, driveFolderId }: { drive: drive_v3.
         code: f.code ? String(f.code) : undefined,
         message: f.message ? String(f.message).slice(0, 200) : undefined,
       })),
+      mutedTargets: breakerState.targets
+        .filter((target) => target.state === 'muted')
+        .map((target) => ({
+          channel: target.channel,
+          targetKey: target.targetKey,
+          recipientKey: target.recipientKey,
+          mutedUntilISO: target.mutedUntilISO,
+          failureCount: target.failureCount,
+          reason: target.lastError?.message,
+        })),
     },
   };
 

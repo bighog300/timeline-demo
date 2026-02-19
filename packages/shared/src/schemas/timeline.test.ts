@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ScheduleConfigSchema } from './timeline.js';
+import { NotificationCircuitBreakerSchema, ScheduleConfigSchema } from './timeline.js';
 
 describe('ScheduleConfigSchema channel notifications', () => {
   const base = {
@@ -58,5 +58,29 @@ describe('ScheduleConfigSchema channel notifications', () => {
   it('keeps backward compatibility without channels', () => {
     const result = ScheduleConfigSchema.safeParse(base);
     expect(result.success).toBe(true);
+  });
+});
+
+
+describe('NotificationCircuitBreakerSchema', () => {
+  it('accepts valid entries', () => {
+    const result = NotificationCircuitBreakerSchema.safeParse({
+      version: 1,
+      updatedAtISO: '2026-01-01T00:00:00Z',
+      targets: [
+        { channel: 'email', recipientKey: 'broadcast', state: 'muted', failureCount: 3, mutedUntilISO: '2026-01-01T00:30:00Z', lastError: { message: 'x' } },
+        { channel: 'slack', targetKey: 'TEAM_A', state: 'open', failureCount: 0 },
+      ],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects missing key fields', () => {
+    const result = NotificationCircuitBreakerSchema.safeParse({
+      version: 1,
+      updatedAtISO: '2026-01-01T00:00:00Z',
+      targets: [{ channel: 'slack', state: 'open', failureCount: 1 }],
+    });
+    expect(result.success).toBe(false);
   });
 });

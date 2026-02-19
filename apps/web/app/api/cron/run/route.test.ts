@@ -23,6 +23,13 @@ vi.mock('../../../lib/scheduler/perProfileReports', () => ({
 vi.mock('../../../lib/secrets/webhookTargets', () => ({ resolveSlackWebhookUrl: vi.fn(), resolveGenericWebhookUrl: vi.fn() }));
 vi.mock('../../../lib/notifications/slack', () => ({ postSlackMessage: vi.fn() }));
 vi.mock('../../../lib/notifications/webhook', () => ({ postWebhook: vi.fn() }));
+vi.mock('../../../lib/notifications/circuitBreaker', () => ({
+  loadCircuitBreakers: vi.fn(async () => ({ version: 1, updatedAtISO: '2026-01-01T00:00:00Z', targets: [] })),
+  saveCircuitBreakers: vi.fn(async () => undefined),
+  getCircuitState: vi.fn(() => ({ muted: false })),
+  recordSendFailure: vi.fn(),
+  recordSendSuccess: vi.fn(),
+}));
 vi.mock('../../../lib/scheduler/channelMarkers', () => ({ existsMarker: vi.fn(() => false), writeMarker: vi.fn() }));
 vi.mock('../../../lib/scheduler/cronLock', () => ({ tryAcquireCronLock: vi.fn(async () => ({ acquired: true })), releaseCronLock: vi.fn(), readCronLock: vi.fn() }));
 vi.mock('../../../lib/scheduler/runJobs', () => ({
@@ -45,6 +52,7 @@ import { maybeGeneratePerProfileReport } from '../../../lib/scheduler/perProfile
 import { resolveGenericWebhookUrl, resolveSlackWebhookUrl } from '../../../lib/secrets/webhookTargets';
 import { postSlackMessage } from '../../../lib/notifications/slack';
 import { postWebhook } from '../../../lib/notifications/webhook';
+import { getCircuitState } from '../../../lib/notifications/circuitBreaker';
 import { existsMarker } from '../../../lib/scheduler/channelMarkers';
 import { readScheduleConfigFromDrive } from '../../../lib/scheduler/scheduleConfigDrive';
 import { tryAcquireCronLock } from '../../../lib/scheduler/cronLock';
@@ -263,6 +271,28 @@ describe('/api/cron/run', () => {
     expect(response.status).toBe(200);
     expect(json.ranJobs[0]).toBeTruthy();
   });
+
+
+  it('skips muted slack target and does not call sender', async () => {
+    vi.mocked(getCircuitState).mockReturnValue({ muted: true, mutedUntilISO: '2026-01-05T09:30:00Z' } as never);
+    mockAuth.mockResolvedValue({ ok: true, accessToken: 'token' });
+    mockFolder.mockResolvedValue({ id: 'folder-1', name: 'f' });
+    mockRead.mockResolvedValue({
+      config: {
+        version: 1,
+        updatedAtISO: '2026-01-05T00:00:00Z',
+        jobs: [{ id: 'alerts', type: 'alerts', enabled: true, schedule: { cron: '0 9 * * MON', timezone: 'UTC' }, params: { alertTypes: ['new_high_risks'], lookbackDays: 1, dueInDays: 7 }, notify: { enabled: true, channels: { slack: { enabled: true, targets: ['TEAM_A'] } } } }],
+      },
+      fileId: 'cfg-1',
+      webViewLink: undefined,
+    });
+    vi.mocked(runAlertsJob).mockResolvedValue({ noticeDriveFileId: 'n1', noticeDriveFileName: 'notice.md', counts: { new_high_risks: 1, new_open_loops_due_7d: 0, new_decisions: 0 }, lookbackStartISO: '2026-01-04T09:00:00Z', nowISO: '2026-01-05T09:00:00Z' });
+
+    const response = await POST(new Request('http://localhost/api/cron/run', { headers: { Authorization: 'Bearer secret' } }) as never);
+    expect(response.status).toBe(200);
+    expect(postSlackMessage).not.toHaveBeenCalled();
+  });
+
   it('runs alerts job with bounded query inputs', async () => {
     mockAuth.mockResolvedValue({ ok: true, accessToken: 'token' });
     mockFolder.mockResolvedValue({ id: 'folder-1', name: 'f' });

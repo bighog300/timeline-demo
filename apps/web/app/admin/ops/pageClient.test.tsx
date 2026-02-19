@@ -13,6 +13,7 @@ const statusPayload = {
     missingEnvTargets: { slack: ['MISSING'], webhook: [] },
     auth: { missingRefreshToken: true, insufficientScope: false, notes: [] },
     recentFailures: [],
+    mutedTargets: [{ channel: 'slack', targetKey: 'TEAM_A', failureCount: 3, mutedUntilISO: '2026-01-01T00:30:00Z', reason: 'bad' }],
   },
 };
 
@@ -26,6 +27,7 @@ describe('OpsPageClient', () => {
     render(<OpsPageClient />);
     await waitFor(() => expect(screen.getByText('Ops Dashboard')).toBeInTheDocument());
     expect(screen.getByText(/Missing Slack keys/)).toHaveTextContent('MISSING');
+    expect(screen.getByText(/Muted targets/)).toBeInTheDocument();
   });
 
   it('run now calls API and refreshes', async () => {

@@ -732,6 +732,42 @@ export const ScheduleConfigSchema = z
     });
   });
 
+
+export const NotificationCircuitBreakerTargetSchema = z
+  .object({
+    channel: z.enum(['email', 'slack', 'webhook']),
+    targetKey: z.string().trim().min(1).max(120).optional(),
+    recipientKey: z.string().trim().min(1).max(120).optional(),
+    state: z.enum(['open', 'muted']),
+    failureCount: z.number().int().min(0),
+    firstFailureAtISO: isoDateString.optional(),
+    lastFailureAtISO: isoDateString.optional(),
+    mutedUntilISO: isoDateString.optional(),
+    lastError: z.object({
+      status: z.number().optional(),
+      code: z.string().max(60).optional(),
+      message: z.string().max(200),
+    }).strict().optional(),
+  })
+  .strict();
+
+export const NotificationCircuitBreakerSchema = z
+  .object({
+    version: z.literal(1),
+    updatedAtISO: isoDateString,
+    targets: z.array(NotificationCircuitBreakerTargetSchema),
+  })
+  .superRefine((value, ctx) => {
+    value.targets.forEach((target, index) => {
+      if (target.channel === 'email' && !target.recipientKey) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['targets', index, 'recipientKey'], message: 'Email targets require recipientKey.' });
+      }
+      if (target.channel !== 'email' && !target.targetKey) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['targets', index, 'targetKey'], message: 'Slack/Webhook targets require targetKey.' });
+      }
+    });
+  });
+
 export const ApiErrorSchema = z
   .object({
     error: z
@@ -776,5 +812,6 @@ export type StructuredQueryRequest = z.infer<typeof StructuredQueryRequestSchema
 export type StructuredQueryResponse = z.infer<typeof StructuredQueryResponseSchema>;
 export type ReportExportRequest = z.infer<typeof ReportExportRequestSchema>;
 export type ReportExportResponse = z.infer<typeof ReportExportResponseSchema>;
+export type NotificationCircuitBreakerState = z.infer<typeof NotificationCircuitBreakerSchema>;
 
 export type ScheduleConfig = z.infer<typeof ScheduleConfigSchema>;

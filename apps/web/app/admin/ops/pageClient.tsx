@@ -8,6 +8,7 @@ import { getAuthRemediation } from '../../lib/ops/remediationText';
 export default function OpsPageClient() {
   const [status, setStatus] = useState<OpsStatus | null>(null);
   const [running, setRunning] = useState(false);
+  const [unmutingKey, setUnmutingKey] = useState<string | null>(null);
 
   const load = async () => {
     const response = await fetch('/api/admin/ops/status');
@@ -22,6 +23,19 @@ export default function OpsPageClient() {
     await fetch('/api/admin/ops/run-now', { method: 'POST' });
     await load();
     setRunning(false);
+  };
+
+
+  const onUnmute = async (target: { channel: 'email' | 'slack' | 'webhook'; targetKey?: string; recipientKey?: string }) => {
+    const key = `${target.channel}:${target.targetKey ?? target.recipientKey ?? ''}`;
+    setUnmutingKey(key);
+    await fetch('/api/admin/ops/targets', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'unmute', channel: target.channel, targetKey: target.targetKey, recipientKey: target.recipientKey }),
+    });
+    await load();
+    setUnmutingKey(null);
   };
 
   const auth = status?.issues.auth;
@@ -40,6 +54,22 @@ export default function OpsPageClient() {
       <section>
         <h2>Jobs</h2>
         <table><tbody>{(status?.jobs ?? []).map((job) => <tr key={job.jobId}><td>{job.jobId}</td><td>{job.type}</td><td>{job.lastRun?.ok ? 'ok' : 'fail'}</td><td>{job.issues?.join(', ')}</td></tr>)}</tbody></table>
+      </section>
+
+
+      <section>
+        <h2>Muted targets</h2>
+        <ul>
+          {(status?.issues.mutedTargets ?? []).map((target) => {
+            const key = `${target.channel}:${target.targetKey ?? target.recipientKey ?? ''}`;
+            return (
+              <li key={key}>
+                {target.channel} {target.targetKey ?? target.recipientKey} until {target.mutedUntilISO ?? 'unknown'} ({target.reason ?? 'muted'})
+                <button type="button" disabled={unmutingKey === key} onClick={() => onUnmute(target)}>Unmute</button>
+              </li>
+            );
+          })}
+        </ul>
       </section>
 
       <section>
