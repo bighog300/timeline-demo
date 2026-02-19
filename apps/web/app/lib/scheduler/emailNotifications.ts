@@ -104,18 +104,26 @@ export const composeAlertsEmail = ({
   return { subject, body };
 };
 
+export const emailMarkerName = (runKey: string, recipientKey = 'broadcast') => `email_sent_${slugify(`${runKey}__${recipientKey}`)}.json`;
+
 export const shouldSendEmailMarkerExists = async ({
   drive,
   folderId,
   runKey,
+  recipientKey = 'broadcast',
 }: {
   drive: drive_v3.Drive;
   folderId: string;
   runKey: string;
+  recipientKey?: string;
 }) => {
-  const name = `email_sent_${slugify(runKey)}.json`;
+  const scopedName = emailMarkerName(runKey, recipientKey);
+  const legacyName = `email_sent_${slugify(runKey)}.json`;
+  const q = recipientKey === 'broadcast'
+    ? `'${folderId}' in parents and trashed=false and (name='${scopedName}' or name='${legacyName}')`
+    : `'${folderId}' in parents and trashed=false and name='${scopedName}'`;
   const listed = await drive.files.list({
-    q: `'${folderId}' in parents and trashed=false and name='${name}'`,
+    q,
     pageSize: 1,
     fields: 'files(id)',
   });
@@ -127,14 +135,16 @@ export const writeEmailSentMarker = async ({
   drive,
   folderId,
   runKey,
+  recipientKey = 'broadcast',
   details,
 }: {
   drive: drive_v3.Drive;
   folderId: string;
   runKey: string;
+  recipientKey?: string;
   details: Record<string, unknown>;
 }) => {
-  const name = `email_sent_${slugify(runKey)}.json`;
+  const name = emailMarkerName(runKey, recipientKey);
   await drive.files.create({
     requestBody: {
       name,

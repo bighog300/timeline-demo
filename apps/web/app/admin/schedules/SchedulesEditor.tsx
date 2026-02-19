@@ -50,6 +50,9 @@ export default function SchedulesEditor() {
       <p>
         Notify snippet example: <code>{`"notify": { "enabled": true, "to": ["ops@example.com"], "subjectPrefix": "[Timeline]", "includeLinks": true }`}</code>
       </p>
+      <p>
+        Routes snippet example: <code>{`"recipientProfiles": [{"id":"p1","to":["p1@example.com"],"filters":{"entities":["acme"]}}], "notify": {"enabled": true, "mode": "routes", "routes": [{"profileId": "p1", "subjectPrefix": "[Acme]"}]}`}</code>
+      </p>
       {saved ? <p>Saved.</p> : null}
       {error ? <p>{error}</p> : null}
     </div>

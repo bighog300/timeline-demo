@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 import { getAdminEmailList } from '../../../lib/adminAuth';
 import { resolveOrProvisionAppDriveFolder } from '../../../lib/appDriveFolder';
+import { readEntityAliasesFromDrive } from '../../../lib/entities/aliases';
 import { sendEmail } from '../../../lib/gmailSend';
 import { createDriveClient } from '../../../lib/googleDrive';
 import { getGoogleAccessTokenForCron } from '../../../lib/googleServiceAuth';
@@ -11,6 +12,7 @@ import {
   shouldSendEmailMarkerExists,
   writeEmailSentMarker,
 } from '../../../lib/scheduler/emailNotifications';
+import { buildPersonalizedDigest, normalizeProfileFilters } from '../../../lib/scheduler/personalizeDigest';
 import {
   appendJobRunLog,
   runAlertsJob,
@@ -79,6 +81,7 @@ const run = async (request: NextRequest) => {
   }
 
   const loaded = await readScheduleConfigFromDrive(drive, folder.id);
+  const aliases = await readEntityAliasesFromDrive(drive, folder.id);
   const now = new Date();
   const fromEmail = process.env.GOOGLE_SERVICE_FROM_EMAIL ?? getAdminEmailList()[0] ?? 'me';
   const ranJobs: Array<{
@@ -87,7 +90,18 @@ const run = async (request: NextRequest) => {
     ok: boolean;
     output?: unknown;
     error?: string;
-    email?: { attempted: boolean; ok?: boolean; skipped?: boolean; error?: string; recipientCount?: number };
+    email?: {
+      attempted: boolean;
+      ok?: boolean;
+      skipped?: boolean;
+      error?: string;
+      mode?: 'broadcast' | 'routes';
+      profileId?: string;
+      emailedRoutesAttempted?: number;
+      emailedRoutesSent?: number;
+      emailedRoutesSkipped?: number;
+      emailedRoutesFailed?: number;
+    };
   }> = [];
 
   for (const job of loaded.config.jobs.filter((item) => item.enabled)) {
@@ -111,52 +125,113 @@ const run = async (request: NextRequest) => {
 
         if (job.notify?.enabled) {
           const runKey = `${job.id}:${output.dateFromISO}:${output.dateToISO}`;
-          const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey });
-          if (markerExists) {
-            result.email = { attempted: false, skipped: true, recipientCount: job.notify.to.length };
-          } else {
-            try {
-              const message = composeWeekInReviewEmail({
-                job,
-                runOutput: { ...output, ...notice },
-                now,
+          if ((job.notify.mode ?? 'broadcast') === 'routes') {
+            let attempted = 0;
+            let sent = 0;
+            let skipped = 0;
+            let failed = 0;
+            const profiles = new Map((loaded.config.recipientProfiles ?? []).map((profile) => [profile.id, profile]));
+            for (const route of job.notify.routes ?? []) {
+              const profile = profiles.get(route.profileId);
+              if (!profile) {
+                failed += 1;
+                continue;
+              }
+              const effectiveProfile = {
+                ...profile,
+                filters: normalizeProfileFilters({ ...profile.filters, ...(route.filtersOverride ?? {}) }, aliases.aliases),
+              };
+              const digest = await buildPersonalizedDigest({
+                jobType: 'week_in_review',
+                profile: effectiveProfile,
+                jobOutput: { ...output, ...notice },
+                drive,
                 driveFolderId: folder.id,
-              });
-              const sent = await sendEmail({
                 accessToken: auth.accessToken,
-                fromEmail,
-                to: job.notify.to,
-                cc: job.notify.cc,
-                subject: message.subject,
-                textBody: message.body,
+                now,
+                aliasMap: aliases.aliases,
               });
-              result.email = { attempted: true, ok: true, recipientCount: job.notify.to.length + (job.notify.cc?.length ?? 0) };
+              attempted += 1;
+              if (digest.empty && !job.notify.sendWhenEmpty) {
+                skipped += 1;
+                continue;
+              }
+              const recipientKey = profile.id;
+              if (await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey })) {
+                skipped += 1;
+                continue;
+              }
+
               try {
+                const sentMessage = await sendEmail({
+                  accessToken: auth.accessToken,
+                  fromEmail,
+                  to: profile.to,
+                  cc: profile.cc,
+                  subject: `${route.subjectPrefix?.trim() ?? ''}${route.subjectPrefix ? ' ' : ''}${digest.subject}`,
+                  textBody: digest.body,
+                });
                 await writeEmailSentMarker({
                   drive,
                   folderId: folder.id,
                   runKey,
+                  recipientKey,
+                  details: { runKey, recipientKey, sentAtISO: now.toISOString(), gmailMessageId: sentMessage.id },
+                });
+                sent += 1;
+              } catch {
+                failed += 1;
+              }
+            }
+            result.email = {
+              attempted: attempted > 0,
+              mode: 'routes',
+              emailedRoutesAttempted: attempted,
+              emailedRoutesSent: sent,
+              emailedRoutesSkipped: skipped,
+              emailedRoutesFailed: failed,
+            };
+          } else {
+            const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey: 'broadcast' });
+            if (markerExists) {
+              result.email = { attempted: false, skipped: true, mode: 'broadcast' };
+            } else {
+              try {
+                const message = composeWeekInReviewEmail({
+                  job,
+                  runOutput: { ...output, ...notice },
+                  now,
+                  driveFolderId: folder.id,
+                });
+                const sent = await sendEmail({
+                  accessToken: auth.accessToken,
+                  fromEmail,
+                  to: job.notify.to ?? [],
+                  cc: job.notify.cc,
+                  subject: message.subject,
+                  textBody: message.body,
+                });
+                result.email = { attempted: true, ok: true, mode: 'broadcast' };
+                await writeEmailSentMarker({
+                  drive,
+                  folderId: folder.id,
+                  runKey,
+                  recipientKey: 'broadcast',
                   details: {
                     runKey,
                     sentAtISO: now.toISOString(),
-                    to: job.notify.to,
                     subject: message.subject,
                     gmailMessageId: sent.id,
                   },
                 });
-              } catch (markerError) {
+              } catch (emailError) {
                 result.email = {
-                  ...result.email,
-                  error: `marker_write_failed:${markerError instanceof Error ? markerError.message : 'unknown'}`,
+                  attempted: true,
+                  ok: false,
+                  mode: 'broadcast',
+                  error: emailError instanceof Error ? emailError.message : 'email_send_failed',
                 };
               }
-            } catch (emailError) {
-              result.email = {
-                attempted: true,
-                ok: false,
-                recipientCount: job.notify.to.length + (job.notify.cc?.length ?? 0),
-                error: emailError instanceof Error ? emailError.message : 'email_send_failed',
-              };
             }
           }
         }
@@ -167,52 +242,113 @@ const run = async (request: NextRequest) => {
 
         if (job.notify?.enabled) {
           const runKey = `${job.id}:${output.lookbackStartISO}:${output.nowISO}`;
-          const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey });
-          if (markerExists) {
-            result.email = { attempted: false, skipped: true, recipientCount: job.notify.to.length };
-          } else {
-            try {
-              const message = composeAlertsEmail({
-                job,
-                runOutput: output,
-                now,
+          if ((job.notify.mode ?? 'broadcast') === 'routes') {
+            let attempted = 0;
+            let sent = 0;
+            let skipped = 0;
+            let failed = 0;
+            const profiles = new Map((loaded.config.recipientProfiles ?? []).map((profile) => [profile.id, profile]));
+            for (const route of job.notify.routes ?? []) {
+              const profile = profiles.get(route.profileId);
+              if (!profile) {
+                failed += 1;
+                continue;
+              }
+              const effectiveProfile = {
+                ...profile,
+                filters: normalizeProfileFilters({ ...profile.filters, ...(route.filtersOverride ?? {}) }, aliases.aliases),
+              };
+              const digest = await buildPersonalizedDigest({
+                jobType: 'alerts',
+                profile: effectiveProfile,
+                jobOutput: output,
+                drive,
                 driveFolderId: folder.id,
-              });
-              const sent = await sendEmail({
                 accessToken: auth.accessToken,
-                fromEmail,
-                to: job.notify.to,
-                cc: job.notify.cc,
-                subject: message.subject,
-                textBody: message.body,
+                now,
+                aliasMap: aliases.aliases,
               });
-              result.email = { attempted: true, ok: true, recipientCount: job.notify.to.length + (job.notify.cc?.length ?? 0) };
+              attempted += 1;
+              if (digest.empty && !job.notify.sendWhenEmpty) {
+                skipped += 1;
+                continue;
+              }
+              const recipientKey = profile.id;
+              if (await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey })) {
+                skipped += 1;
+                continue;
+              }
+
               try {
+                const sentMessage = await sendEmail({
+                  accessToken: auth.accessToken,
+                  fromEmail,
+                  to: profile.to,
+                  cc: profile.cc,
+                  subject: `${route.subjectPrefix?.trim() ?? ''}${route.subjectPrefix ? ' ' : ''}${digest.subject}`,
+                  textBody: digest.body,
+                });
                 await writeEmailSentMarker({
                   drive,
                   folderId: folder.id,
                   runKey,
+                  recipientKey,
+                  details: { runKey, recipientKey, sentAtISO: now.toISOString(), gmailMessageId: sentMessage.id },
+                });
+                sent += 1;
+              } catch {
+                failed += 1;
+              }
+            }
+            result.email = {
+              attempted: attempted > 0,
+              mode: 'routes',
+              emailedRoutesAttempted: attempted,
+              emailedRoutesSent: sent,
+              emailedRoutesSkipped: skipped,
+              emailedRoutesFailed: failed,
+            };
+          } else {
+            const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey: 'broadcast' });
+            if (markerExists) {
+              result.email = { attempted: false, skipped: true, mode: 'broadcast' };
+            } else {
+              try {
+                const message = composeAlertsEmail({
+                  job,
+                  runOutput: output,
+                  now,
+                  driveFolderId: folder.id,
+                });
+                const sent = await sendEmail({
+                  accessToken: auth.accessToken,
+                  fromEmail,
+                  to: job.notify.to ?? [],
+                  cc: job.notify.cc,
+                  subject: message.subject,
+                  textBody: message.body,
+                });
+                result.email = { attempted: true, ok: true, mode: 'broadcast' };
+                await writeEmailSentMarker({
+                  drive,
+                  folderId: folder.id,
+                  runKey,
+                  recipientKey: 'broadcast',
                   details: {
                     runKey,
                     sentAtISO: now.toISOString(),
-                    to: job.notify.to,
                     subject: message.subject,
                     gmailMessageId: sent.id,
                   },
                 });
-              } catch (markerError) {
+              } catch (emailError) {
                 result.email = {
-                  ...result.email,
-                  error: `marker_write_failed:${markerError instanceof Error ? markerError.message : 'unknown'}`,
+                  attempted: true,
+                  ok: false,
+                  mode: 'broadcast',
+                  error: emailError instanceof Error ? emailError.message : 'email_send_failed',
                 };
               }
-            } catch (emailError) {
-              result.email = {
-                attempted: true,
-                ok: false,
-                recipientCount: job.notify.to.length + (job.notify.cc?.length ?? 0),
-                error: emailError instanceof Error ? emailError.message : 'email_send_failed',
-              };
             }
           }
         }

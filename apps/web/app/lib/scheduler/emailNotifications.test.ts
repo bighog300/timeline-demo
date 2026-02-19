@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { composeAlertsEmail, composeWeekInReviewEmail } from './emailNotifications';
+import {
+  composeAlertsEmail,
+  composeWeekInReviewEmail,
+  emailMarkerName,
+  shouldSendEmailMarkerExists,
+} from './emailNotifications';
 
 describe('emailNotifications', () => {
   it('applies subjectPrefix and includes report link for week in review', () => {
@@ -35,5 +40,21 @@ describe('emailNotifications', () => {
 
     expect(message.body).toContain('New high risks: 1');
     expect(message.body).toContain('https://drive.google.com/file/d/notice-1/view');
+  });
+
+  it('uses per-recipient marker name format', () => {
+    expect(emailMarkerName('job:window', 'p1')).toContain('__p1');
+  });
+
+  it('checks legacy broadcast marker compatibility', async () => {
+    const drive = {
+      files: {
+        list: async ({ q }: { q: string }) => ({ data: { files: q.includes('or name') ? [{ id: 'f1' }] : [] } }),
+      },
+    };
+
+    await expect(
+      shouldSendEmailMarkerExists({ drive: drive as never, folderId: 'folder', runKey: 'rk', recipientKey: 'broadcast' }),
+    ).resolves.toBe(true);
   });
 });

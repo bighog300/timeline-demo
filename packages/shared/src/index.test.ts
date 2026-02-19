@@ -747,6 +747,45 @@ describe('phase 5 schemas', () => {
     expect(result.success).toBe(false);
   });
 
+
+  it('accepts valid routes notify config with profile references', () => {
+    const result = ScheduleConfigSchema.safeParse({
+      version: 1,
+      updatedAtISO: '2026-01-01T00:00:00Z',
+      recipientProfiles: [
+        { id: 'p1', to: ['p1@example.com'], filters: { entities: ['acme'] } },
+      ],
+      jobs: [
+        {
+          id: 'weekly',
+          type: 'week_in_review',
+          enabled: true,
+          schedule: { cron: '0 9 * * MON', timezone: 'UTC' },
+          notify: { enabled: true, mode: 'routes', routes: [{ profileId: 'p1' }] },
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects routes config with invalid profile reference', () => {
+    const result = ScheduleConfigSchema.safeParse({
+      version: 1,
+      updatedAtISO: '2026-01-01T00:00:00Z',
+      recipientProfiles: [{ id: 'p1', to: ['p1@example.com'], filters: {} }],
+      jobs: [{
+        id: 'weekly',
+        type: 'week_in_review',
+        enabled: true,
+        schedule: { cron: '0 9 * * MON', timezone: 'UTC' },
+        notify: { enabled: true, mode: 'routes', routes: [{ profileId: 'missing' }] },
+      }],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
   it('rejects notify config with invalid recipient email', () => {
     const result = ScheduleConfigSchema.safeParse({
       version: 1,
