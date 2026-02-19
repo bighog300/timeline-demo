@@ -8,6 +8,10 @@ import {
   SynthesisArtifactSchema,
   SynthesisRequestSchema,
   SynthesisResponseSchema,
+  StructuredQueryRequestSchema,
+  StructuredQueryResponseSchema,
+  ReportExportRequestSchema,
+  ReportExportResponseSchema,
 } from './index.js';
 
 describe('shared schemas', () => {
@@ -654,5 +658,42 @@ describe('structured intelligence schemas', () => {
 
     expect(legacy.success).toBe(true);
     expect(structured.success).toBe(true);
+  });
+});
+
+describe('phase 5 schemas', () => {
+  it('applies defaults for structured query limits', () => {
+    const parsed = StructuredQueryRequestSchema.parse({ entity: 'acme' });
+    expect(parsed.limitArtifacts).toBe(30);
+    expect(parsed.limitItemsPerArtifact).toBe(10);
+  });
+
+  it('validates structured query response shape', () => {
+    const result = StructuredQueryResponseSchema.safeParse({
+      ok: true,
+      query: { limitArtifacts: 5, limitItemsPerArtifact: 3 },
+      totals: { artifactsMatched: 1, openLoopsMatched: 2, risksMatched: 1, decisionsMatched: 0 },
+      results: [{ artifactId: 'a1', matches: { openLoops: [{ text: 'Follow up' }] } }],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('validates report export request/response', () => {
+    const request = ReportExportRequestSchema.safeParse({
+      title: 'Week in review',
+      format: 'markdown',
+      weekInReview: { dateFromISO: '2026-01-01T00:00:00Z', dateToISO: '2026-01-08T00:00:00Z' },
+    });
+    const response = ReportExportResponseSchema.safeParse({
+      ok: true,
+      report: {
+        reportId: 'r1',
+        title: 'Week in review',
+        createdAtISO: '2026-01-08T00:00:00Z',
+      },
+    });
+
+    expect(request.success).toBe(true);
+    expect(response.success).toBe(true);
   });
 });
