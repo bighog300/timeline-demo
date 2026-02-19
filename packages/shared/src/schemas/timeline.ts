@@ -415,6 +415,93 @@ export const ArtifactIndexSchema = z
   })
   .strict();
 
+export const StructuredQueryRequestSchema = z
+  .object({
+    dateFromISO: isoDateString.optional(),
+    dateToISO: isoDateString.optional(),
+    kind: z.array(z.enum(['summary', 'synthesis'])).max(2).optional(),
+    entity: z.string().trim().min(1).max(120).optional(),
+    tags: z.array(z.string().trim().min(1)).max(10).optional(),
+    participants: z.array(z.string().trim().min(1)).max(10).optional(),
+    hasOpenLoops: z.boolean().optional(),
+    openLoopStatus: z.enum(['open', 'closed']).optional(),
+    openLoopDueFromISO: isoDateString.optional(),
+    openLoopDueToISO: isoDateString.optional(),
+    hasRisks: z.boolean().optional(),
+    riskSeverity: z.enum(['low', 'medium', 'high']).optional(),
+    hasDecisions: z.boolean().optional(),
+    decisionFromISO: isoDateString.optional(),
+    decisionToISO: isoDateString.optional(),
+    limitArtifacts: z.number().int().min(1).max(80).default(30),
+    limitItemsPerArtifact: z.number().int().min(1).max(30).default(10),
+  })
+  .strict();
+
+export const StructuredQueryResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    query: StructuredQueryRequestSchema,
+    totals: z
+      .object({
+        artifactsMatched: z.number().int().min(0),
+        openLoopsMatched: z.number().int().min(0),
+        risksMatched: z.number().int().min(0),
+        decisionsMatched: z.number().int().min(0),
+      })
+      .strict(),
+    results: z.array(
+      z
+        .object({
+          artifactId: z.string().min(1),
+          kind: z.enum(['summary', 'synthesis']).optional(),
+          title: z.string().optional(),
+          contentDateISO: isoDateString.optional(),
+          entities: z.array(EntitySchema).optional(),
+          matches: z
+            .object({
+              openLoops: z.array(OpenLoopSchema).optional(),
+              risks: z.array(RiskSchema).optional(),
+              decisions: z.array(DecisionSchema).optional(),
+            })
+            .strict(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+
+export const ReportExportRequestSchema = z
+  .object({
+    title: z.string().trim().min(3).max(120),
+    format: z.literal('markdown'),
+    query: StructuredQueryRequestSchema.optional(),
+    weekInReview: z
+      .object({
+        dateFromISO: isoDateString,
+        dateToISO: isoDateString,
+      })
+      .strict()
+      .optional(),
+    includeCitations: z.boolean().default(true),
+    saveToDrive: z.boolean().default(true),
+  })
+  .strict();
+
+export const ReportExportResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    report: z
+      .object({
+        reportId: z.string().min(1),
+        title: z.string().trim().min(1),
+        createdAtISO: isoDateString,
+        driveFileId: z.string().optional(),
+        driveFileName: z.string().optional(),
+      })
+      .strict(),
+  })
+  .strict();
+
 export const ApiErrorSchema = z
   .object({
     error: z
@@ -455,3 +542,7 @@ export type SynthesisRequest = z.infer<typeof SynthesisRequestSchema>;
 export type SynthesisOutput = z.infer<typeof SynthesisOutputSchema>;
 export type SynthesisResponse = z.infer<typeof SynthesisResponseSchema>;
 export type SynthesisArtifact = z.infer<typeof SynthesisArtifactSchema>;
+export type StructuredQueryRequest = z.infer<typeof StructuredQueryRequestSchema>;
+export type StructuredQueryResponse = z.infer<typeof StructuredQueryResponseSchema>;
+export type ReportExportRequest = z.infer<typeof ReportExportRequestSchema>;
+export type ReportExportResponse = z.infer<typeof ReportExportResponseSchema>;

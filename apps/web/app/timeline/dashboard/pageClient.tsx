@@ -40,6 +40,9 @@ export default function TimelineDashboardPageClient() {
   const [showProposedOnly, setShowProposedOnly] = useState(true);
   const [typeFilter, setTypeFilter] = useState<QueueType>('all');
   const [kindFilter, setKindFilter] = useState<QueueKind>('all');
+  const [includeEvidence, setIncludeEvidence] = useState(false);
+  const [exportReport, setExportReport] = useState(true);
+  const [weekResult, setWeekResult] = useState<{ synthesisText?: string; reportName?: string; reportId?: string; citations?: number; savedArtifactId?: string } | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -134,6 +137,28 @@ export default function TimelineDashboardPageClient() {
     }
   };
 
+  const generateWeekInReview = async () => {
+    setWeekResult(null);
+    try {
+      const response = await fetch('/api/timeline/week-in-review', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ includeEvidence, exportReport }),
+      });
+      const payload = await response.json();
+      if (!response.ok) return;
+      setWeekResult({
+        synthesisText: payload.synthesis?.synthesis?.content,
+        reportName: payload.report?.driveFileName,
+        reportId: payload.report?.driveFileId,
+        citations: payload.synthesis?.citations?.length,
+        savedArtifactId: payload.synthesis?.savedArtifactId,
+      });
+    } catch {
+      // noop
+    }
+  };
+
   return (
     <section style={{ maxWidth: 980, margin: '0 auto', padding: '1.5rem' }}>
       <h1>Timeline Dashboard</h1>
@@ -143,6 +168,20 @@ export default function TimelineDashboardPageClient() {
         <Link href="/ingest/url">Ingest URL</Link>
         <Link href="/timeline/chat">Timeline chat</Link>
       </div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+        <label><input type="checkbox" checked={includeEvidence} onChange={(event) => setIncludeEvidence(event.target.checked)} /> Include evidence</label>
+        <label><input type="checkbox" checked={exportReport} onChange={(event) => setExportReport(event.target.checked)} /> Export report</label>
+        <button onClick={() => void generateWeekInReview()}>Generate Week in Review</button>
+      </div>
+      {weekResult ? (
+        <div style={{ border: '1px solid #ddd', padding: 10, marginBottom: 16 }}>
+          <h3>Week in Review</h3>
+          {weekResult.synthesisText ? <p>{weekResult.synthesisText}</p> : null}
+          {weekResult.savedArtifactId ? <p><Link href={`/timeline?artifactId=${encodeURIComponent(weekResult.savedArtifactId)}`}>Open saved synthesis</Link></p> : null}
+          {weekResult.reportId ? <p>Report saved: {weekResult.reportName ?? weekResult.reportId}</p> : null}
+          <p>Citations: {weekResult.citations ?? 0}</p>
+        </div>
+      ) : null}
 
       {loading ? <p>Loading…</p> : null}
       {error ? <p style={{ color: '#b00020' }}>{error}</p> : null}

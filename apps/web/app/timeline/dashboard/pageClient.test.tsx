@@ -89,3 +89,33 @@ describe('TimelineDashboardPageClient', () => {
   });
 
 });
+
+it('runs week in review workflow', async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        summary: { totalArtifacts: 1, totalSyntheses: 0, proposedActions: 0, openLoopsOpenCount: 0, highRisksCount: 0, decisionsRecentCount: 0 },
+        topEntities: [],
+        syntheses: [],
+        actionQueue: [],
+      }),
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        synthesis: { synthesis: { content: 'Weekly summary' }, citations: [{ artifactId: 'a1', excerpt: 'x' }], savedArtifactId: 'syn-1' },
+        report: { driveFileId: 'r1', driveFileName: 'report.md' },
+      }),
+    });
+
+  vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+  render(<TimelineDashboardPageClient />);
+  fireEvent.click((await screen.findAllByText('Generate Week in Review'))[0]);
+
+  expect(await screen.findByText('Weekly summary')).toBeInTheDocument();
+  expect(await screen.findByText('Citations: 1')).toBeInTheDocument();
+});
