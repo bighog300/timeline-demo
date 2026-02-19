@@ -169,6 +169,50 @@ describe('TimelinePageClient', () => {
     cleanup();
   });
 
+
+  it('auto-clears stale selection storage and shows migration warning', async () => {
+    window.localStorage.setItem('timeline.selectionVersion', '1');
+    window.localStorage.setItem('timeline.gmailSelections', JSON.stringify([{ foo: 'bar' }]));
+    mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/saved selection format changed/i)).toBeInTheDocument();
+    });
+    expect(window.localStorage.getItem('timeline.gmailSelections')).toBeNull();
+    expect(window.localStorage.getItem('timeline.selectionVersion')).toBe('2');
+  });
+
+  it('shows invalid_request with clear selections action', async () => {
+    setSelections();
+    mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url === '/api/timeline/summarize') {
+        return buildApiError(400, 'invalid_request', 'Invalid request payload.');
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    render(<TimelinePageClient />);
+
+    fireEvent.click(screen.getByRole('button', { name: /generate summaries/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/invalid_request/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /clear selections/i }));
+    expect(window.localStorage.getItem('timeline.gmailSelections')).toBeNull();
+  });
+
   it('shows an empty state when no selections exist', () => {
     mockFetch(withIndexGet((url) => {
       if (url === '/api/timeline/selection/list') {

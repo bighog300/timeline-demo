@@ -9,7 +9,7 @@ import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
 import { artifactKey, mergeArtifacts } from '../lib/artifactMerge';
-import { parseApiError } from '../lib/apiErrors';
+import { API_ERROR_CODES, parseApiError } from '../lib/apiErrors';
 import type { TimelineIndex } from '../lib/indexTypes';
 import { mergeSelectionItems } from '../lib/selectionMerge';
 import {
@@ -50,6 +50,8 @@ type ApiSurfaceError =
   | 'upstream_error'
   | 'too_many_items'
   | 'invalid_request'
+  | 'provider_not_configured'
+  | 'provider_bad_output'
   | 'generic'
   | null;
 
@@ -122,6 +124,8 @@ const AUTO_SYNC_KEY = 'timeline.autoSyncOnOpen';
 const LAST_SYNC_KEY = 'timeline.lastSyncISO';
 const GROUPING_KEY = 'timeline.groupingMode';
 const FILTERS_KEY = 'timeline.filters';
+const SELECTION_VERSION_KEY = 'timeline.selectionVersion';
+const CURRENT_SELECTION_VERSION = 2;
 const ARTIFACT_LIMIT = 100;
 const DEFAULT_FILTERS: TimelineFilters = {
   source: 'all',
@@ -144,6 +148,56 @@ const RequestIdNote = ({ requestId }: { requestId?: string | null }) =>
       Request ID: <code>{requestId}</code>
     </span>
   ) : null;
+
+
+const isValidGmailSelection = (value: unknown): value is GmailSelection => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return typeof record.id === 'string' && typeof record.subject === 'string';
+};
+
+const isValidDriveSelection = (value: unknown): value is DriveSelection => {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return typeof record.id === 'string' && typeof record.name === 'string';
+};
+
+const clearStoredSelections = () => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.localStorage.removeItem(GMAIL_KEY);
+  window.localStorage.removeItem(DRIVE_KEY);
+};
+
+const migrateSelectionStorage = () => {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const storedVersion = Number(window.localStorage.getItem(SELECTION_VERSION_KEY) ?? '0');
+  if (storedVersion >= CURRENT_SELECTION_VERSION) {
+    return false;
+  }
+
+  const gmailRaw = parseStoredSelections<unknown>(GMAIL_KEY);
+  const driveRaw = parseStoredSelections<unknown>(DRIVE_KEY);
+  const gmailValid = gmailRaw.every(isValidGmailSelection);
+  const driveValid = driveRaw.every(isValidDriveSelection);
+
+  if (!gmailValid || !driveValid) {
+    clearStoredSelections();
+    window.localStorage.setItem(SELECTION_VERSION_KEY, String(CURRENT_SELECTION_VERSION));
+    return true;
+  }
+
+  window.localStorage.setItem(SELECTION_VERSION_KEY, String(CURRENT_SELECTION_VERSION));
+  return false;
+};
 
 const parseStoredSelections = <T,>(key: string) => {
   if (typeof window === 'undefined') {
@@ -350,6 +404,7 @@ export default function TimelinePageClient() {
   const [isSummarizing, setIsSummarizing] = useState(false);
   const [error, setError] = useState<SummarizeError>(null);
   const [errorRequestId, setErrorRequestId] = useState<string | null>(null);
+  const [selectionMigrationWarning, setSelectionMigrationWarning] = useState(false);
   const [failedItems, setFailedItems] = useState<FailedItem[]>([]);
   const [summarizeCooldownUntil, setSummarizeCooldownUntil] = useState<number | null>(null);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
@@ -408,6 +463,8 @@ export default function TimelinePageClient() {
     : null;
 
   useEffect(() => {
+    const didMigrateSelections = migrateSelectionStorage();
+    setSelectionMigrationWarning(didMigrateSelections);
     setGmailSelections(parseStoredSelections<GmailSelection>(GMAIL_KEY));
     setDriveSelections(parseStoredSelections<DriveSelection>(DRIVE_KEY));
     setArtifacts(parseStoredArtifacts());
@@ -596,8 +653,20 @@ export default function TimelinePageClient() {
           setSummarizeCooldownUntil(Date.now() + 4000);
           return;
         }
-        if (apiError?.code === 'upstream_timeout' || apiError?.code === 'upstream_error') {
+        if (apiError?.code === API_ERROR_CODES.upstreamTimeout || apiError?.code === API_ERROR_CODES.upstreamError) {
           setError(apiError.code);
+          return;
+        }
+        if (apiError?.code === API_ERROR_CODES.invalidRequest) {
+          setError('invalid_request');
+          return;
+        }
+        if (apiError?.code === API_ERROR_CODES.providerNotConfigured) {
+          setError('provider_not_configured');
+          return;
+        }
+        if (apiError?.code === API_ERROR_CODES.providerBadOutput) {
+          setError('provider_bad_output');
           return;
         }
         setError('generic');
@@ -731,6 +800,13 @@ export default function TimelinePageClient() {
     }
     window.localStorage.setItem(FILTERS_KEY, JSON.stringify(filters));
   }, [filters, hasHydrated]);
+
+
+  const handleClearSelections = useCallback(() => {
+    clearStoredSelections();
+    setGmailSelections([]);
+    setDriveSelections([]);
+  }, []);
 
   const persistSelections = (nextGmail: GmailSelection[], nextDrive: DriveSelection[]) => {
     setGmailSelections(nextGmail);
@@ -2013,6 +2089,10 @@ export default function TimelinePageClient() {
         {indexMessage ? <div className={styles.noticeSuccess}>{indexMessage}</div> : null}
       </Card>
 
+
+      {selectionMigrationWarning ? (
+        <div className={styles.notice}>Your saved selection format changed after an update. Please reselect files.</div>
+      ) : null}
       {error === 'reconnect_required' ? reconnectNotice(errorRequestId) : null}
       {error === 'drive_not_provisioned' ? provisionNotice(errorRequestId) : null}
       {error === 'forbidden_outside_folder' ? outsideFolderNotice(errorRequestId) : null}
@@ -2028,6 +2108,25 @@ export default function TimelinePageClient() {
           <Button variant="ghost" onClick={handleSummarize} disabled={isSummarizing}>
             Retry summaries
           </Button>
+          <RequestIdNote requestId={errorRequestId} />
+        </div>
+      ) : null}
+      {error === 'invalid_request' ? (
+        <div className={styles.notice}>
+          We could not process your selection (invalid_request).
+          <Button variant="ghost" onClick={handleClearSelections}>Clear selections</Button>
+          <RequestIdNote requestId={errorRequestId} />
+        </div>
+      ) : null}
+      {error === 'provider_not_configured' ? (
+        <div className={styles.notice}>
+          Summarization provider is not configured (provider_not_configured).
+          <RequestIdNote requestId={errorRequestId} />
+        </div>
+      ) : null}
+      {error === 'provider_bad_output' ? (
+        <div className={styles.notice}>
+          Provider returned invalid output (provider_bad_output). Retry.
           <RequestIdNote requestId={errorRequestId} />
         </div>
       ) : null}

@@ -3,6 +3,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const root = process.cwd();
+
+const requiredRoutes = [
+  path.join(root, 'apps', 'web', 'app', 'admin', 'ops', 'page.tsx'),
+  path.join(root, 'apps', 'web', 'app', 'api', 'meta', 'build', 'route.ts'),
+];
+const missingRoutes = requiredRoutes.filter((filePath) => !fs.existsSync(filePath));
+if (missingRoutes.length > 0) {
+  console.error('❌ Build verification failed. Required route source files missing:');
+  for (const filePath of missingRoutes) {
+    console.error(`- ${path.relative(root, filePath)}`);
+  }
+  process.exit(1);
+}
+
 const webPackageJsonPath = path.join(root, 'apps', 'web', 'package.json');
 let webUsesShared = false;
 

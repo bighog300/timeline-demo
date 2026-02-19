@@ -8,7 +8,7 @@ import {
   type UrlSelection,
 } from '@timeline/shared';
 
-import { jsonError } from '../../../lib/apiErrors';
+import { API_ERROR_CODES } from '../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../lib/googleAuth';
 import { createDriveClient } from '../../../lib/googleDrive';
 import { createGmailClient } from '../../../lib/googleGmail';
@@ -146,12 +146,12 @@ export const summarizeTimelineItems = async (
   const { items, session, accessToken, ctx } = params;
   const driveFolderId = session.driveFolderId;
   if (!driveFolderId) {
-    return { response: jsonError(400, 'drive_not_provisioned', 'Drive folder not provisioned.') };
+    return { response: summarizeError(400, API_ERROR_CODES.driveNotProvisioned, 'Drive folder not provisioned.') };
   }
 
   if (items.length > MAX_ITEMS) {
     return {
-      response: jsonError(400, 'too_many_items', 'Too many items requested.', { limit: MAX_ITEMS }),
+      response: summarizeError(400, API_ERROR_CODES.tooManyItems, 'Too many items requested.', { limit: MAX_ITEMS }),
     };
   }
 
@@ -176,7 +176,7 @@ export const summarizeTimelineItems = async (
   } catch (error) {
     if (error instanceof ProviderError && error.code === 'not_configured') {
       return {
-        response: jsonError(500, 'provider_not_configured', 'Selected provider is not configured.'),
+        response: summarizeError(500, API_ERROR_CODES.providerNotConfigured, 'Selected provider is not configured.'),
       };
     }
     throw error;
@@ -254,24 +254,20 @@ export const summarizeTimelineItems = async (
       if (error instanceof ProviderError) {
         if (error.code === 'bad_output') {
           return {
-            response: jsonError(502, 'provider_bad_output', 'Provider returned invalid output.'),
+            response: summarizeError(502, API_ERROR_CODES.providerBadOutput, 'Provider returned invalid output.'),
           };
         }
 
         if (error.code === 'not_configured') {
           return {
-            response: jsonError(500, 'provider_not_configured', 'Selected provider is not configured.'),
+            response: summarizeError(500, API_ERROR_CODES.providerNotConfigured, 'Selected provider is not configured.'),
           };
         }
       }
 
       if (error instanceof PayloadLimitError) {
         return {
-          response: jsonError(
-            400,
-            'invalid_request',
-            `${error.label} is too large to store in Drive. Trim the selection and try again.`,
-          ),
+          response: summarizeError(400, API_ERROR_CODES.invalidRequest, `${error.label} is too large to store in Drive. Trim the selection and try again.`),
         };
       }
 
@@ -292,12 +288,44 @@ export const summarizeTimelineItems = async (
   return { payload: SummarizeResponseSchema.parse({ artifacts, failed }) };
 };
 
+
+const withErrorCodeHeader = (response: NextResponse, errorCode: string) => {
+  response.headers.set('x-error-code', errorCode);
+  return response;
+};
+
+
+const summarizeError = (status: number, code: string, message: string, details?: unknown) =>
+  withErrorCodeHeader(
+    NextResponse.json(
+      {
+        error: code,
+        message,
+        ...(details === undefined ? {} : { details }),
+        legacyError: {
+          code,
+          message,
+          ...(details === undefined ? {} : { details }),
+        },
+        error_code: code,
+      },
+      { status },
+    ),
+    code,
+  );
+
 export const POST = async (request: NextRequest) => {
   const ctx = createCtx(request, '/api/timeline/summarize');
   const startedAt = Date.now();
   const respond = (response: NextResponse) => {
     withRequestId(response, ctx.requestId);
-    logInfo(ctx, 'request_end', { status: response.status, durationMs: Date.now() - startedAt });
+    const status = response.status;
+    logInfo(ctx, 'request_end', {
+      route: '/api/timeline/summarize',
+      status,
+      ...(status >= 400 ? { errorCode: response.headers.get('x-error-code') ?? 'unknown_error' } : {}),
+      durationMs: Date.now() - startedAt,
+    });
     return response;
   };
 
@@ -307,7 +335,7 @@ export const POST = async (request: NextRequest) => {
   const accessToken = await getGoogleAccessToken();
 
   if (!session || !accessToken) {
-    return respond(jsonError(401, 'reconnect_required', 'Reconnect required.'));
+    return respond(summarizeError(401, API_ERROR_CODES.reconnectRequired, 'Reconnect required.'));
   }
 
   ctx.userHint = session.user?.email ? hashUserHint(session.user.email) : 'anon';
@@ -316,7 +344,7 @@ export const POST = async (request: NextRequest) => {
   const rateStatus = checkRateLimit(rateKey, { limit: 10, windowMs: 60_000 }, ctx);
   if (!rateStatus.allowed) {
     return respond(
-      jsonError(429, 'rate_limited', 'Too many requests. Try again in a moment.', {
+      summarizeError(429, API_ERROR_CODES.rateLimited, 'Too many requests. Try again in a moment.', {
         retryAfterMs: rateStatus.resetMs,
       }),
     );
@@ -325,13 +353,18 @@ export const POST = async (request: NextRequest) => {
   let body: SummarizeRequest | null = null;
   try {
     const parsed = SummarizeRequestSchema.safeParse(await request.json());
-    body = parsed.success ? parsed.data : null;
+    if (!parsed.success) {
+      return respond(
+        summarizeError(400, API_ERROR_CODES.invalidRequest, 'Invalid request payload.', { issues: parsed.error.issues }),
+      );
+    }
+    body = parsed.data;
   } catch {
-    return respond(jsonError(400, 'invalid_request', 'Invalid request payload.'));
+    return respond(summarizeError(400, API_ERROR_CODES.invalidRequest, 'Invalid request payload.'));
   }
 
   if (!body) {
-    return respond(jsonError(400, 'invalid_request', 'Invalid request payload.'));
+    return respond(summarizeError(400, API_ERROR_CODES.invalidRequest, 'Invalid request payload.'));
   }
 
   const result = await summarizeTimelineItems({

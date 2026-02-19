@@ -58,6 +58,46 @@ describe('POST /api/timeline/summarize', () => {
     expect(response.status).toBe(401);
   });
 
+
+  it('returns drive_not_provisioned when session has no drive folder', async () => {
+    mockGetGoogleSession.mockResolvedValue({ user: { email: 'test@example.com' } } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+
+    const response = await POST(
+      new Request('http://localhost/api/timeline/summarize', {
+        method: 'POST',
+        body: JSON.stringify({ items: [{ source: 'gmail', id: 'id-1' }] }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'drive_not_provisioned',
+      error_code: 'drive_not_provisioned',
+    });
+  });
+
+  it('returns invalid_request with details for invalid payload shape', async () => {
+    mockGetGoogleSession.mockResolvedValue({ driveFolderId: 'folder-1', user: { email: 'test@example.com' } } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+
+    const response = await POST(
+      new Request('http://localhost/api/timeline/summarize', {
+        method: 'POST',
+        body: JSON.stringify({ items: [{ id: 'id-1' }] }),
+      }) as never,
+    );
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'invalid_request',
+      error_code: 'invalid_request',
+      details: {
+        issues: expect.any(Array),
+      },
+    });
+  });
+
   it('returns provider_not_configured when provider credentials are missing', async () => {
     mockGetGoogleSession.mockResolvedValue({ driveFolderId: 'folder-1' } as never);
     mockGetGoogleAccessToken.mockResolvedValue('token');
@@ -80,7 +120,7 @@ describe('POST /api/timeline/summarize', () => {
     );
 
     expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toMatchObject({ error_code: 'provider_not_configured' });
+    await expect(response.json()).resolves.toMatchObject({ error: 'provider_not_configured', error_code: 'provider_not_configured' });
   });
 
   it('returns provider_bad_output when provider output is malformed', async () => {
@@ -111,7 +151,7 @@ describe('POST /api/timeline/summarize', () => {
     );
 
     expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toMatchObject({ error_code: 'provider_bad_output' });
+    await expect(response.json()).resolves.toMatchObject({ error: 'provider_bad_output', error_code: 'provider_bad_output' });
   });
 
   it('returns summary artifacts with selected provider model', async () => {
@@ -155,6 +195,7 @@ describe('POST /api/timeline/summarize', () => {
     const payload = await response.json();
 
     expect(response.status).toBe(200);
+    expect(payload).toMatchObject({ artifacts: expect.any(Array), failed: expect.any(Array) });
     expect(payload.artifacts[0].model).toBe('stub-model');
     expect(payload.artifacts[0].contentDateISO).toBe('2024-04-15T10:30:00Z');
     expect(mockWriteArtifactToDrive).toHaveBeenCalledWith(
