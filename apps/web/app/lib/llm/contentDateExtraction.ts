@@ -12,7 +12,9 @@ export type DateExtractionInput = {
 };
 
 export const extractContentDate = async (input: DateExtractionInput, settings: AdminSettings) => {
-  switch (settings.provider) {
+  const provider = settings.routing.tasks?.summarize?.provider ?? settings.routing.default.provider;
+
+  switch (provider) {
     case 'stub':
       return extractContentDateWithStub(input);
     case 'openai':
@@ -20,7 +22,7 @@ export const extractContentDate = async (input: DateExtractionInput, settings: A
     case 'gemini':
       return extractContentDateWithGemini(input, settings);
     default: {
-      const exhaustive: never = settings.provider;
+      const exhaustive: never = provider;
       return exhaustive;
     }
   }
