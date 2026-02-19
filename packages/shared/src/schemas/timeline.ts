@@ -265,15 +265,67 @@ export const DriveSelectionSetJsonSchema = SelectionSetSchema.extend({
 export const AdminSettingsSchema = z
   .object({
     type: z.literal('admin_settings'),
-    version: z.literal(1),
-    provider: z.enum(['stub', 'openai', 'gemini']),
-    model: z.string(),
-    systemPrompt: z.string(),
-    summaryPromptTemplate: z.string().optional(),
-    highlightsPromptTemplate: z.string().optional(),
-    maxOutputTokens: z.number().optional(),
-    maxContextItems: z.number(),
-    temperature: z.number(),
+    version: z.literal(2),
+    routing: z
+      .object({
+        default: z
+          .object({
+            provider: z.enum(['stub', 'openai', 'gemini']),
+            model: z.string(),
+          })
+          .strict(),
+        tasks: z
+          .object({
+            chat: z
+              .object({
+                provider: z.enum(['stub', 'openai', 'gemini']),
+                model: z.string(),
+              })
+              .strict()
+              .optional(),
+            summarize: z
+              .object({
+                provider: z.enum(['stub', 'openai', 'gemini']),
+                model: z.string(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict()
+          .optional(),
+      })
+      .strict(),
+    prompts: z
+      .object({
+        system: z.string(),
+        chatPromptTemplate: z.string().optional(),
+        summarizePromptTemplate: z.string().optional(),
+        highlightsPromptTemplate: z.string().optional(),
+      })
+      .strict(),
+    tasks: z
+      .object({
+        chat: z
+          .object({
+            temperature: z.number(),
+            maxContextItems: z.number(),
+            maxOutputTokens: z.number().optional(),
+          })
+          .strict(),
+        summarize: z
+          .object({
+            temperature: z.number(),
+            maxContextItems: z.number(),
+            maxOutputTokens: z.number().optional(),
+          })
+          .strict(),
+      })
+      .strict(),
+    safety: z
+      .object({
+        mode: z.enum(['standard', 'strict']),
+      })
+      .strict(),
     updatedAtISO: isoDateString,
   })
   .strict();

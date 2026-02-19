@@ -21,6 +21,7 @@ import { hashUserHint, logError, logInfo, logWarn, safeError, time, type LogCont
 import { createCtx, withRequestId } from '../../../lib/requestContext';
 import { ProviderError } from '../../../lib/llm/providerErrors';
 import { getTimelineProviderFromDrive } from '../../../lib/llm/providerRouter';
+import { createDefaultAdminSettings, normalizeAdminSettings } from '../../../lib/adminSettings';
 import { upsertArtifactIndex } from '../../../lib/timeline/artifactIndex';
 import { canonicalizeEntities, readEntityAliasesFromDrive } from '../../../lib/entities/aliases';
 
@@ -172,7 +173,7 @@ export const summarizeTimelineItems = async (
   try {
     const providerResult = await getTimelineProviderFromDrive(drive, driveFolderId, ctx);
     timelineProvider = providerResult.provider;
-    settings = providerResult.settings;
+    settings = normalizeAdminSettings(providerResult.settings) ?? createDefaultAdminSettings();
   } catch (error) {
     if (error instanceof ProviderError && error.code === 'not_configured') {
       return {
@@ -188,6 +189,14 @@ export const summarizeTimelineItems = async (
   for (const item of items) {
     try {
       const resolved = await resolveSourceContent(drive, gmail, item, driveFolderId);
+      const summarizeRouting = settings.routing.tasks?.summarize ?? settings.routing.default;
+      const summarizeSettings = {
+        ...settings,
+        routing: {
+          ...settings.routing,
+          default: summarizeRouting,
+        },
+      };
 
       const { summary, highlights, evidence, dateConfidence, contentDateISO, model, suggestedActions, entities, decisions, openLoops, risks, participants, tags, topics } = await time(ctx, 'summarize', async () =>
         timelineProvider.summarize(
@@ -197,7 +206,7 @@ export const summarizeTimelineItems = async (
             source: resolved.source,
             sourceMetadata: resolved.metadata,
           },
-          settings,
+          summarizeSettings,
         ),
       );
 

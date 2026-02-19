@@ -102,12 +102,12 @@ const buildUserPrompt = (
   metadata: string,
   settings: AdminSettings,
 ) => {
-  const summaryPrompt = settings.summaryPromptTemplate?.trim()
-    ? renderTemplate(settings.summaryPromptTemplate, { title, text, source, metadata })
-    : `${settings.systemPrompt}\n${defaultSummaryPrompt}`.trim();
-  const highlightsPrompt = settings.highlightsPromptTemplate?.trim()
-    ? renderTemplate(settings.highlightsPromptTemplate, { title, text, source, metadata })
-    : `${settings.systemPrompt}\n${defaultHighlightsPrompt}`.trim();
+  const summaryPrompt = settings.prompts.summarizePromptTemplate?.trim()
+    ? renderTemplate(settings.prompts.summarizePromptTemplate, { title, text, source, metadata })
+    : `${settings.prompts.system}\n${defaultSummaryPrompt}`.trim();
+  const highlightsPrompt = settings.prompts.highlightsPromptTemplate?.trim()
+    ? renderTemplate(settings.prompts.highlightsPromptTemplate, { title, text, source, metadata })
+    : `${settings.prompts.system}\n${defaultHighlightsPrompt}`.trim();
 
   return [
     `${summaryPrompt}`,
@@ -180,13 +180,13 @@ const callChatCompletionFallback = async (
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: settings.model,
+      model: settings.routing.default.model,
       messages: [
-        { role: 'system', content: `${settings.systemPrompt}\n${systemInstruction}`.trim() },
+        { role: 'system', content: `${settings.prompts.system}\n${systemInstruction}`.trim() },
         { role: 'user', content: userPrompt },
       ],
-      temperature: settings.temperature,
-      ...(settings.maxOutputTokens ? { max_tokens: settings.maxOutputTokens } : {}),
+      temperature: settings.tasks.summarize.temperature,
+      ...(settings.tasks.summarize.maxOutputTokens ? { max_tokens: settings.tasks.summarize.maxOutputTokens } : {}),
     }),
   });
 
@@ -224,19 +224,19 @@ const callResponsesApi = async (
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: settings.model,
+      model: settings.routing.default.model,
       input: [
         {
           role: 'system',
-          content: `${settings.systemPrompt}\n${systemInstruction}`.trim(),
+          content: `${settings.prompts.system}\n${systemInstruction}`.trim(),
         },
         {
           role: 'user',
           content: userPrompt,
         },
       ],
-      temperature: settings.temperature,
-      ...(settings.maxOutputTokens ? { max_output_tokens: settings.maxOutputTokens } : {}),
+      temperature: settings.tasks.summarize.temperature,
+      ...(settings.tasks.summarize.maxOutputTokens ? { max_output_tokens: settings.tasks.summarize.maxOutputTokens } : {}),
     }),
   });
 
@@ -301,7 +301,7 @@ export const openaiTimelineProvider: TimelineProvider = {
       evidence: parsed.evidence,
       dateConfidence: parsed.dateConfidence,
       contentDateISO: parsed.contentDateISO,
-      model: settings.model,
+      model: settings.routing.default.model,
       suggestedActions: parsed.suggestedActions,
     };
   },

@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { parseApiError } from '../../lib/apiErrors';
 import type { AdminSettings } from '../../lib/adminSettings';
-import { DEFAULT_ADMIN_SETTINGS } from '../../lib/adminSettings';
+import { DEFAULT_ADMIN_SETTINGS, normalizeAdminSettings } from '../../lib/adminSettings';
 import styles from './page.module.css';
 
 type Status = 'loading' | 'ready' | 'error' | 'reconnect';
@@ -66,23 +66,25 @@ export default function AdminSettingsForm() {
 
   const validation = useMemo(() => {
     const errors: string[] = [];
-    if (!settings.provider) {
-      errors.push('Provider is required.');
+    if (!settings.routing.default.provider) {
+      errors.push('Default provider is required.');
     }
-    if (!settings.model.trim()) {
-      errors.push('Model is required.');
+    if (!settings.routing.default.model.trim()) {
+      errors.push('Default model is required.');
     }
-    if (!(settings.temperature >= 0 && settings.temperature <= 2)) {
-      errors.push('Temperature must be between 0 and 2.');
-    }
-    if (!Number.isInteger(settings.maxContextItems) || settings.maxContextItems <= 0) {
-      errors.push('Max context items must be a positive integer.');
-    }
-    if (
-      settings.maxOutputTokens !== undefined &&
-      (!Number.isInteger(settings.maxOutputTokens) || settings.maxOutputTokens <= 0)
-    ) {
-      errors.push('Max output tokens must be a positive integer when provided.');
+    for (const task of ['chat', 'summarize'] as const) {
+      if (!(settings.tasks[task].temperature >= 0 && settings.tasks[task].temperature <= 2)) {
+        errors.push(`${task} temperature must be between 0 and 2.`);
+      }
+      if (!Number.isInteger(settings.tasks[task].maxContextItems) || settings.tasks[task].maxContextItems <= 0) {
+        errors.push(`${task} max context items must be a positive integer.`);
+      }
+      if (
+        settings.tasks[task].maxOutputTokens !== undefined &&
+        (!Number.isInteger(settings.tasks[task].maxOutputTokens) || settings.tasks[task].maxOutputTokens <= 0)
+      ) {
+        errors.push(`${task} max output tokens must be a positive integer when provided.`);
+      }
     }
     return errors;
   }, [settings]);
@@ -103,7 +105,7 @@ export default function AdminSettingsForm() {
         return;
       }
       const payload = (await response.json()) as { settings: AdminSettings };
-      setSettings(payload.settings);
+      setSettings(normalizeAdminSettings(payload.settings) ?? defaultSettings);
       setStatus('ready');
     } catch (error) {
       setStatus('error');
@@ -115,9 +117,9 @@ export default function AdminSettingsForm() {
     void loadSettings();
   }, [loadSettings]);
 
-  const updateField = <K extends keyof AdminSettings>(key: K, value: AdminSettings[K]) => {
+  const updateSettings = (next: AdminSettings) => {
     setSaved(false);
-    setSettings((current) => ({ ...current, [key]: value }));
+    setSettings(next);
   };
 
   const handleSave = async () => {
@@ -135,14 +137,10 @@ export default function AdminSettingsForm() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          provider: settings.provider,
-          model: settings.model,
-          systemPrompt: settings.systemPrompt,
-          summaryPromptTemplate: settings.summaryPromptTemplate,
-          highlightsPromptTemplate: settings.highlightsPromptTemplate,
-          maxOutputTokens: settings.maxOutputTokens,
-          maxContextItems: settings.maxContextItems,
-          temperature: settings.temperature,
+          routing: settings.routing,
+          prompts: settings.prompts,
+          tasks: settings.tasks,
+          safety: settings.safety,
         }),
       });
 
@@ -180,13 +178,13 @@ export default function AdminSettingsForm() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          provider: settings.provider,
-          model: settings.model,
-          systemPrompt: settings.systemPrompt,
-          summaryPromptTemplate: settings.summaryPromptTemplate,
-          highlightsPromptTemplate: settings.highlightsPromptTemplate,
-          maxOutputTokens: settings.maxOutputTokens,
-          temperature: settings.temperature,
+          provider: settings.routing.default.provider,
+          model: settings.routing.default.model,
+          systemPrompt: settings.prompts.system,
+          summarizePromptTemplate: settings.prompts.summarizePromptTemplate,
+          highlightsPromptTemplate: settings.prompts.highlightsPromptTemplate,
+          maxOutputTokens: settings.tasks.summarize.maxOutputTokens,
+          temperature: settings.tasks.summarize.temperature,
         }),
       });
 
@@ -203,7 +201,6 @@ export default function AdminSettingsForm() {
       setIsTesting(false);
     }
   };
-
 
   const handleBackfill = async () => {
     if (!enableBackfill) {
@@ -236,194 +233,74 @@ export default function AdminSettingsForm() {
     }
   };
 
-  if (status === 'loading') {
-    return <p className={styles.notice}>Loading settings…</p>;
-  }
-
-  if (status === 'reconnect') {
-    return <p className={styles.notice}>Please reconnect to manage admin settings.</p>;
-  }
+  if (status === 'loading') return <p className={styles.notice}>Loading settings…</p>;
+  if (status === 'reconnect') return <p className={styles.notice}>Please reconnect to manage admin settings.</p>;
 
   return (
     <div className={styles.form}>
       {errorMessage ? <div className={styles.error}>{errorMessage}</div> : null}
       {saved ? <p className={styles.saved}>Saved.</p> : null}
-      {validation.length > 0 ? (
-        <ul className={styles.validation}>
-          {validation.map((error) => (
-            <li key={error}>{error}</li>
-          ))}
-        </ul>
-      ) : null}
+      {validation.length > 0 ? <ul className={styles.validation}>{validation.map((error) => <li key={error}>{error}</li>)}</ul> : null}
 
-      <label className={styles.field}>
-        <span>Provider</span>
-        <select
-          value={settings.provider}
-          onChange={(event) => updateField('provider', event.target.value as AdminSettings['provider'])}
-        >
-          <option value="stub">stub</option>
-          <option value="openai">openai</option>
-          <option value="gemini">gemini</option>
-        </select>
-      </label>
+      <h3>Model routing</h3>
+      <label className={styles.field}><span>Default provider</span><select value={settings.routing.default.provider} onChange={(event) => updateSettings({ ...settings, routing: { ...settings.routing, default: { ...settings.routing.default, provider: event.target.value as AdminSettings['routing']['default']['provider'] } } })}><option value="stub">stub</option><option value="openai">openai</option><option value="gemini">gemini</option></select></label>
+      <label className={styles.field}><span>Default model</span><input type="text" value={settings.routing.default.model} onChange={(event) => updateSettings({ ...settings, routing: { ...settings.routing, default: { ...settings.routing.default, model: event.target.value } } })} /></label>
 
-      <label className={styles.field}>
-        <span>Model</span>
-        <input type="text" value={settings.model} onChange={(event) => updateField('model', event.target.value)} />
-      </label>
+      <label className={styles.inlineField}><input type="checkbox" checked={Boolean(settings.routing.tasks?.chat)} onChange={(event) => updateSettings({ ...settings, routing: { ...settings.routing, tasks: event.target.checked ? { ...settings.routing.tasks, chat: settings.routing.tasks?.chat ?? { ...settings.routing.default } } : { ...settings.routing.tasks, chat: undefined } } })} /><span>Override chat routing</span></label>
+      {settings.routing.tasks?.chat ? <><label className={styles.field}><span>Chat provider</span><select value={settings.routing.tasks.chat.provider} onChange={(event) => updateSettings({ ...settings, routing: { ...settings.routing, tasks: { ...settings.routing.tasks, chat: { ...settings.routing.tasks!.chat!, provider: event.target.value as AdminSettings['routing']['default']['provider'] } } } })}><option value="stub">stub</option><option value="openai">openai</option><option value="gemini">gemini</option></select></label><label className={styles.field}><span>Chat model</span><input type="text" value={settings.routing.tasks.chat.model} onChange={(event) => updateSettings({ ...settings, routing: { ...settings.routing, tasks: { ...settings.routing.tasks, chat: { ...settings.routing.tasks!.chat!, model: event.target.value } } } })} /></label></> : null}
 
-      <label className={styles.field}>
-        <span>Temperature</span>
-        <input
-          type="number"
-          step="0.1"
-          min={0}
-          max={2}
-          value={settings.temperature}
-          onChange={(event) => updateField('temperature', toFloat(event.target.value))}
-        />
-      </label>
+      <label className={styles.inlineField}><input type="checkbox" checked={Boolean(settings.routing.tasks?.summarize)} onChange={(event) => updateSettings({ ...settings, routing: { ...settings.routing, tasks: event.target.checked ? { ...settings.routing.tasks, summarize: settings.routing.tasks?.summarize ?? { ...settings.routing.default } } : { ...settings.routing.tasks, summarize: undefined } } })} /><span>Override summarize routing</span></label>
+      {settings.routing.tasks?.summarize ? <><label className={styles.field}><span>Summarize provider</span><select value={settings.routing.tasks.summarize.provider} onChange={(event) => updateSettings({ ...settings, routing: { ...settings.routing, tasks: { ...settings.routing.tasks, summarize: { ...settings.routing.tasks!.summarize!, provider: event.target.value as AdminSettings['routing']['default']['provider'] } } } })}><option value="stub">stub</option><option value="openai">openai</option><option value="gemini">gemini</option></select></label><label className={styles.field}><span>Summarize model</span><input type="text" value={settings.routing.tasks.summarize.model} onChange={(event) => updateSettings({ ...settings, routing: { ...settings.routing, tasks: { ...settings.routing.tasks, summarize: { ...settings.routing.tasks!.summarize!, model: event.target.value } } } })} /></label></> : null}
 
-      <label className={styles.field}>
-        <span>Max context items</span>
-        <input
-          type="number"
-          min={1}
-          value={settings.maxContextItems}
-          onChange={(event) => updateField('maxContextItems', toPositiveInteger(event.target.value))}
-        />
-      </label>
+      <h3>Task budgets</h3>
+      {(['chat', 'summarize'] as const).map((task) => (
+        <div key={task}>
+          <p>{task}</p>
+          <label className={styles.field}><span>Temperature</span><input type="number" step="0.1" min={0} max={2} value={settings.tasks[task].temperature} onChange={(event) => updateSettings({ ...settings, tasks: { ...settings.tasks, [task]: { ...settings.tasks[task], temperature: toFloat(event.target.value) } } })} /></label>
+          <label className={styles.field}><span>Max context items</span><input type="number" min={1} value={settings.tasks[task].maxContextItems} onChange={(event) => updateSettings({ ...settings, tasks: { ...settings.tasks, [task]: { ...settings.tasks[task], maxContextItems: toPositiveInteger(event.target.value) } } })} /></label>
+          <label className={styles.field}><span>Max output tokens (optional)</span><input type="number" min={1} value={settings.tasks[task].maxOutputTokens ?? ''} onChange={(event) => updateSettings({ ...settings, tasks: { ...settings.tasks, [task]: { ...settings.tasks[task], maxOutputTokens: event.target.value.trim() ? toPositiveInteger(event.target.value) : undefined } } })} /></label>
+        </div>
+      ))}
 
-      <label className={styles.field}>
-        <span>Max output tokens (optional)</span>
-        <input
-          type="number"
-          min={1}
-          value={settings.maxOutputTokens ?? ''}
-          onChange={(event) =>
-            updateField(
-              'maxOutputTokens',
-              event.target.value.trim() ? toPositiveInteger(event.target.value) : undefined,
-            )
-          }
-        />
-      </label>
+      <h3>Prompts</h3>
+      <label className={styles.field}><span>System prompt</span><textarea rows={5} value={settings.prompts.system} onChange={(event) => updateSettings({ ...settings, prompts: { ...settings.prompts, system: event.target.value } })} /></label>
+      <label className={styles.field}><span>Chat prompt template (optional)</span><textarea rows={4} value={settings.prompts.chatPromptTemplate ?? ''} onChange={(event) => updateSettings({ ...settings, prompts: { ...settings.prompts, chatPromptTemplate: event.target.value } })} /></label>
+      <label className={styles.field}><span>Summarize prompt template (optional)</span><textarea rows={4} value={settings.prompts.summarizePromptTemplate ?? ''} onChange={(event) => updateSettings({ ...settings, prompts: { ...settings.prompts, summarizePromptTemplate: event.target.value } })} /></label>
+      <label className={styles.field}><span>Highlights prompt template (optional)</span><textarea rows={4} value={settings.prompts.highlightsPromptTemplate ?? ''} onChange={(event) => updateSettings({ ...settings, prompts: { ...settings.prompts, highlightsPromptTemplate: event.target.value } })} /></label>
 
-      <label className={styles.field}>
-        <span>System prompt</span>
-        <textarea
-          rows={5}
-          value={settings.systemPrompt}
-          onChange={(event) => updateField('systemPrompt', event.target.value)}
-        />
-      </label>
+      <label className={styles.field}><span>Safety mode</span><select value={settings.safety.mode} onChange={(event) => updateSettings({ ...settings, safety: { mode: event.target.value as AdminSettings['safety']['mode'] } })}><option value="standard">standard</option><option value="strict">strict</option></select></label>
 
-      <label className={styles.field}>
-        <span>Summary prompt template (optional)</span>
-        <textarea
-          rows={4}
-          value={settings.summaryPromptTemplate ?? ''}
-          onChange={(event) => updateField('summaryPromptTemplate', event.target.value)}
-        />
-      </label>
-
-      <label className={styles.field}>
-        <span>Highlights prompt template (optional)</span>
-        <textarea
-          rows={4}
-          value={settings.highlightsPromptTemplate ?? ''}
-          onChange={(event) => updateField('highlightsPromptTemplate', event.target.value)}
-        />
-      </label>
-
-      <p className={styles.helper}>
-        Supported template tokens: {'{title}'}, {'{text}'}, {'{source}'}, {'{metadata}'}.
-      </p>
+      <p className={styles.helper}>Supported template tokens: {'{title}'}, {'{text}'}, {'{source}'}, {'{metadata}'}.</p>
 
       <div className={styles.actions}>
-        <button type="button" onClick={handleSave} disabled={isSaving}>
-          {isSaving ? 'Saving…' : 'Save'}
-        </button>
-        <button type="button" onClick={handleTest} disabled={isTesting}>
-          {isTesting ? 'Testing…' : 'Test current settings'}
-        </button>
+        <button type="button" onClick={handleSave} disabled={isSaving}>{isSaving ? 'Saving…' : 'Save'}</button>
+        <button type="button" onClick={handleTest} disabled={isTesting}>{isTesting ? 'Testing…' : 'Test current settings'}</button>
       </div>
 
-      {testResult ? (
-        <div className={styles.result}>
-          <p>
-            <strong>
-              {testResult.provider} / {testResult.model}
-            </strong>{' '}
-            ({testResult.timings.ms} ms)
-          </p>
-          <p>{testResult.summary}</p>
-          {testResult.highlights.length > 0 ? (
-            <ul>
-              {testResult.highlights.map((highlight) => (
-                <li key={highlight}>{highlight}</li>
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      ) : null}
+      {testResult ? (<div className={styles.result}><p><strong>{testResult.provider} / {testResult.model}</strong> ({testResult.timings.ms} ms)</p><p>{testResult.summary}</p>{testResult.highlights.length > 0 ? (<ul>{testResult.highlights.map((highlight) => (<li key={highlight}>{highlight}</li>))}</ul>) : null}</div>) : null}
 
       <section className={styles.maintenanceSection}>
         <h3 className={styles.maintenanceTitle}>Maintenance</h3>
         <label className={styles.inlineField}>
-          <input
-            type="checkbox"
-            checked={enableBackfill}
-            onChange={(event) => setEnableBackfill(event.target.checked)}
-          />
+          <input type="checkbox" checked={enableBackfill} onChange={(event) => setEnableBackfill(event.target.checked)} />
           <span>Backfill content dates for existing summaries</span>
         </label>
 
         <div className={styles.maintenanceControls}>
           <label className={styles.inlineField}>
-            <input
-              type="checkbox"
-              checked={backfillDryRun}
-              onChange={(event) => setBackfillDryRun(event.target.checked)}
-            />
+            <input type="checkbox" checked={backfillDryRun} onChange={(event) => setBackfillDryRun(event.target.checked)} />
             <span>Dry run</span>
           </label>
 
           <label className={styles.inlineField}>
             <span>Limit</span>
-            <select
-              value={backfillLimit}
-              onChange={(event) => setBackfillLimit(Number(event.target.value) as 10 | 25)}
-            >
-              <option value={10}>10</option>
-              <option value={25}>25</option>
-            </select>
+            <select value={backfillLimit} onChange={(event) => setBackfillLimit(Number(event.target.value) as 10 | 25)}><option value={10}>10</option><option value={25}>25</option></select>
           </label>
 
-          <button type="button" onClick={handleBackfill} disabled={isRunningBackfill || !enableBackfill}>
-            {isRunningBackfill ? 'Running…' : 'Run backfill'}
-          </button>
+          <button type="button" onClick={handleBackfill} disabled={isRunningBackfill || !enableBackfill}>{isRunningBackfill ? 'Running…' : 'Run backfill'}</button>
         </div>
 
-        {backfillResult ? (
-          <div className={styles.result}>
-            <p>
-              scanned: {backfillResult.scanned} · updated: {backfillResult.updated} · skipped:{' '}
-              {backfillResult.skippedAlreadyHasDate} · no date found: {backfillResult.noDateFound}
-            </p>
-            <ul>
-              {backfillResult.items.slice(0, 10).map((item) => (
-                <li key={item.fileId}>
-                  <a href={`https://drive.google.com/file/d/${item.fileId}/view`} target="_blank" rel="noreferrer">
-                    {item.title}
-                  </a>{' '}
-                  — {item.status} ({item.before ?? 'none'} → {item.after ?? 'none'})
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : null}
+        {backfillResult ? (<div className={styles.result}><p>scanned: {backfillResult.scanned} · updated: {backfillResult.updated} · skipped: {backfillResult.skippedAlreadyHasDate} · no date found: {backfillResult.noDateFound}</p><ul>{backfillResult.items.slice(0, 10).map((item) => (<li key={item.fileId}><a href={`https://drive.google.com/file/d/${item.fileId}/view`} target="_blank" rel="noreferrer">{item.title}</a> — {item.status} ({item.before ?? 'none'} → {item.after ?? 'none'})</li>))}</ul></div>) : null}
       </section>
     </div>
   );

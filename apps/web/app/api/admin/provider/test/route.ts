@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { jsonError } from '../../../../lib/apiErrors';
 import { isAdminSession } from '../../../../lib/adminAuth';
 import type { AdminSettings } from '../../../../lib/adminSettings';
+import { createDefaultAdminSettings, normalizeAdminSettings } from '../../../../lib/adminSettings';
 import { readAdminSettingsFromDrive } from '../../../../lib/adminSettingsDrive';
 import { getGoogleAccessToken, getGoogleSession } from '../../../../lib/googleAuth';
 import { createDriveClient } from '../../../../lib/googleDrive';
@@ -18,7 +19,7 @@ type ProviderTestPayload = {
   provider?: 'stub' | 'openai' | 'gemini';
   model?: string;
   systemPrompt?: string;
-  summaryPromptTemplate?: string;
+  summarizePromptTemplate?: string;
   highlightsPromptTemplate?: string;
   maxOutputTokens?: number;
   temperature?: number;
@@ -37,7 +38,7 @@ const parseBody = (value: unknown): ProviderTestPayload | null => {
     'provider',
     'model',
     'systemPrompt',
-    'summaryPromptTemplate',
+    'summarizePromptTemplate',
     'highlightsPromptTemplate',
     'maxOutputTokens',
     'temperature',
@@ -57,11 +58,11 @@ const parseBody = (value: unknown): ProviderTestPayload | null => {
 
   const stringFields: Array<keyof Pick<
     ProviderTestPayload,
-    'model' | 'systemPrompt' | 'summaryPromptTemplate' | 'highlightsPromptTemplate' | 'sampleTitle' | 'sampleText' | 'sampleSource'
+    'model' | 'systemPrompt' | 'summarizePromptTemplate' | 'highlightsPromptTemplate' | 'sampleTitle' | 'sampleText' | 'sampleSource'
   >> = [
     'model',
     'systemPrompt',
-    'summaryPromptTemplate',
+    'summarizePromptTemplate',
     'highlightsPromptTemplate',
     'sampleTitle',
     'sampleText',
@@ -86,15 +87,39 @@ const parseBody = (value: unknown): ProviderTestPayload | null => {
 };
 
 const buildMergedSettings = (current: AdminSettings, overrides: ProviderTestPayload) => {
-  const next: AdminSettings = { ...current };
+  const next: AdminSettings = {
+    ...current,
+    routing: {
+      ...current.routing,
+      default: { ...current.routing.default },
+      ...(current.routing.tasks
+        ? {
+            tasks: {
+              ...(current.routing.tasks.chat ? { chat: { ...current.routing.tasks.chat } } : {}),
+              ...(current.routing.tasks.summarize
+                ? { summarize: { ...current.routing.tasks.summarize } }
+                : {}),
+            },
+          }
+        : {}),
+    },
+    prompts: { ...current.prompts },
+    tasks: {
+      chat: { ...current.tasks.chat },
+      summarize: { ...current.tasks.summarize },
+    },
+    safety: { ...current.safety },
+  };
 
-  if (overrides.provider !== undefined) next.provider = overrides.provider;
-  if (overrides.model !== undefined) next.model = overrides.model;
-  if (overrides.systemPrompt !== undefined) next.systemPrompt = overrides.systemPrompt;
-  if (overrides.summaryPromptTemplate !== undefined) next.summaryPromptTemplate = overrides.summaryPromptTemplate;
-  if (overrides.highlightsPromptTemplate !== undefined) next.highlightsPromptTemplate = overrides.highlightsPromptTemplate;
-  if (overrides.maxOutputTokens !== undefined) next.maxOutputTokens = overrides.maxOutputTokens;
-  if (overrides.temperature !== undefined) next.temperature = overrides.temperature;
+  if (overrides.provider !== undefined) next.routing.default.provider = overrides.provider;
+  if (overrides.model !== undefined) next.routing.default.model = overrides.model;
+  if (overrides.systemPrompt !== undefined) next.prompts.system = overrides.systemPrompt;
+  if (overrides.summarizePromptTemplate !== undefined)
+    next.prompts.summarizePromptTemplate = overrides.summarizePromptTemplate;
+  if (overrides.highlightsPromptTemplate !== undefined)
+    next.prompts.highlightsPromptTemplate = overrides.highlightsPromptTemplate;
+  if (overrides.maxOutputTokens !== undefined) next.tasks.summarize.maxOutputTokens = overrides.maxOutputTokens;
+  if (overrides.temperature !== undefined) next.tasks.summarize.temperature = overrides.temperature;
 
   return next;
 };
@@ -140,8 +165,9 @@ export const POST = async (request: NextRequest) => {
   try {
     const drive = createDriveClient(accessToken);
     const { settings: loadedSettings } = await readAdminSettingsFromDrive(drive, session.driveFolderId, ctx);
+    const baseSettings = normalizeAdminSettings(loadedSettings) ?? createDefaultAdminSettings();
 
-    const mergedSettings = buildMergedSettings(loadedSettings, parsedBody);
+    const mergedSettings = buildMergedSettings(baseSettings, parsedBody);
     const provider = getTimelineProviderForSettings(mergedSettings);
 
     const sampleTitle = parsedBody.sampleTitle ?? 'Test Document';
@@ -169,8 +195,8 @@ export const POST = async (request: NextRequest) => {
 
       return respond(
         NextResponse.json({
-          provider: mergedSettings.provider,
-          model: mergedSettings.model,
+          provider: mergedSettings.routing.default.provider,
+          model: mergedSettings.routing.default.model,
           summary: validated.summary,
           highlights: validated.highlights,
           timings,

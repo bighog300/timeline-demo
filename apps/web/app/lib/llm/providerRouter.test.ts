@@ -15,12 +15,14 @@ describe('timeline provider router', () => {
     mockReadAdminSettingsFromDrive.mockResolvedValue({
       settings: {
         type: 'admin_settings',
-        version: 1,
-        provider: 'stub',
-        model: 'stub-model',
-        systemPrompt: '',
-        maxContextItems: 8,
-        temperature: 0.2,
+        version: 2,
+        routing: { default: { provider: 'stub', model: 'stub-model' } },
+        prompts: { system: '' },
+        tasks: {
+          chat: { maxContextItems: 8, temperature: 0.2 },
+          summarize: { maxContextItems: 8, temperature: 0.2 },
+        },
+        safety: { mode: 'standard' },
         updatedAtISO: '2026-01-01T00:00:00Z',
       },
     } as never);
@@ -28,20 +30,49 @@ describe('timeline provider router', () => {
     const { provider, settings } = await getTimelineProviderFromDrive({} as never, 'folder-1');
     const result = await provider.summarize({ title: 'T', text: 'Body' }, settings);
 
-    expect(settings.provider).toBe('stub');
+    expect(settings.routing.default.provider).toBe('stub');
     expect(result.model).toBe('stub-model');
+  });
+
+  it('uses summarize task routing override when loading from drive', async () => {
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        type: 'admin_settings',
+        version: 2,
+        routing: {
+          default: { provider: 'stub', model: 'stub-model' },
+          tasks: {
+            summarize: { provider: 'openai', model: 'gpt-4o-mini' },
+          },
+        },
+        prompts: { system: '' },
+        tasks: {
+          chat: { maxContextItems: 8, temperature: 0.2 },
+          summarize: { maxContextItems: 8, temperature: 0.2 },
+        },
+        safety: { mode: 'standard' },
+        updatedAtISO: '2026-01-01T00:00:00Z',
+      },
+    } as never);
+
+    process.env.OPENAI_API_KEY = 'test';
+    const { provider } = await getTimelineProviderFromDrive({} as never, 'folder-1');
+    expect(provider).toBeDefined();
+    delete process.env.OPENAI_API_KEY;
   });
 
   it('uses AdminSettings.provider for selection', () => {
     process.env.OPENAI_API_KEY = 'test';
     const provider = getTimelineProviderForSettings({
       type: 'admin_settings',
-      version: 1,
-      provider: 'openai',
-      model: 'gpt-4o-mini',
-      systemPrompt: '',
-      maxContextItems: 8,
-      temperature: 0.2,
+      version: 2,
+      routing: { default: { provider: 'openai', model: 'gpt-4o-mini' } },
+      prompts: { system: '' },
+      tasks: {
+        chat: { maxContextItems: 8, temperature: 0.2 },
+        summarize: { maxContextItems: 8, temperature: 0.2 },
+      },
+      safety: { mode: 'standard' },
       updatedAtISO: '2026-01-01T00:00:00Z',
     });
 
@@ -55,12 +86,14 @@ describe('timeline provider router', () => {
     expect(() =>
       getTimelineProviderForSettings({
         type: 'admin_settings',
-        version: 1,
-        provider: 'openai',
-        model: 'gpt-4o-mini',
-        systemPrompt: '',
-        maxContextItems: 8,
-        temperature: 0.2,
+        version: 2,
+        routing: { default: { provider: 'openai', model: 'gpt-4o-mini' } },
+        prompts: { system: '' },
+        tasks: {
+          chat: { maxContextItems: 8, temperature: 0.2 },
+          summarize: { maxContextItems: 8, temperature: 0.2 },
+        },
+        safety: { mode: 'standard' },
         updatedAtISO: '2026-01-01T00:00:00Z',
       }),
     ).toThrowError(ProviderError);

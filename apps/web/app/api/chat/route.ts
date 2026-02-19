@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'crypto';
 
 import { isAdminSession } from '../../lib/adminAuth';
 import { readAdminSettingsFromDrive } from '../../lib/adminSettingsDrive';
+import { createDefaultAdminSettings, normalizeAdminSettings } from '../../lib/adminSettings';
 import {
   AppDriveFolderResolveError,
   resolveOrProvisionAppDriveFolder,
@@ -738,7 +739,7 @@ export async function POST(request: Request) {
 
   try {
     const result = await readAdminSettingsFromDrive(drive, driveFolderId, ctx);
-    adminSettings = result.settings;
+    adminSettings = normalizeAdminSettings(result.settings) ?? createDefaultAdminSettings();
   } catch (error) {
     logGoogleError(error, 'drive.files.get', ctx);
     const mapped = mapGoogleError(error, 'drive.files.get');
@@ -756,7 +757,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const maxContextItems = adminSettings?.maxContextItems;
+  const maxContextItems = adminSettings?.tasks?.chat?.maxContextItems;
   let contextPack;
   try {
     const contextBody =
@@ -811,12 +812,13 @@ export async function POST(request: Request) {
   const { context, items } = buildChatContextString(summaryItems);
   const summaryCount = summaryItems.length;
   const systemPrompt = buildChatSystemPrompt(
-    adminSettings?.systemPrompt ?? '',
+    adminSettings?.prompts?.system ?? '',
     effectiveAdvisorMode,
     effectiveSynthesisMode,
   );
-  const provider = adminSettings?.provider ?? 'stub';
-  const model = adminSettings?.model ?? 'stub';
+  const resolvedRouting = adminSettings?.routing?.tasks?.chat ?? adminSettings?.routing?.default;
+  const provider = resolvedRouting?.provider ?? 'stub';
+  const model = resolvedRouting?.model ?? 'stub';
 
   if ((effectiveSynthesisMode && summaryCount < 2) || summaryCount === 0) {
     return respond(
@@ -848,13 +850,21 @@ export async function POST(request: Request) {
         ? 'Return STRICT JSON only with shape {"occurrences":[{"who":"...","action":"...","when":null,"where":null,"evidence":"...","citations":[1]}],"notes":null}. Extract discrete occurrences needed to answer the counting question using summary sources only. Each occurrence MUST include at least one citation like [1] referencing SOURCE numbers. If evidence is insufficient to count reliably, return an empty occurrences array and explain uncertainty in notes. No prose outside JSON.'
         : buildOriginalsRouterPrompt(effectiveSynthesisMode),
     },
+    ...(adminSettings?.prompts?.chatPromptTemplate?.trim()
+      ? [
+          {
+            role: 'user' as const,
+            content: adminSettings?.prompts?.chatPromptTemplate ?? '',
+          },
+        ]
+      : []),
   ];
 
   const llmRequest = {
     model,
     systemPrompt,
     messages,
-    temperature: adminSettings?.temperature,
+    temperature: adminSettings?.tasks?.chat?.temperature,
   };
 
   let llmProvider: LLMProviderName = provider;
@@ -1059,7 +1069,7 @@ ${context}` }]
               'Return STRICT JSON only with shape {"entities":[{"id":"e1","type":"person|org|location|matter|document","canonical":"...","aliases":["..."],"confidence":"high|medium|low","citations":[1]}],"events":[{"id":"v1","dateISO":null,"dateLabel":"Unknown","actors":["e1"],"summary":"...","theme":"...","impact":"...","citations":[1]}]}. Entity normalization: prefer Name <email> when email appears; otherwise most complete name. Include aliases and mark uncertain links as possible aliases via low confidence aliases. Event grouping: keep only cited events and omit uncited events.',
           },
         ],
-        temperature: adminSettings?.temperature,
+        temperature: adminSettings?.tasks?.chat?.temperature,
       });
       const plan = parseSynthesisPlan(extraction.text, summaryCount);
       if (plan) {
@@ -1080,7 +1090,7 @@ ${JSON.stringify(plan)}` },
             },
             { role: 'user' as const, content: message || 'Synthesize recent timeline context.' },
           ],
-          temperature: adminSettings?.temperature,
+          temperature: adminSettings?.tasks?.chat?.temperature,
         });
         if (writeup.text.trim()) {
           synthesisPlanReply = writeup.text;
@@ -1174,7 +1184,7 @@ ${JSON.stringify(plan)}` },
           model: llmProvider === 'stub' ? 'stub' : model,
           systemPrompt,
           messages: pass2Messages,
-          temperature: adminSettings?.temperature,
+          temperature: adminSettings?.tasks?.chat?.temperature,
         });
         reply =
           pass2.text ||

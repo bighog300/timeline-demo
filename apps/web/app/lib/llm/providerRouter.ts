@@ -9,8 +9,13 @@ import { openaiTimelineProvider } from './providers/timelineOpenai';
 import { stubTimelineProvider } from './providers/timelineStub';
 import type { TimelineProvider } from './providers/types';
 
-export const getTimelineProviderForSettings = (settings: AdminSettings): TimelineProvider => {
-  switch (settings.provider) {
+export type ResolvedProviderModel = {
+  provider: AdminSettings['routing']['default']['provider'];
+  model: string;
+};
+
+export const getTimelineProviderForResolved = (resolved: ResolvedProviderModel): TimelineProvider => {
+  switch (resolved.provider) {
     case 'stub':
       return stubTimelineProvider;
     case 'openai':
@@ -34,11 +39,14 @@ export const getTimelineProviderForSettings = (settings: AdminSettings): Timelin
       }
       return geminiTimelineProvider;
     default: {
-      const exhaustive: never = settings.provider;
+      const exhaustive: never = resolved.provider;
       return exhaustive;
     }
   }
 };
+
+export const getTimelineProviderForSettings = (settings: AdminSettings): TimelineProvider =>
+  getTimelineProviderForResolved(settings.routing.default);
 
 export const getTimelineProviderFromDrive = async (
   drive: drive_v3.Drive,
@@ -46,6 +54,8 @@ export const getTimelineProviderFromDrive = async (
   ctx?: LogContext,
 ): Promise<{ provider: TimelineProvider; settings: AdminSettings }> => {
   const { settings } = await readAdminSettingsFromDrive(drive, driveFolderId, ctx);
-  const provider = getTimelineProviderForSettings(settings);
+  const provider = getTimelineProviderForResolved(
+    settings.routing.tasks?.summarize ?? settings.routing.default,
+  );
   return { provider, settings };
 };

@@ -206,6 +206,46 @@ describe('POST /api/timeline/summarize', () => {
     );
   });
 
+  it('uses routing.tasks.summarize override model when configured', async () => {
+    const summarize = vi.fn().mockResolvedValue({
+      summary: 'Summary text',
+      highlights: ['h1'],
+      model: 'gemini-1.5-flash',
+    });
+
+    mockGetTimelineProviderFromDrive.mockResolvedValue({
+      provider: { summarize } as never,
+      settings: {
+        type: 'admin_settings',
+        version: 2,
+        routing: {
+          default: { provider: 'openai', model: 'gpt-4o-mini' },
+          tasks: { summarize: { provider: 'gemini', model: 'gemini-1.5-flash' } },
+        },
+        prompts: { system: '' },
+        tasks: {
+          chat: { maxContextItems: 8, temperature: 0.2 },
+          summarize: { maxContextItems: 8, temperature: 0.2 },
+        },
+        safety: { mode: 'standard' },
+        updatedAtISO: '2026-01-01T00:00:00Z',
+      },
+    });
+
+    const response = await POST(
+      new Request('http://localhost/api/timeline/summarize', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ items: [{ source: 'gmail', id: 'msg-1' }] }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(summarize).toHaveBeenCalled();
+    const [, settingsArg] = summarize.mock.calls[0] as [unknown, { routing: { default: { model: string } } }];
+    expect(settingsArg.routing.default.model).toBe('gemini-1.5-flash');
+  });
+
   it('persists suggestedActions with generated ids and proposed status', async () => {
     mockGetGoogleSession.mockResolvedValue({ driveFolderId: 'folder-1', user: { email: 'test@example.com' } } as never);
     mockGetGoogleAccessToken.mockResolvedValue('token');
