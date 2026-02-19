@@ -20,8 +20,8 @@ describe('readAdminSettingsFromDrive', () => {
 
     const result = await readAdminSettingsFromDrive(drive as never, 'folder-1');
 
-    expect(result.settings.provider).toBe('stub');
-    expect(result.settings.model).toBe(createDefaultAdminSettings().model);
+    expect(result.settings.routing.default.provider).toBe('stub');
+    expect(result.settings.routing.default.model).toBe(createDefaultAdminSettings().routing.default.model);
     expect(result.fileId).toBeUndefined();
   });
 
@@ -45,8 +45,10 @@ describe('readAdminSettingsFromDrive', () => {
 
     const result = await readAdminSettingsFromDrive(drive as never, 'folder-1');
 
-    expect(result.settings.provider).toBe('openai');
-    expect(result.settings.model).toBe('gpt-4o');
+    expect(result.settings.routing.default.provider).toBe('openai');
+    expect(result.settings.routing.default.model).toBe('gpt-4o');
+    expect(result.settings.tasks.chat.maxContextItems).toBe(6);
+    expect(result.settings.tasks.summarize.maxContextItems).toBe(6);
     expect(result.fileId).toBe('file-1');
     expect(result.webViewLink).toBe('https://drive.test/file-1');
   });

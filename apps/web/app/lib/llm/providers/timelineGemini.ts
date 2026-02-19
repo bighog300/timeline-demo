@@ -102,12 +102,12 @@ const buildUserPrompt = (
   metadata: string,
   settings: AdminSettings,
 ) => {
-  const summaryPrompt = settings.summaryPromptTemplate?.trim()
-    ? renderTemplate(settings.summaryPromptTemplate, { title, text, source, metadata })
-    : `${settings.systemPrompt}\n${defaultSummaryPrompt}`.trim();
-  const highlightsPrompt = settings.highlightsPromptTemplate?.trim()
-    ? renderTemplate(settings.highlightsPromptTemplate, { title, text, source, metadata })
-    : `${settings.systemPrompt}\n${defaultHighlightsPrompt}`.trim();
+  const summaryPrompt = settings.prompts.summarizePromptTemplate?.trim()
+    ? renderTemplate(settings.prompts.summarizePromptTemplate, { title, text, source, metadata })
+    : `${settings.prompts.system}\n${defaultSummaryPrompt}`.trim();
+  const highlightsPrompt = settings.prompts.highlightsPromptTemplate?.trim()
+    ? renderTemplate(settings.prompts.highlightsPromptTemplate, { title, text, source, metadata })
+    : `${settings.prompts.system}\n${defaultHighlightsPrompt}`.trim();
 
   return [
     `${summaryPrompt}`,
@@ -166,7 +166,7 @@ const callGemini = async (
   }
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.model)}:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.routing.default.model)}:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: {
@@ -174,12 +174,12 @@ const callGemini = async (
       },
       body: JSON.stringify({
         systemInstruction: {
-          parts: [{ text: `${settings.systemPrompt}\n${instruction}`.trim() }],
+          parts: [{ text: `${settings.prompts.system}\n${instruction}`.trim() }],
         },
         contents: [{ parts: [{ text: userPrompt }] }],
         generationConfig: {
-          temperature: settings.temperature,
-          ...(settings.maxOutputTokens ? { maxOutputTokens: settings.maxOutputTokens } : {}),
+          temperature: settings.tasks.summarize.temperature,
+          ...(settings.tasks.summarize.maxOutputTokens ? { maxOutputTokens: settings.tasks.summarize.maxOutputTokens } : {}),
         },
       }),
     },
@@ -233,7 +233,7 @@ export const geminiTimelineProvider: TimelineProvider = {
       evidence: parsed.evidence,
       dateConfidence: parsed.dateConfidence,
       contentDateISO: parsed.contentDateISO,
-      model: settings.model,
+      model: settings.routing.default.model,
       suggestedActions: parsed.suggestedActions,
     };
   },

@@ -264,6 +264,46 @@ describe('POST /api/chat', () => {
     expect(payload.requestId).toEqual(expect.any(String));
   });
 
+  it('uses routing.tasks.chat override for provider metadata', async () => {
+    mockGetGoogleSession.mockResolvedValue({
+      driveFolderId: 'folder-1',
+      user: { email: 'person@example.com' },
+    } as never);
+    mockGetGoogleAccessToken.mockResolvedValue('token');
+    mockResolveOrProvisionAppDriveFolder.mockResolvedValue({ id: 'folder-1' } as never);
+    mockReadAdminSettingsFromDrive.mockResolvedValue({
+      settings: {
+        type: 'admin_settings',
+        version: 2,
+        routing: {
+          default: { provider: 'stub', model: 'stub-default' },
+          tasks: { chat: { provider: 'gemini', model: 'gemini-1.5-flash' } },
+        },
+        prompts: { system: '' },
+        tasks: {
+          chat: { maxContextItems: 8, temperature: 0.2 },
+          summarize: { maxContextItems: 8, temperature: 0.2 },
+        },
+        safety: { mode: 'standard' },
+        updatedAtISO: '2024-01-01T00:00:00.000Z',
+      },
+    } as never);
+    mockLoadChatContext.mockResolvedValue({ items: [defaultContextItem], key: 'Recent 8 (All)', indexMissing: false });
+    mockCallLLM.mockResolvedValue({ text: '[override answer]' });
+
+    const response = await POST(
+      new Request('http://localhost/api/chat', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ message: 'hello' }),
+      }),
+    );
+
+    const payload = (await response.json()) as { provider: { name: string; model: string } };
+    expect(response.status).toBe(200);
+    expect(payload.provider).toEqual({ name: 'gemini', model: 'gemini-1.5-flash' });
+  });
+
 
   it('returns advisor structured headings when advisorMode is enabled with stub provider', async () => {
     mockGetGoogleSession.mockResolvedValue({

@@ -74,7 +74,7 @@ export const stubTimelineProvider: TimelineProvider = {
         },
       ],
       dateConfidence: dateResult.contentDateISO ? 0.95 : 0.2,
-      model: settings.model || 'stub',
+      model: settings.routing.default.model || 'stub',
       suggestedActions: buildStubSuggestedActions(input.text),
       ...buildStructuredFromText(input.text),
     };

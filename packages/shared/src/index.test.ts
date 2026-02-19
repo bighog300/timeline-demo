@@ -414,12 +414,29 @@ describe('shared schemas', () => {
   it('accepts admin settings without optional prompt fields', () => {
     const result = AdminSettingsSchema.safeParse({
       type: 'admin_settings',
-      version: 1,
-      provider: 'stub',
-      model: 'gpt-4o-mini',
-      systemPrompt: '',
-      maxContextItems: 8,
-      temperature: 0.2,
+      version: 2,
+      routing: {
+        default: {
+          provider: 'stub',
+          model: 'gpt-4o-mini',
+        },
+      },
+      prompts: {
+        system: '',
+      },
+      tasks: {
+        chat: {
+          maxContextItems: 8,
+          temperature: 0.2,
+        },
+        summarize: {
+          maxContextItems: 8,
+          temperature: 0.2,
+        },
+      },
+      safety: {
+        mode: 'standard',
+      },
       updatedAtISO: '2026-01-01T12:34:56Z',
     });
 
@@ -429,15 +446,40 @@ describe('shared schemas', () => {
   it('accepts admin settings with optional prompt fields', () => {
     const result = AdminSettingsSchema.safeParse({
       type: 'admin_settings',
-      version: 1,
-      provider: 'openai',
-      model: 'gpt-4.1-mini',
-      systemPrompt: 'System instruction',
-      summaryPromptTemplate: 'Summarize {{title}}',
-      highlightsPromptTemplate: 'Highlights for {{title}}',
-      maxOutputTokens: 256,
-      maxContextItems: 8,
-      temperature: 0.1,
+      version: 2,
+      routing: {
+        default: {
+          provider: 'openai',
+          model: 'gpt-4.1-mini',
+        },
+        tasks: {
+          chat: {
+            provider: 'gemini',
+            model: 'gemini-1.5-flash',
+          },
+        },
+      },
+      prompts: {
+        system: 'System instruction',
+        chatPromptTemplate: 'Chat {{title}}',
+        summarizePromptTemplate: 'Summarize {{title}}',
+        highlightsPromptTemplate: 'Highlights for {{title}}',
+      },
+      tasks: {
+        chat: {
+          maxOutputTokens: 256,
+          maxContextItems: 8,
+          temperature: 0.1,
+        },
+        summarize: {
+          maxOutputTokens: 300,
+          maxContextItems: 12,
+          temperature: 0.3,
+        },
+      },
+      safety: {
+        mode: 'strict',
+      },
       updatedAtISO: '2026-01-01T12:34:56Z',
     });
 
