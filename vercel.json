@@ -15,5 +15,11 @@
       ]
     }
   ],
-  "outputDirectory": "apps/web/.next"
+  "outputDirectory": "apps/web/.next",
+  "crons": [
+    {
+      "path": "/api/cron/run",
+      "schedule": "*/5 * * * *"
+    }
+  ]
 }
