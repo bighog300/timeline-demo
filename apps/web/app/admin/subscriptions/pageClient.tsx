@@ -89,6 +89,7 @@ export default function SubscriptionsPageClient() {
   const [newProfile, setNewProfile] = useState<RecipientProfile>(emptyProfile());
   const [previewProfileId, setPreviewProfileId] = useState<string>('');
   const [previewResult, setPreviewResult] = useState<string | null>(null);
+  const [authWarning, setAuthWarning] = useState(false);
 
   useEffect(() => {
     fetch('/api/admin/schedules')
@@ -101,6 +102,19 @@ export default function SubscriptionsPageClient() {
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : 'Failed to load schedules');
       });
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const response = await fetch('/api/admin/ops/status');
+        if (!response || typeof (response as { json?: unknown }).json !== 'function') return;
+        const json = await response.json();
+        setAuthWarning(Boolean((json as any)?.issues?.auth?.missingRefreshToken || (json as any)?.issues?.auth?.insufficientScope));
+      } catch {
+        // ignore ops status failures
+      }
+    })();
   }, []);
 
   const unsaved = useMemo(() => (config ? JSON.stringify(config) !== initialConfigJson : false), [config, initialConfigJson]);
@@ -174,6 +188,10 @@ export default function SubscriptionsPageClient() {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(config),
     });
+    if (!response || typeof (response as { json?: unknown }).json !== 'function') {
+      setError('Failed to save schedule config');
+      return;
+    }
     const json = await response.json();
     if (!response.ok) {
       setError(json?.error?.message ?? 'Failed to save schedule config');
@@ -209,6 +227,10 @@ export default function SubscriptionsPageClient() {
         limitArtifacts: 10,
       }),
     });
+    if (!response || typeof (response as { json?: unknown }).json !== 'function') {
+      setError('Failed to save schedule config');
+      return;
+    }
     const json = await response.json();
     if (!response.ok) {
       setPreviewResult(json?.error?.message ?? 'Preview query failed');
@@ -231,6 +253,7 @@ export default function SubscriptionsPageClient() {
         <button type="button" onClick={() => setActiveTab('advanced')}>Advanced JSON</button>
       </div>
 
+      {authWarning ? <p>Auth permissions need re-consent. See <Link href='/admin/ops'>/admin/ops</Link>.</p> : null}
       {unsaved ? <p>Unsaved changes</p> : null}
       {status ? <p>{status}</p> : null}
       {error ? <p>{error}</p> : null}

@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { defaultIsRetryableError, withRetry, type RetryableError } from '../net/retry';
+
 const boundedText = z.string().trim().min(1).max(240);
 
 export const WebhookPayloadV1Schema = z.object({
@@ -27,22 +29,53 @@ export const WebhookPayloadV1Schema = z.object({
 export class WebhookError extends Error {
   status: number;
 
-  constructor(message: string, status: number) {
+  attempts?: number;
+
+  constructor(message: string, status: number, attempts?: number) {
     super(message);
     this.name = 'WebhookError';
     this.status = status;
+    this.attempts = attempts;
   }
 }
 
+const toRetryableError = (error: unknown): RetryableError => {
+  if (error instanceof WebhookError) {
+    return { kind: 'http', status: error.status, message: error.message };
+  }
+  if (error instanceof Error && error.name === 'AbortError') {
+    return { kind: 'timeout', message: 'webhook_timeout' };
+  }
+  if (error instanceof Error) {
+    return { kind: 'network', message: error.message || 'webhook_network_error' };
+  }
+  return { kind: 'network', message: 'webhook_network_error' };
+};
+
 export const postWebhook = async ({ url, payload, headers }: { url: string; payload: unknown; headers?: Record<string, string> }) => {
   const parsed = WebhookPayloadV1Schema.parse(payload);
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
-    body: JSON.stringify(parsed),
+  const result = await withRetry(async () => {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(headers ?? {}) },
+      body: JSON.stringify(parsed),
+    });
+
+    if (!response.ok) {
+      throw new WebhookError('webhook_failed', response.status);
+    }
+  }, {
+    maxAttempts: 3,
+    baseDelayMs: 200,
+    maxDelayMs: 1500,
+    maxTotalMs: 3500,
+    isRetryable: defaultIsRetryableError,
+    mapError: toRetryableError,
   });
 
-  if (!response.ok) {
-    throw new WebhookError('webhook_failed', response.status);
+  if (!result.ok) {
+    throw new WebhookError(result.error.message, result.error.status ?? 502, result.attempts);
   }
+
+  return { attempts: result.attempts };
 };
