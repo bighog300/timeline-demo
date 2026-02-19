@@ -3,6 +3,33 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ProviderError } from '../providerErrors';
 import { openaiTimelineProvider } from './timelineOpenai';
 
+const buildSettings = (overrides?: {
+  system?: string;
+  summarizePromptTemplate?: string;
+  highlightsPromptTemplate?: string;
+}) => ({
+  type: 'admin_settings' as const,
+  version: 2 as const,
+  routing: {
+    default: {
+      provider: 'openai' as const,
+      model: 'gpt-4.1-mini',
+    },
+  },
+  prompts: {
+    system: overrides?.system ?? '',
+    chatPromptTemplate: '',
+    summarizePromptTemplate: overrides?.summarizePromptTemplate ?? '',
+    highlightsPromptTemplate: overrides?.highlightsPromptTemplate ?? '',
+  },
+  tasks: {
+    chat: { temperature: 0.2, maxContextItems: 8, maxOutputTokens: 256 },
+    summarize: { temperature: 0.2, maxContextItems: 8, maxOutputTokens: 256 },
+  },
+  safety: { mode: 'standard' as const },
+  updatedAtISO: '2026-01-01T00:00:00Z',
+});
+
 describe('openai timeline provider', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -29,16 +56,7 @@ describe('openai timeline provider', () => {
     await expect(
       openaiTimelineProvider.summarize(
         { title: 'Title', text: 'Body text' },
-        {
-          type: 'admin_settings',
-          version: 1,
-          provider: 'openai',
-          model: 'gpt-4.1-mini',
-          systemPrompt: '',
-          maxContextItems: 8,
-          temperature: 0.2,
-          updatedAtISO: '2026-01-01T00:00:00Z',
-        },
+        buildSettings(),
       ),
     ).rejects.toMatchObject<Partial<ProviderError>>({ code: 'bad_output', status: 502 });
   });
@@ -73,16 +91,7 @@ describe('openai timeline provider', () => {
     await expect(
       openaiTimelineProvider.summarize(
         { title: 'Title', text: 'Body text' },
-        {
-          type: 'admin_settings',
-          version: 1,
-          provider: 'openai',
-          model: 'gpt-4.1-mini',
-          systemPrompt: '',
-          maxContextItems: 8,
-          temperature: 0.2,
-          updatedAtISO: '2026-01-01T00:00:00Z',
-        },
+        buildSettings(),
       ),
     ).rejects.toMatchObject<Partial<ProviderError>>({ code: 'bad_output', status: 502 });
   });
@@ -118,18 +127,11 @@ describe('openai timeline provider', () => {
         source: 'drive',
         sourceMetadata: { folder: 'Ops' },
       },
-      {
-        type: 'admin_settings',
-        version: 1,
-        provider: 'openai',
-        model: 'gpt-4.1-mini',
-        systemPrompt: 'System',
-        summaryPromptTemplate: 'SUM {title} {source}',
+      buildSettings({
+        system: 'System',
+        summarizePromptTemplate: 'SUM {title} {source}',
         highlightsPromptTemplate: 'HILITE {metadata}',
-        maxContextItems: 8,
-        temperature: 0.2,
-        updatedAtISO: '2026-01-01T00:00:00Z',
-      },
+      }),
     );
 
     const req = JSON.parse(fetchMock.mock.calls[0][1].body as string);
@@ -163,18 +165,11 @@ describe('openai timeline provider', () => {
 
     await openaiTimelineProvider.summarize(
       { title: 'T', text: 'Body', source: 'gmail' },
-      {
-        type: 'admin_settings',
-        version: 1,
-        provider: 'openai',
-        model: 'gpt-4.1-mini',
-        systemPrompt: 'System baseline',
-        summaryPromptTemplate: '   ',
+      buildSettings({
+        system: 'System baseline',
+        summarizePromptTemplate: '   ',
         highlightsPromptTemplate: '',
-        maxContextItems: 8,
-        temperature: 0.2,
-        updatedAtISO: '2026-01-01T00:00:00Z',
-      },
+      }),
     );
 
     const req = JSON.parse(fetchMock.mock.calls[0][1].body as string);
