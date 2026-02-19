@@ -36,6 +36,14 @@ export const OpsStatusSchema = z.object({
     missingEnvTargets: z.object({ slack: z.array(z.string()), webhook: z.array(z.string()) }).strict(),
     auth: z.object({ missingRefreshToken: z.boolean(), insufficientScope: z.boolean(), notes: z.array(z.string()) }).strict(),
     recentFailures: z.array(FailureSchema),
+    mutedTargets: z.array(z.object({
+      channel: z.enum(['email', 'slack', 'webhook']),
+      targetKey: z.string().optional(),
+      recipientKey: z.string().optional(),
+      mutedUntilISO: z.string().optional(),
+      failureCount: z.number(),
+      reason: z.string().optional(),
+    }).strict()),
   }).strict(),
 }).strict();
 

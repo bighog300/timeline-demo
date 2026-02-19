@@ -23,6 +23,7 @@ import {
 import { readScheduleConfigFromDrive } from '../../../lib/scheduler/scheduleConfigDrive';
 import { resolveGenericWebhookUrl, resolveSlackWebhookUrl } from '../../../lib/secrets/webhookTargets';
 import { formatDigest } from '../../../lib/notifications/formatDigest';
+import { getCircuitState, loadCircuitBreakers, recordSendFailure, recordSendSuccess, saveCircuitBreakers } from '../../../lib/notifications/circuitBreaker';
 import { postSlackMessage } from '../../../lib/notifications/slack';
 import { postWebhook } from '../../../lib/notifications/webhook';
 import { existsMarker, writeMarker } from '../../../lib/scheduler/channelMarkers';
@@ -102,6 +103,7 @@ const sendChannelNotifications = async ({
   digest,
   jobMeta,
   now,
+  breakerState,
 }: {
   drive: Parameters<typeof existsMarker>[0]['drive'];
   folderId: string;
@@ -113,6 +115,7 @@ const sendChannelNotifications = async ({
   digest: Awaited<ReturnType<typeof buildPersonalizedDigest>>;
   jobMeta: { id: string; type: 'week_in_review' | 'alerts'; dateFromISO?: string; dateToISO?: string; lookbackStartISO?: string; nowISO?: string };
   now: Date;
+  breakerState: Awaited<ReturnType<typeof loadCircuitBreakers>>;
 }) => {
   const slack = { attempted: 0, sent: 0, skipped: 0, failed: 0, attemptsTotal: 0, retries: 0, missingTargets: [] as string[] };
   const webhook = { attempted: 0, sent: 0, skipped: 0, failed: 0, attemptsTotal: 0, retries: 0, missingTargets: [] as string[] };
@@ -129,11 +132,18 @@ const sendChannelNotifications = async ({
 
     for (const targetKey of slackTargets) {
       slack.attempted += 1;
+      const muted = getCircuitState(breakerState, { channel: 'slack', targetKey }, now);
+      if (muted.muted) {
+        slack.skipped += 1;
+        failures.push({ channel: 'slack', targetKey, code: 'skipped_muted', message: `muted_until:${muted.mutedUntilISO ?? 'unknown'}` });
+        continue;
+      }
       const webhookUrl = resolveSlackWebhookUrl(targetKey);
       if (!webhookUrl) {
         slack.failed += 1;
         slack.missingTargets.push(targetKey);
         failures.push({ channel: 'slack', targetKey, code: 'missing_env_target', message: 'missing_env_target' });
+        recordSendFailure({ state: breakerState, target: { channel: 'slack', targetKey }, error: { code: 'missing_env_target', message: 'missing_env_target' }, now });
         continue;
       }
       if (await existsMarker({ drive, folderId, type: 'slack', runKey, recipientKey, targetKey })) {
@@ -156,13 +166,16 @@ const sendChannelNotifications = async ({
           details: { runKey, recipientKey, targetKey, sentAtISO: now.toISOString() },
         });
         slack.sent += 1;
+        recordSendSuccess({ state: breakerState, target: { channel: 'slack', targetKey } });
       } catch (error) {
         slack.failed += 1;
         const status = error && typeof error === 'object' && 'status' in error ? Number((error as { status?: number }).status) : undefined;
         const attempts = error && typeof error === 'object' && 'attempts' in error ? Number((error as { attempts?: number }).attempts) : 1;
         slack.attemptsTotal += Number.isFinite(attempts) ? attempts : 1;
         slack.retries += Math.max(0, (Number.isFinite(attempts) ? attempts : 1) - 1);
-        failures.push({ channel: 'slack', targetKey, status, message: error instanceof Error ? error.message.slice(0, 200) : 'slack_send_failed' });
+        const message = error instanceof Error ? error.message.slice(0, 200) : 'slack_send_failed';
+        failures.push({ channel: 'slack', targetKey, status, message });
+        recordSendFailure({ state: breakerState, target: { channel: 'slack', targetKey }, error: { status, message }, now });
       }
     }
   }
@@ -177,11 +190,18 @@ const sendChannelNotifications = async ({
     });
     for (const targetKey of webhookTargets) {
       webhook.attempted += 1;
+      const muted = getCircuitState(breakerState, { channel: 'webhook', targetKey }, now);
+      if (muted.muted) {
+        webhook.skipped += 1;
+        failures.push({ channel: 'webhook', targetKey, code: 'skipped_muted', message: `muted_until:${muted.mutedUntilISO ?? 'unknown'}` });
+        continue;
+      }
       const url = resolveGenericWebhookUrl(targetKey);
       if (!url) {
         webhook.failed += 1;
         webhook.missingTargets.push(targetKey);
         failures.push({ channel: 'webhook', targetKey, code: 'missing_env_target', message: 'missing_env_target' });
+        recordSendFailure({ state: breakerState, target: { channel: 'webhook', targetKey }, error: { code: 'missing_env_target', message: 'missing_env_target' }, now });
         continue;
       }
       if (await existsMarker({ drive, folderId, type: 'webhook', runKey, recipientKey, targetKey })) {
@@ -204,13 +224,16 @@ const sendChannelNotifications = async ({
           details: { runKey, recipientKey, targetKey, sentAtISO: now.toISOString(), version: 1 },
         });
         webhook.sent += 1;
+        recordSendSuccess({ state: breakerState, target: { channel: 'webhook', targetKey } });
       } catch (error) {
         webhook.failed += 1;
         const status = error && typeof error === 'object' && 'status' in error ? Number((error as { status?: number }).status) : undefined;
         const attempts = error && typeof error === 'object' && 'attempts' in error ? Number((error as { attempts?: number }).attempts) : 1;
         webhook.attemptsTotal += Number.isFinite(attempts) ? attempts : 1;
         webhook.retries += Math.max(0, (Number.isFinite(attempts) ? attempts : 1) - 1);
-        failures.push({ channel: 'webhook', targetKey, status, message: error instanceof Error ? error.message.slice(0, 200) : 'webhook_send_failed' });
+        const message = error instanceof Error ? error.message.slice(0, 200) : 'webhook_send_failed';
+        failures.push({ channel: 'webhook', targetKey, status, message });
+        recordSendFailure({ state: breakerState, target: { channel: 'webhook', targetKey }, error: { status, message }, now });
       }
     }
   }
@@ -241,6 +264,7 @@ const run = async (request: NextRequest) => {
   }
 
   const loaded = await readScheduleConfigFromDrive(drive, folder.id);
+  const breakerState = await loadCircuitBreakers(drive, folder.id);
   const aliases = await readEntityAliasesFromDrive(drive, folder.id);
   const now = new Date();
   const fromEmail = process.env.GOOGLE_SERVICE_FROM_EMAIL ?? getAdminEmailList()[0] ?? 'me';
@@ -387,7 +411,11 @@ const run = async (request: NextRequest) => {
               }
 
               const recipientKey = profile.id;
-              const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey });
+              const emailCircuit = getCircuitState(breakerState, { channel: 'email', recipientKey }, now);
+              if (emailCircuit.muted) {
+                skipped += 1;
+              }
+              const markerExists = emailCircuit.muted ? true : await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey });
               if (markerExists) {
                 skipped += 1;
               } else {
@@ -417,8 +445,10 @@ const run = async (request: NextRequest) => {
                   details: { runKey, recipientKey, sentAtISO: now.toISOString(), gmailMessageId: sentMessage.id },
                 });
                 sent += 1;
+                recordSendSuccess({ state: breakerState, target: { channel: 'email', recipientKey } });
                 } catch {
                   failed += 1;
+                  recordSendFailure({ state: breakerState, target: { channel: 'email', recipientKey }, error: { message: 'email_send_failed' }, now });
                 }
               }
 
@@ -433,6 +463,7 @@ const run = async (request: NextRequest) => {
                 digest,
                 jobMeta: { id: job.id, type: 'week_in_review', dateFromISO: output.dateFromISO, dateToISO: output.dateToISO },
                 now,
+                breakerState,
               });
               slackAttempted += channelResult.slack.attempted;
               slackSent += channelResult.slack.sent;
@@ -466,7 +497,8 @@ const run = async (request: NextRequest) => {
               webhookFailed,
             };
           } else {
-            const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey: 'broadcast' });
+            const emailCircuit = getCircuitState(breakerState, { channel: 'email', recipientKey: 'broadcast' }, now);
+            const markerExists = emailCircuit.muted ? true : await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey: 'broadcast' });
             let slackAttempted = 0;
             let slackSent = 0;
             let slackSkipped = 0;
@@ -494,6 +526,7 @@ const run = async (request: NextRequest) => {
                   textBody: message.body,
                 });
                 result.email = { attempted: true, ok: true, mode: 'broadcast', emailAttemptsTotal: sent.attempts ?? 1, emailRetries: Math.max(0, (sent.attempts ?? 1) - 1) };
+                recordSendSuccess({ state: breakerState, target: { channel: 'email', recipientKey: 'broadcast' } });
                 await writeEmailSentMarker({
                   drive,
                   folderId: folder.id,
@@ -507,12 +540,14 @@ const run = async (request: NextRequest) => {
                   },
                 });
               } catch (emailError) {
+                const message = emailError instanceof Error ? emailError.message : 'email_send_failed';
                 result.email = {
                   attempted: true,
                   ok: false,
                   mode: 'broadcast',
-                  error: emailError instanceof Error ? emailError.message : 'email_send_failed',
+                  error: message,
                 };
+                recordSendFailure({ state: breakerState, target: { channel: 'email', recipientKey: 'broadcast' }, error: { message }, now });
               }
             }
             const digest = await buildPersonalizedDigest({
@@ -527,7 +562,7 @@ const run = async (request: NextRequest) => {
             });
             const channelResult = await sendChannelNotifications({
               drive, folderId: folder.id, notify: job.notify, mode: 'broadcast', runKey, recipientKey: 'broadcast', digest,
-              jobMeta: { id: job.id, type: 'week_in_review', dateFromISO: output.dateFromISO, dateToISO: output.dateToISO }, now,
+              jobMeta: { id: job.id, type: 'week_in_review', dateFromISO: output.dateFromISO, dateToISO: output.dateToISO }, now, breakerState,
             });
             slackAttempted = channelResult.slack.attempted;
             slackSent = channelResult.slack.sent;
@@ -627,7 +662,11 @@ const run = async (request: NextRequest) => {
               }
 
               const recipientKey = profile.id;
-              const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey });
+              const emailCircuit = getCircuitState(breakerState, { channel: 'email', recipientKey }, now);
+              if (emailCircuit.muted) {
+                skipped += 1;
+              }
+              const markerExists = emailCircuit.muted ? true : await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey });
               if (markerExists) {
                 skipped += 1;
               } else {
@@ -657,8 +696,10 @@ const run = async (request: NextRequest) => {
                   details: { runKey, recipientKey, sentAtISO: now.toISOString(), gmailMessageId: sentMessage.id },
                 });
                 sent += 1;
+                recordSendSuccess({ state: breakerState, target: { channel: 'email', recipientKey } });
                 } catch {
                   failed += 1;
+                  recordSendFailure({ state: breakerState, target: { channel: 'email', recipientKey }, error: { message: 'email_send_failed' }, now });
                 }
               }
 
@@ -673,6 +714,7 @@ const run = async (request: NextRequest) => {
                 digest,
                 jobMeta: { id: job.id, type: 'alerts', dateFromISO: output.lookbackStartISO, dateToISO: output.nowISO, lookbackStartISO: output.lookbackStartISO, nowISO: output.nowISO },
                 now,
+                breakerState,
               });
               slackAttempted += channelResult.slack.attempted;
               slackSent += channelResult.slack.sent;
@@ -706,7 +748,8 @@ const run = async (request: NextRequest) => {
               webhookFailed,
             };
           } else {
-            const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey: 'broadcast' });
+            const emailCircuit = getCircuitState(breakerState, { channel: 'email', recipientKey: 'broadcast' }, now);
+            const markerExists = emailCircuit.muted ? true : await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey: 'broadcast' });
             let slackAttempted = 0;
             let slackSent = 0;
             let slackSkipped = 0;
@@ -734,6 +777,7 @@ const run = async (request: NextRequest) => {
                   textBody: message.body,
                 });
                 result.email = { attempted: true, ok: true, mode: 'broadcast', emailAttemptsTotal: sent.attempts ?? 1, emailRetries: Math.max(0, (sent.attempts ?? 1) - 1) };
+                recordSendSuccess({ state: breakerState, target: { channel: 'email', recipientKey: 'broadcast' } });
                 await writeEmailSentMarker({
                   drive,
                   folderId: folder.id,
@@ -747,12 +791,14 @@ const run = async (request: NextRequest) => {
                   },
                 });
               } catch (emailError) {
+                const message = emailError instanceof Error ? emailError.message : 'email_send_failed';
                 result.email = {
                   attempted: true,
                   ok: false,
                   mode: 'broadcast',
-                  error: emailError instanceof Error ? emailError.message : 'email_send_failed',
+                  error: message,
                 };
+                recordSendFailure({ state: breakerState, target: { channel: 'email', recipientKey: 'broadcast' }, error: { message }, now });
               }
             }
             const digest = await buildPersonalizedDigest({
@@ -767,7 +813,7 @@ const run = async (request: NextRequest) => {
             });
             const channelResult = await sendChannelNotifications({
               drive, folderId: folder.id, notify: job.notify, mode: 'broadcast', runKey, recipientKey: 'broadcast', digest,
-              jobMeta: { id: job.id, type: 'alerts', lookbackStartISO: output.lookbackStartISO, nowISO: output.nowISO }, now,
+              jobMeta: { id: job.id, type: 'alerts', lookbackStartISO: output.lookbackStartISO, nowISO: output.nowISO }, now, breakerState,
             });
             slackAttempted = channelResult.slack.attempted;
             slackSent = channelResult.slack.sent;
@@ -804,6 +850,7 @@ const run = async (request: NextRequest) => {
 
     return NextResponse.json({ ok: true, ranJobs });
   } finally {
+    await saveCircuitBreakers(drive, folder.id, breakerState).catch(() => undefined);
     await releaseCronLock({ drive, driveFolderId: folder.id, holder: lockHolder });
   }
 };
