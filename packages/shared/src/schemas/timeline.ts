@@ -502,6 +502,59 @@ export const ReportExportResponseSchema = z
   })
   .strict();
 
+
+
+const ScheduleSchema = z
+  .object({
+    cron: z.string().trim().min(1),
+    timezone: z.string().trim().min(1),
+  })
+  .strict();
+
+const WeekInReviewJobSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.literal('week_in_review'),
+    enabled: z.boolean(),
+    schedule: ScheduleSchema,
+    params: z
+      .object({
+        includeEvidence: z.boolean().optional(),
+        exportReport: z.boolean().optional(),
+        saveToTimeline: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
+const AlertsJobSchema = z
+  .object({
+    id: z.string().min(1),
+    type: z.literal('alerts'),
+    enabled: z.boolean(),
+    schedule: ScheduleSchema,
+    params: z
+      .object({
+        alertTypes: z
+          .array(z.enum(['new_high_risks', 'new_open_loops_due_7d', 'new_decisions']))
+          .min(1),
+        lookbackDays: z.number().int().min(1).max(30).default(1),
+        riskSeverity: z.literal('high').optional(),
+        dueInDays: z.number().int().min(1).max(30).default(7),
+      })
+      .strict(),
+  })
+  .strict();
+
+export const ScheduleConfigSchema = z
+  .object({
+    version: z.literal(1),
+    updatedAtISO: isoDateString,
+    jobs: z.array(z.discriminatedUnion('type', [WeekInReviewJobSchema, AlertsJobSchema])),
+  })
+  .strict();
+
 export const ApiErrorSchema = z
   .object({
     error: z
@@ -546,3 +599,5 @@ export type StructuredQueryRequest = z.infer<typeof StructuredQueryRequestSchema
 export type StructuredQueryResponse = z.infer<typeof StructuredQueryResponseSchema>;
 export type ReportExportRequest = z.infer<typeof ReportExportRequestSchema>;
 export type ReportExportResponse = z.infer<typeof ReportExportResponseSchema>;
+
+export type ScheduleConfig = z.infer<typeof ScheduleConfigSchema>;

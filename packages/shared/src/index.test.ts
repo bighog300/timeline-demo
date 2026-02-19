@@ -12,6 +12,7 @@ import {
   StructuredQueryResponseSchema,
   ReportExportRequestSchema,
   ReportExportResponseSchema,
+  ScheduleConfigSchema,
 } from './index.js';
 
 describe('shared schemas', () => {
@@ -696,4 +697,48 @@ describe('phase 5 schemas', () => {
     expect(request.success).toBe(true);
     expect(response.success).toBe(true);
   });
+
+  it('accepts valid schedule config payload', () => {
+    const result = ScheduleConfigSchema.safeParse({
+      version: 1,
+      updatedAtISO: '2026-01-01T00:00:00Z',
+      jobs: [
+        {
+          id: 'weekly',
+          type: 'week_in_review',
+          enabled: true,
+          schedule: { cron: '0 9 * * MON', timezone: 'Europe/London' },
+          params: { includeEvidence: true, exportReport: true, saveToTimeline: false },
+        },
+        {
+          id: 'alerts',
+          type: 'alerts',
+          enabled: true,
+          schedule: { cron: '*/5 * * * *', timezone: 'UTC' },
+          params: { alertTypes: ['new_high_risks'], lookbackDays: 2, dueInDays: 7, riskSeverity: 'high' },
+        },
+      ],
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects alert schedule config with out-of-range lookback days', () => {
+    const result = ScheduleConfigSchema.safeParse({
+      version: 1,
+      updatedAtISO: '2026-01-01T00:00:00Z',
+      jobs: [
+        {
+          id: 'alerts',
+          type: 'alerts',
+          enabled: true,
+          schedule: { cron: '*/5 * * * *', timezone: 'UTC' },
+          params: { alertTypes: ['new_decisions'], lookbackDays: 60 },
+        },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+  });
+
 });
