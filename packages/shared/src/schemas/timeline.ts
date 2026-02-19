@@ -511,6 +511,40 @@ const ScheduleSchema = z
   })
   .strict();
 
+const WebhookTargetKeySchema = z.string().trim().regex(/^[A-Z0-9_]+$/, 'Webhook target keys must use A-Z, 0-9, or _.');
+
+const ChannelRouteTargetsSchema = z
+  .array(
+    z
+      .object({
+        profileId: z.string().min(1).max(40),
+        targets: z.array(WebhookTargetKeySchema).min(1).max(10),
+      })
+      .strict(),
+  )
+  .max(30);
+
+const SlackChannelSchema = z
+  .object({
+    enabled: z.boolean(),
+    targets: z.array(WebhookTargetKeySchema).min(1).max(10).optional(),
+    routesTargets: ChannelRouteTargetsSchema.optional(),
+    includeReportLink: z.boolean().default(true).optional(),
+    maxItems: z.number().int().min(1).max(20).default(8).optional(),
+  })
+  .strict();
+
+const WebhookChannelSchema = z
+  .object({
+    enabled: z.boolean(),
+    targets: z.array(WebhookTargetKeySchema).min(1).max(10).optional(),
+    routesTargets: ChannelRouteTargetsSchema.optional(),
+    payloadVersion: z.literal(1).default(1).optional(),
+    includeReportLink: z.boolean().default(true).optional(),
+    maxItems: z.number().int().min(1).max(30).default(10).optional(),
+  })
+  .strict();
+
 const NotificationConfigSchema = z
   .object({
     enabled: z.boolean(),
@@ -550,6 +584,19 @@ const NotificationConfigSchema = z
     generatePerRouteReport: z.boolean().default(false),
     maxPerRouteReportsPerRun: z.number().int().min(1).max(25).default(5),
     reportTitleTemplate: z.string().trim().min(0).max(120).optional(),
+    channels: z
+      .object({
+        email: z
+          .object({
+            enabled: z.boolean(),
+          })
+          .strict()
+          .optional(),
+        slack: SlackChannelSchema.optional(),
+        webhook: WebhookChannelSchema.optional(),
+      })
+      .strict()
+      .optional(),
   })
   .superRefine((value, ctx) => {
     const mode = value.mode ?? 'broadcast';
@@ -566,6 +613,29 @@ const NotificationConfigSchema = z
         message: 'Per-route report generation requires notify.mode="routes".',
       });
     }
+
+    const slack = value.channels?.slack;
+    const webhook = value.channels?.webhook;
+    const validateChannel = (channel: { enabled: boolean; targets?: string[]; routesTargets?: Array<{ profileId: string; targets: string[] }> } | undefined, path: 'slack' | 'webhook') => {
+      if (!channel?.enabled) return;
+      if (mode === 'broadcast' && !channel.targets?.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['channels', path, 'targets'],
+          message: 'Broadcast notifications require at least one target key.',
+        });
+      }
+      if (mode === 'routes' && !channel.targets?.length && !channel.routesTargets?.length) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['channels', path],
+          message: 'Routes notifications require targets or routesTargets.',
+        });
+      }
+    };
+
+    validateChannel(slack, 'slack');
+    validateChannel(webhook, 'webhook');
   });
 
 const RecipientProfileFiltersSchema = z

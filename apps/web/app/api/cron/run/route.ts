@@ -21,6 +21,11 @@ import {
   saveNoticeToDrive,
 } from '../../../lib/scheduler/runJobs';
 import { readScheduleConfigFromDrive } from '../../../lib/scheduler/scheduleConfigDrive';
+import { resolveGenericWebhookUrl, resolveSlackWebhookUrl } from '../../../lib/secrets/webhookTargets';
+import { formatDigest } from '../../../lib/notifications/formatDigest';
+import { postSlackMessage } from '../../../lib/notifications/slack';
+import { postWebhook } from '../../../lib/notifications/webhook';
+import { existsMarker, writeMarker } from '../../../lib/scheduler/channelMarkers';
 
 const isAuthorized = (request: NextRequest) => {
   const header = request.headers.get('authorization') ?? '';
@@ -63,6 +68,134 @@ const isJobDue = (cron: string, _timezone: string, now: Date) => {
     && fieldMatches(month, now.getUTCMonth() + 1)
     && fieldMatches(dayOfWeek, now.getUTCDay(), dowValue)
   );
+};
+
+
+
+const parseTargets = (value: string[] | undefined) => (value ?? []).map((item) => item.trim().toUpperCase()).filter(Boolean);
+
+const resolveRouteTargets = ({
+  recipientKey,
+  mode,
+  defaults,
+  overrides,
+}: {
+  recipientKey: string;
+  mode: 'broadcast' | 'routes';
+  defaults?: string[];
+  overrides?: Array<{ profileId: string; targets: string[] }>;
+}) => {
+  if (mode === 'broadcast') return parseTargets(defaults);
+  const override = overrides?.find((item) => item.profileId === recipientKey)?.targets;
+  return parseTargets(override ?? defaults);
+};
+
+const sendChannelNotifications = async ({
+  drive,
+  folderId,
+  notify,
+  mode,
+  runKey,
+  recipientKey,
+  profileName,
+  digest,
+  jobMeta,
+  now,
+}: {
+  drive: Parameters<typeof existsMarker>[0]['drive'];
+  folderId: string;
+  notify: Record<string, any>;
+  mode: 'broadcast' | 'routes';
+  runKey: string;
+  recipientKey: string;
+  profileName?: string;
+  digest: Awaited<ReturnType<typeof buildPersonalizedDigest>>;
+  jobMeta: { id: string; type: 'week_in_review' | 'alerts'; dateFromISO?: string; dateToISO?: string; lookbackStartISO?: string; nowISO?: string };
+  now: Date;
+}) => {
+  const slack = { attempted: 0, sent: 0, skipped: 0, failed: 0 };
+  const webhook = { attempted: 0, sent: 0, skipped: 0, failed: 0 };
+
+  const slackChannel = notify.channels?.slack;
+  if (slackChannel?.enabled) {
+    const slackTargets = resolveRouteTargets({
+      recipientKey,
+      mode,
+      defaults: slackChannel.targets,
+      overrides: slackChannel.routesTargets,
+    });
+
+    for (const targetKey of slackTargets) {
+      slack.attempted += 1;
+      const webhookUrl = resolveSlackWebhookUrl(targetKey);
+      if (!webhookUrl) {
+        slack.failed += 1;
+        continue;
+      }
+      if (await existsMarker({ drive, folderId, type: 'slack', runKey, recipientKey, targetKey })) {
+        slack.skipped += 1;
+        continue;
+      }
+      try {
+        const formatted = formatDigest({
+          digest,
+          job: { ...jobMeta, runKey },
+          recipient: { key: recipientKey, ...(profileName ? { profileName } : {}) },
+          maxItems: slackChannel.maxItems ?? 8,
+          includeReportLink: slackChannel.includeReportLink ?? true,
+        });
+        await postSlackMessage({ webhookUrl, text: formatted.slackText });
+        await writeMarker({
+          drive, folderId, type: 'slack', runKey, recipientKey, targetKey,
+          details: { runKey, recipientKey, targetKey, sentAtISO: now.toISOString() },
+        });
+        slack.sent += 1;
+      } catch {
+        slack.failed += 1;
+      }
+    }
+  }
+
+  const webhookChannel = notify.channels?.webhook;
+  if (webhookChannel?.enabled) {
+    const webhookTargets = resolveRouteTargets({
+      recipientKey,
+      mode,
+      defaults: webhookChannel.targets,
+      overrides: webhookChannel.routesTargets,
+    });
+    for (const targetKey of webhookTargets) {
+      webhook.attempted += 1;
+      const url = resolveGenericWebhookUrl(targetKey);
+      if (!url) {
+        webhook.failed += 1;
+        continue;
+      }
+      if (await existsMarker({ drive, folderId, type: 'webhook', runKey, recipientKey, targetKey })) {
+        webhook.skipped += 1;
+        continue;
+      }
+      try {
+        const formatted = formatDigest({
+          digest,
+          job: { ...jobMeta, runKey },
+          recipient: { key: recipientKey, ...(profileName ? { profileName } : {}) },
+          maxItems: webhookChannel.maxItems ?? 10,
+          includeReportLink: webhookChannel.includeReportLink ?? true,
+        });
+        await postWebhook({ url, payload: formatted.webhookPayload });
+        await writeMarker({
+          drive, folderId, type: 'webhook', runKey, recipientKey, targetKey,
+          details: { runKey, recipientKey, targetKey, sentAtISO: now.toISOString(), version: 1 },
+        });
+        webhook.sent += 1;
+      } catch {
+        webhook.failed += 1;
+      }
+    }
+  }
+
+  return { slack, webhook };
 };
 
 const run = async (request: NextRequest) => {
@@ -108,6 +241,14 @@ const run = async (request: NextRequest) => {
       perRouteReportsSkipped?: number;
       perRouteReportsFailed?: number;
       routeReports?: Array<{ profileId: string; reportSaved: boolean; reportReused: boolean; reportSkippedReason?: string }>;
+      slackAttempted?: number;
+      slackSent?: number;
+      slackSkipped?: number;
+      slackFailed?: number;
+      webhookAttempted?: number;
+      webhookSent?: number;
+      webhookSkipped?: number;
+      webhookFailed?: number;
     };
   }> = [];
 
@@ -137,6 +278,14 @@ const run = async (request: NextRequest) => {
             let sent = 0;
             let skipped = 0;
             let failed = 0;
+            let slackAttempted = 0;
+            let slackSent = 0;
+            let slackSkipped = 0;
+            let slackFailed = 0;
+            let webhookAttempted = 0;
+            let webhookSent = 0;
+            let webhookSkipped = 0;
+            let webhookFailed = 0;
             let perRouteReportsAttempted = 0;
             let perRouteReportsSaved = 0;
             let perRouteReportsReused = 0;
@@ -204,12 +353,11 @@ const run = async (request: NextRequest) => {
               }
 
               const recipientKey = profile.id;
-              if (await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey })) {
+              const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey });
+              if (markerExists) {
                 skipped += 1;
-                continue;
-              }
-
-              try {
+              } else {
+                try {
                 const sentMessage = await sendEmail({
                   accessToken: auth.accessToken,
                   fromEmail,
@@ -235,9 +383,31 @@ const run = async (request: NextRequest) => {
                   details: { runKey, recipientKey, sentAtISO: now.toISOString(), gmailMessageId: sentMessage.id },
                 });
                 sent += 1;
-              } catch {
-                failed += 1;
+                } catch {
+                  failed += 1;
+                }
               }
+
+              const channelResult = await sendChannelNotifications({
+                drive,
+                folderId: folder.id,
+                notify: job.notify,
+                mode: 'routes',
+                runKey,
+                recipientKey,
+                profileName: profile.name,
+                digest,
+                jobMeta: { id: job.id, type: 'week_in_review', dateFromISO: output.dateFromISO, dateToISO: output.dateToISO },
+                now,
+              });
+              slackAttempted += channelResult.slack.attempted;
+              slackSent += channelResult.slack.sent;
+              slackSkipped += channelResult.slack.skipped;
+              slackFailed += channelResult.slack.failed;
+              webhookAttempted += channelResult.webhook.attempted;
+              webhookSent += channelResult.webhook.sent;
+              webhookSkipped += channelResult.webhook.skipped;
+              webhookFailed += channelResult.webhook.failed;
             }
             result.email = {
               attempted: attempted > 0,
@@ -252,9 +422,25 @@ const run = async (request: NextRequest) => {
               perRouteReportsSkipped,
               perRouteReportsFailed,
               routeReports,
+              slackAttempted,
+              slackSent,
+              slackSkipped,
+              slackFailed,
+              webhookAttempted,
+              webhookSent,
+              webhookSkipped,
+              webhookFailed,
             };
           } else {
             const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey: 'broadcast' });
+            let slackAttempted = 0;
+            let slackSent = 0;
+            let slackSkipped = 0;
+            let slackFailed = 0;
+            let webhookAttempted = 0;
+            let webhookSent = 0;
+            let webhookSkipped = 0;
+            let webhookFailed = 0;
             if (markerExists) {
               result.email = { attempted: false, skipped: true, mode: 'broadcast' };
             } else {
@@ -295,6 +481,29 @@ const run = async (request: NextRequest) => {
                 };
               }
             }
+            const digest = await buildPersonalizedDigest({
+              jobType: 'week_in_review',
+              profile: { id: 'broadcast', name: 'broadcast', to: [], filters: {} },
+              jobOutput: { ...output, ...notice },
+              drive,
+              driveFolderId: folder.id,
+              accessToken: auth.accessToken,
+              now,
+              aliasMap: aliases.aliases,
+            });
+            const channelResult = await sendChannelNotifications({
+              drive, folderId: folder.id, notify: job.notify, mode: 'broadcast', runKey, recipientKey: 'broadcast', digest,
+              jobMeta: { id: job.id, type: 'week_in_review', dateFromISO: output.dateFromISO, dateToISO: output.dateToISO }, now,
+            });
+            slackAttempted = channelResult.slack.attempted;
+            slackSent = channelResult.slack.sent;
+            slackSkipped = channelResult.slack.skipped;
+            slackFailed = channelResult.slack.failed;
+            webhookAttempted = channelResult.webhook.attempted;
+            webhookSent = channelResult.webhook.sent;
+            webhookSkipped = channelResult.webhook.skipped;
+            webhookFailed = channelResult.webhook.failed;
+            result.email = { ...(result.email ?? {}), slackAttempted, slackSent, slackSkipped, slackFailed, webhookAttempted, webhookSent, webhookSkipped, webhookFailed };
           }
         }
         ranJobs.push(result);
@@ -309,6 +518,14 @@ const run = async (request: NextRequest) => {
             let sent = 0;
             let skipped = 0;
             let failed = 0;
+            let slackAttempted = 0;
+            let slackSent = 0;
+            let slackSkipped = 0;
+            let slackFailed = 0;
+            let webhookAttempted = 0;
+            let webhookSent = 0;
+            let webhookSkipped = 0;
+            let webhookFailed = 0;
             let perRouteReportsAttempted = 0;
             let perRouteReportsSaved = 0;
             let perRouteReportsReused = 0;
@@ -376,12 +593,11 @@ const run = async (request: NextRequest) => {
               }
 
               const recipientKey = profile.id;
-              if (await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey })) {
+              const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey });
+              if (markerExists) {
                 skipped += 1;
-                continue;
-              }
-
-              try {
+              } else {
+                try {
                 const sentMessage = await sendEmail({
                   accessToken: auth.accessToken,
                   fromEmail,
@@ -407,9 +623,31 @@ const run = async (request: NextRequest) => {
                   details: { runKey, recipientKey, sentAtISO: now.toISOString(), gmailMessageId: sentMessage.id },
                 });
                 sent += 1;
-              } catch {
-                failed += 1;
+                } catch {
+                  failed += 1;
+                }
               }
+
+              const channelResult = await sendChannelNotifications({
+                drive,
+                folderId: folder.id,
+                notify: job.notify,
+                mode: 'routes',
+                runKey,
+                recipientKey,
+                profileName: profile.name,
+                digest,
+                jobMeta: { id: job.id, type: 'alerts', dateFromISO: output.lookbackStartISO, dateToISO: output.nowISO, lookbackStartISO: output.lookbackStartISO, nowISO: output.nowISO },
+                now,
+              });
+              slackAttempted += channelResult.slack.attempted;
+              slackSent += channelResult.slack.sent;
+              slackSkipped += channelResult.slack.skipped;
+              slackFailed += channelResult.slack.failed;
+              webhookAttempted += channelResult.webhook.attempted;
+              webhookSent += channelResult.webhook.sent;
+              webhookSkipped += channelResult.webhook.skipped;
+              webhookFailed += channelResult.webhook.failed;
             }
             result.email = {
               attempted: attempted > 0,
@@ -424,9 +662,25 @@ const run = async (request: NextRequest) => {
               perRouteReportsSkipped,
               perRouteReportsFailed,
               routeReports,
+              slackAttempted,
+              slackSent,
+              slackSkipped,
+              slackFailed,
+              webhookAttempted,
+              webhookSent,
+              webhookSkipped,
+              webhookFailed,
             };
           } else {
             const markerExists = await shouldSendEmailMarkerExists({ drive, folderId: folder.id, runKey, recipientKey: 'broadcast' });
+            let slackAttempted = 0;
+            let slackSent = 0;
+            let slackSkipped = 0;
+            let slackFailed = 0;
+            let webhookAttempted = 0;
+            let webhookSent = 0;
+            let webhookSkipped = 0;
+            let webhookFailed = 0;
             if (markerExists) {
               result.email = { attempted: false, skipped: true, mode: 'broadcast' };
             } else {
@@ -467,6 +721,29 @@ const run = async (request: NextRequest) => {
                 };
               }
             }
+            const digest = await buildPersonalizedDigest({
+              jobType: 'alerts',
+              profile: { id: 'broadcast', name: 'broadcast', to: [], filters: {} },
+              jobOutput: output,
+              drive,
+              driveFolderId: folder.id,
+              accessToken: auth.accessToken,
+              now,
+              aliasMap: aliases.aliases,
+            });
+            const channelResult = await sendChannelNotifications({
+              drive, folderId: folder.id, notify: job.notify, mode: 'broadcast', runKey, recipientKey: 'broadcast', digest,
+              jobMeta: { id: job.id, type: 'alerts', lookbackStartISO: output.lookbackStartISO, nowISO: output.nowISO }, now,
+            });
+            slackAttempted = channelResult.slack.attempted;
+            slackSent = channelResult.slack.sent;
+            slackSkipped = channelResult.slack.skipped;
+            slackFailed = channelResult.slack.failed;
+            webhookAttempted = channelResult.webhook.attempted;
+            webhookSent = channelResult.webhook.sent;
+            webhookSkipped = channelResult.webhook.skipped;
+            webhookFailed = channelResult.webhook.failed;
+            result.email = { ...(result.email ?? {}), slackAttempted, slackSent, slackSkipped, slackFailed, webhookAttempted, webhookSent, webhookSkipped, webhookFailed };
           }
         }
 

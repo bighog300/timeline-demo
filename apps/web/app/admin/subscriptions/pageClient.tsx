@@ -28,6 +28,8 @@ const emptyProfile = (): RecipientProfile => ({
 
 const splitCsv = (value: string) => value.split(',').map((part) => part.trim()).filter(Boolean);
 const isEmailLike = (value: string) => value.includes('@') && value.includes('.');
+const normalizeTargetKeys = (value: string) => splitCsv(value).map((item) => item.toUpperCase());
+const validTargetKey = (key: string) => /^[A-Z0-9_]+$/.test(key);
 
 const filtersToDrilldown = (filters: Filters) => {
   const params = new URLSearchParams();
@@ -152,6 +154,19 @@ export default function SubscriptionsPageClient() {
 
   const save = async () => {
     if (!config) return;
+    for (const job of config.jobs) {
+      const channels = job.notify?.channels;
+      const keys = [
+        ...(channels?.slack?.targets ?? []),
+        ...(channels?.webhook?.targets ?? []),
+        ...((channels?.slack?.routesTargets ?? []).flatMap((row) => row.targets)),
+        ...((channels?.webhook?.routesTargets ?? []).flatMap((row) => row.targets)),
+      ];
+      if (keys.some((key) => !validTargetKey(key))) {
+        setError('Webhook target keys must match A-Z0-9_.');
+        return;
+      }
+    }
     setStatus(null);
     setError(null);
     const response = await fetch('/api/admin/schedules', {
@@ -327,6 +342,29 @@ export default function SubscriptionsPageClient() {
                 </label>
                 <label><input type="checkbox" checked={notify.sendWhenEmpty ?? false} onChange={(event) => upsertNotify({ ...notify, sendWhenEmpty: event.target.checked })} />sendWhenEmpty</label>
                 <label><input type="checkbox" checked={notify.includeLinks ?? true} onChange={(event) => upsertNotify({ ...notify, includeLinks: event.target.checked })} />includeLinks</label>
+                <p>Targets are env keys like TEAM_A; configure SLACK_WEBHOOK_TEAM_A in deployment env.</p>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={notify.channels?.slack?.enabled ?? false}
+                    onChange={(event) => upsertNotify({ ...notify, channels: { ...(notify.channels ?? {}), slack: { ...(notify.channels?.slack ?? {}), enabled: event.target.checked } } })}
+                  />
+                  Slack enabled
+                </label>
+                <label>Slack targets (comma separated keys)
+                  <input value={(notify.channels?.slack?.targets ?? []).join(', ')} onChange={(event) => upsertNotify({ ...notify, channels: { ...(notify.channels ?? {}), slack: { ...(notify.channels?.slack ?? { enabled: true }), targets: normalizeTargetKeys(event.target.value) } } })} />
+                </label>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={notify.channels?.webhook?.enabled ?? false}
+                    onChange={(event) => upsertNotify({ ...notify, channels: { ...(notify.channels ?? {}), webhook: { ...(notify.channels?.webhook ?? {}), enabled: event.target.checked } } })}
+                  />
+                  Webhook enabled
+                </label>
+                <label>Webhook targets (comma separated keys)
+                  <input value={(notify.channels?.webhook?.targets ?? []).join(', ')} onChange={(event) => upsertNotify({ ...notify, channels: { ...(notify.channels ?? {}), webhook: { ...(notify.channels?.webhook ?? { enabled: true }), targets: normalizeTargetKeys(event.target.value) } } })} />
+                </label>
 
                 {mode === 'broadcast' ? (
                   <div>
@@ -358,6 +396,20 @@ export default function SubscriptionsPageClient() {
                             const nextRoutes = [...routes];
                             nextRoutes[routeIndex] = { ...route, subjectPrefix: event.target.value };
                             upsertNotify({ ...notify, routes: nextRoutes });
+                          }} />
+                        </label>
+                        <label>Override Slack targets (comma separated keys)
+                          <input value={(notify.channels?.slack?.routesTargets?.find((row) => row.profileId === route.profileId)?.targets ?? []).join(', ')} onChange={(event) => {
+                            const existing = notify.channels?.slack?.routesTargets ?? [];
+                            const rest = existing.filter((row) => row.profileId !== route.profileId);
+                            upsertNotify({ ...notify, channels: { ...(notify.channels ?? {}), slack: { ...(notify.channels?.slack ?? { enabled: true }), routesTargets: [...rest, { profileId: route.profileId, targets: normalizeTargetKeys(event.target.value) }] } } });
+                          }} />
+                        </label>
+                        <label>Override Webhook targets (comma separated keys)
+                          <input value={(notify.channels?.webhook?.routesTargets?.find((row) => row.profileId === route.profileId)?.targets ?? []).join(', ')} onChange={(event) => {
+                            const existing = notify.channels?.webhook?.routesTargets ?? [];
+                            const rest = existing.filter((row) => row.profileId !== route.profileId);
+                            upsertNotify({ ...notify, channels: { ...(notify.channels ?? {}), webhook: { ...(notify.channels?.webhook ?? { enabled: true }), routesTargets: [...rest, { profileId: route.profileId, targets: normalizeTargetKeys(event.target.value) }] } } });
                           }} />
                         </label>
                         <label>
