@@ -1,30 +1,94 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { signIn, signOut, useSession } from 'next-auth/react';
+import { signIn, signOut } from 'next-auth/react';
 
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card from '../components/ui/Card';
+import { REQUIRED_GOOGLE_SCOPES } from '../lib/googleAuth';
 import styles from './connect.module.css';
 
-type ProvisionState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'success'; folderId: string; folderName: string }
-  | { status: 'error'; message: string };
-
-type ConnectPageClientProps = {
-  isConfigured: boolean;
-  scopeStatus: {
-    configured: string[];
-    missing: string[];
-    isComplete: boolean;
-  };
+type ScopeStatus = {
+  configured: string[];
+  missing: string[];
+  isComplete: boolean;
 };
 
-const formatDateTime = (value?: string) => {
+type ConnectPageClientProps = {
+  initial: {
+    isConfigured: boolean;
+    signedIn: boolean;
+    email: string | null;
+    scopes: string[];
+    driveFolderId: string | null;
+  };
+  scopeStatus: ScopeStatus;
+};
+
+type HealthState = {
+  isLoading: boolean;
+  reachable: boolean;
+  warnings: string[];
+  checkedAt: string | null;
+  error: string | null;
+};
+
+const DRIVE_SCOPE_SET = [
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/drive.file',
+];
+const GMAIL_SCOPE_SET = ['https://www.googleapis.com/auth/gmail.readonly'];
+const CALENDAR_SCOPE_SET = ['https://www.googleapis.com/auth/calendar.events'];
+
+const hasAllScopes = (grantedScopes: string[], requiredScopes: string[]) =>
+  requiredScopes.every((scope) => grantedScopes.includes(scope));
+
+const parseError = async (response: Response) => {
+  let message = 'Request failed.';
+
+  try {
+    const payload = (await response.json()) as { error?: { message?: string } };
+    if (payload.error?.message) {
+      message = payload.error.message;
+    }
+  } catch {
+    // Ignore invalid json responses.
+  }
+
+  if (response.status === 401) {
+    return "You're not signed in.";
+  }
+
+  if (response.status === 403) {
+    return 'Access denied.';
+  }
+
+  return message;
+};
+
+const inferHealthWarnings = (payload: Record<string, unknown>) => {
+  const warnings = new Set<string>();
+
+  const payloadWarnings = payload.warnings;
+  if (Array.isArray(payloadWarnings)) {
+    payloadWarnings
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .forEach((value) => warnings.add(value));
+  }
+
+  const missingEnv = payload.missingEnv;
+  if (Array.isArray(missingEnv)) {
+    missingEnv
+      .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      .forEach((value) => warnings.add(`Admin must configure: ${value}`));
+  }
+
+  return Array.from(warnings);
+};
+
+const formatTimestamp = (value: string | null) => {
   if (!value) {
     return '—';
   }
@@ -37,405 +101,285 @@ const formatDateTime = (value?: string) => {
   return parsed.toLocaleString();
 };
 
-const STORAGE_KEYS_TO_CLEAR = [
-  'timeline.gmailSelections',
-  'timeline.driveSelections',
-  'timeline.summaryArtifacts',
-  'timeline.lastSyncISO',
-];
+export default function ConnectPageClient({ initial, scopeStatus }: ConnectPageClientProps) {
+  const [authState, setAuthState] = useState({
+    signedIn: initial.signedIn,
+    email: initial.email,
+    scopes: initial.scopes,
+  });
+  const [driveFolderId, setDriveFolderId] = useState<string | null>(initial.driveFolderId);
+  const [healthState, setHealthState] = useState<HealthState>({
+    isLoading: true,
+    reachable: false,
+    warnings: [],
+    checkedAt: null,
+    error: null,
+  });
+  const [provisionLoading, setProvisionLoading] = useState(false);
+  const [disconnectLoading, setDisconnectLoading] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [driveError, setDriveError] = useState<string | null>(null);
 
-const clearTimelineStorage = () => {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  STORAGE_KEYS_TO_CLEAR.forEach((key) => window.localStorage.removeItem(key));
-};
+  const capabilityStatus = useMemo(() => {
+    const scopes = authState.scopes;
+    if (!authState.signedIn) {
+      return { drive: false, gmail: false, calendar: false, unknown: false };
+    }
 
-const SCOPE_EXPLANATIONS: Record<string, string> = {
-  'https://www.googleapis.com/auth/gmail.readonly':
-    'Read message metadata + content for messages you explicitly select.',
-  'https://www.googleapis.com/auth/drive.readonly':
-    'List and read files you explicitly select from Drive.',
-  'https://www.googleapis.com/auth/drive.file':
-    'Create/update Timeline summaries and selection sets in the app folder.',
-};
+    if (!scopes.length) {
+      return { drive: false, gmail: false, calendar: false, unknown: true };
+    }
 
-export default function ConnectPageClient({ isConfigured, scopeStatus }: ConnectPageClientProps) {
-  const { data: session, status, update } = useSession();
-  const [provisionState, setProvisionState] = useState<ProvisionState>({ status: 'idle' });
-  const [cleanupLoading, setCleanupLoading] = useState(false);
-  const [cleanupError, setCleanupError] = useState<string | null>(null);
-  const [cleanupPreview, setCleanupPreview] = useState<{ id: string; name: string }[]>([]);
-  const [cleanupConfirmText, setCleanupConfirmText] = useState('');
+    return {
+      drive: hasAllScopes(scopes, DRIVE_SCOPE_SET),
+      gmail: hasAllScopes(scopes, GMAIL_SCOPE_SET),
+      calendar: hasAllScopes(scopes, CALENDAR_SCOPE_SET),
+      unknown: false,
+    };
+  }, [authState.scopes, authState.signedIn]);
 
-  const scopes = useMemo(() => session?.scopes ?? [], [session?.scopes]);
-  const configuredScopes = scopeStatus.configured;
-  const missingScopes = scopeStatus.missing;
-  const scopesReady = scopeStatus.isComplete;
-  const isSignedIn = status === 'authenticated';
-  const driveFolderId = provisionState.status === 'success' ? provisionState.folderId : session?.driveFolderId;
+  const refreshHealth = useCallback(async () => {
+    setHealthState((previous) => ({ ...previous, isLoading: true, error: null }));
 
-  const handleProvision = async () => {
-    setProvisionState({ status: 'loading' });
+    try {
+      const response = await fetch('/api/health', { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error('Health endpoint unavailable.');
+      }
 
-    const response = await fetch('/api/google/drive/provision', { method: 'POST' });
-
-    if (response.status === 401) {
-      setProvisionState({
-        status: 'error',
-        message: 'Reconnect required. Please sign in again to provision the folder.',
+      const payload = (await response.json()) as Record<string, unknown>;
+      const warnings = inferHealthWarnings(payload);
+      setHealthState({
+        isLoading: false,
+        reachable: true,
+        warnings,
+        checkedAt: typeof payload.ts === 'string' ? payload.ts : new Date().toISOString(),
+        error: null,
       });
-      return;
+    } catch {
+      setHealthState({
+        isLoading: false,
+        reachable: false,
+        warnings: [],
+        checkedAt: new Date().toISOString(),
+        error: 'Unable to reach /api/health.',
+      });
     }
+  }, []);
 
-    if (!response.ok) {
-      setProvisionState({ status: 'error', message: 'Unable to provision the Drive folder.' });
-      return;
-    }
+  useEffect(() => {
+    void refreshHealth();
+  }, [refreshHealth]);
 
-    const payload = (await response.json()) as { folderId: string; folderName: string };
-    setProvisionState({
-      status: 'success',
-      folderId: payload.folderId,
-      folderName: payload.folderName,
-    });
-    await update?.();
+  const handleReconnect = async () => {
+    await signIn('google', { callbackUrl: '/connect' });
   };
 
   const handleDisconnect = async () => {
-    clearTimelineStorage();
-    await fetch('/api/google/disconnect', { method: 'POST' });
-    await signOut({ callbackUrl: '/connect' });
+    setDisconnectLoading(true);
+    setAuthError(null);
+
+    try {
+      const response = await fetch('/api/google/disconnect', { method: 'POST' });
+      if (!response.ok && response.status !== 401) {
+        setAuthError(await parseError(response));
+        return;
+      }
+
+      setAuthState({ signedIn: false, email: null, scopes: [] });
+      setDriveFolderId(null);
+      await signOut({ callbackUrl: '/connect' });
+    } catch {
+      setAuthError('Unable to disconnect right now.');
+    } finally {
+      setDisconnectLoading(false);
+    }
   };
 
-  const handleCleanupPreview = async () => {
-    setCleanupLoading(true);
-    setCleanupError(null);
-    const response = await fetch('/api/google/drive/cleanup', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ dryRun: true }),
-    });
+  const handleProvision = async () => {
+    setProvisionLoading(true);
+    setDriveError(null);
 
-    if (response.status === 401) {
-      setCleanupError('Reconnect required to list app data.');
-      setCleanupLoading(false);
-      return;
+    try {
+      const response = await fetch('/api/google/drive/provision', { method: 'POST' });
+      if (!response.ok) {
+        setDriveError(await parseError(response));
+        return;
+      }
+
+      const payload = (await response.json()) as { folderId?: string };
+      if (!payload.folderId) {
+        setDriveError('Provisioning completed without a folder id.');
+        return;
+      }
+
+      setDriveFolderId(payload.folderId);
+      await refreshHealth();
+    } catch {
+      setDriveError('Unable to provision the Drive folder.');
+    } finally {
+      setProvisionLoading(false);
     }
-
-    if (!response.ok) {
-      setCleanupError('Unable to list app data in Drive.');
-      setCleanupLoading(false);
-      return;
-    }
-
-    const payload = (await response.json()) as { files: { id: string; name: string }[] };
-    setCleanupPreview(payload.files ?? []);
-    setCleanupLoading(false);
   };
 
-  const handleCleanupConfirm = async () => {
-    if (cleanupConfirmText !== 'DELETE') {
-      setCleanupError('Type DELETE to confirm removal.');
-      return;
-    }
-
-    setCleanupLoading(true);
-    setCleanupError(null);
-    const response = await fetch('/api/google/drive/cleanup', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ confirm: true }),
-    });
-
-    if (response.status === 401) {
-      setCleanupError('Reconnect required to delete app data.');
-      setCleanupLoading(false);
-      return;
-    }
-
-    if (!response.ok) {
-      setCleanupError('Unable to delete app data in Drive.');
-      setCleanupLoading(false);
-      return;
-    }
-
-    setCleanupPreview([]);
-    setCleanupConfirmText('');
-    setCleanupLoading(false);
-  };
-
-  const connectionLabel = isSignedIn ? 'Signed in' : 'Signed out';
-  const lastRefresh = session?.lastTokenRefresh;
-  const canProvision = isConfigured && scopesReady && isSignedIn && provisionState.status !== 'loading';
-  const showScopeConfigError = isConfigured && !scopesReady;
-  const driveFolderLink = driveFolderId
-    ? `https://drive.google.com/drive/folders/${driveFolderId}`
-    : null;
+  const folderUrl = driveFolderId ? `https://drive.google.com/drive/folders/${driveFolderId}` : null;
+  const adminMisconfigured = !initial.isConfigured || !scopeStatus.isComplete;
+  const missingRequiredScopes = REQUIRED_GOOGLE_SCOPES.filter(
+    (scope) => !scopeStatus.configured.includes(scope),
+  );
 
   return (
     <section className={styles.page}>
       <div className={styles.header}>
         <div>
-          <p>Connect your Google account to start building a real Timeline.</p>
-          <h1>Google Connection</h1>
-        </div>
-        <div className={styles.actions}>
-          <Button
-            onClick={() => signIn('google')}
-            variant="primary"
-            disabled={!isConfigured || !scopesReady || isSignedIn}
-          >
-            Connect Google
-          </Button>
-          <Button
-            onClick={handleDisconnect}
-            variant="secondary"
-            disabled={!isSignedIn}
-          >
-            Disconnect Google
-          </Button>
+          <p>Check your Google connection status and fix issues in one place.</p>
+          <h1>Connect</h1>
         </div>
       </div>
-
-      {!isConfigured ? (
-        <Card>
-          <h2>Google OAuth not configured</h2>
-          <p>
-            Add the Google OAuth environment variables to enable sign-in. See the README for
-            required keys and redirect URLs.
-          </p>
-        </Card>
-      ) : null}
-
-      {showScopeConfigError ? (
-        <Card>
-          <h2>Config incomplete</h2>
-          <p>
-            GOOGLE_SCOPES is missing required permissions. Update the environment configuration and
-            redeploy before connecting.
-          </p>
-          <ul className={styles.scopeDetails}>
-            {missingScopes.map((scope) => (
-              <li key={scope}>
-                <Badge tone="warning">{scope}</Badge>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      ) : null}
 
       <div className={styles.grid}>
         <Card>
-          <h2>Connection status</h2>
+          <h2>1) Account &amp; Auth</h2>
+          <p className={styles.muted}>Make sure you are signed in with the right Google account.</p>
           <ul className={styles.statusList}>
             <li>
-              <span>Session</span>
-              <Badge tone={status === 'authenticated' ? 'success' : 'warning'}>{connectionLabel}</Badge>
+              <span>Status</span>
+              <Badge tone={authState.signedIn ? 'success' : 'warning'}>
+                {authState.signedIn ? '✅ Signed in' : '⚠️ Signed out'}
+              </Badge>
             </li>
             <li>
-              <span>Scopes</span>
-              <div className={styles.scopeList}>
-                {scopes.length > 0 ? (
-                  scopes.map((scope) => (
-                    <Badge key={scope} tone="accent">
-                      {scope}
-                    </Badge>
-                  ))
-                ) : (
-                  <span className={styles.muted}>Not connected</span>
-                )}
-              </div>
+              <span>Email</span>
+              <span className={styles.muted}>{authState.email ?? '—'}</span>
             </li>
             <li>
-              <span>Last token refresh</span>
-              <span className={styles.muted}>{formatDateTime(lastRefresh)}</span>
+              <span>Drive</span>
+              <Badge tone={capabilityStatus.drive ? 'success' : 'warning'}>
+                {capabilityStatus.unknown
+                  ? '⚠️ Unknown'
+                  : capabilityStatus.drive
+                    ? '✅ Ready'
+                    : '⚠️ Needs scope'}
+              </Badge>
+            </li>
+            <li>
+              <span>Gmail</span>
+              <Badge tone={capabilityStatus.gmail ? 'success' : 'warning'}>
+                {capabilityStatus.unknown
+                  ? '⚠️ Unknown'
+                  : capabilityStatus.gmail
+                    ? '✅ Ready'
+                    : '⚠️ Needs scope'}
+              </Badge>
+            </li>
+            <li>
+              <span>Calendar</span>
+              <Badge tone={capabilityStatus.calendar ? 'success' : 'warning'}>
+                {capabilityStatus.unknown
+                  ? '⚠️ Unknown'
+                  : capabilityStatus.calendar
+                    ? '✅ Ready'
+                    : '⚠️ Needs scope'}
+              </Badge>
             </li>
           </ul>
+          {capabilityStatus.unknown ? (
+            <p className={styles.muted}>We&apos;ll verify exact scopes on first use.</p>
+          ) : null}
+          {!authState.signedIn ? (
+            <p className={styles.error}>Sign in required to use Drive, Gmail, and Calendar.</p>
+          ) : null}
+          {adminMisconfigured ? (
+            <p className={styles.error}>Admin must finish Google OAuth environment configuration.</p>
+          ) : null}
+          {!!missingRequiredScopes.length ? (
+            <p className={styles.muted}>Missing required scopes: {missingRequiredScopes.join(', ')}</p>
+          ) : null}
+          <div className={styles.actions}>
+            <Button onClick={handleReconnect} variant="primary" disabled={!initial.isConfigured}>
+              Reconnect Google
+            </Button>
+            <Button
+              onClick={handleDisconnect}
+              variant="secondary"
+              disabled={!authState.signedIn || disconnectLoading}
+            >
+              {disconnectLoading ? 'Disconnecting...' : 'Disconnect'}
+            </Button>
+          </div>
+          {authError ? <p className={styles.error}>{authError}</p> : null}
         </Card>
 
         <Card>
-          <h2>Drive folder provisioning</h2>
-          <p>
-            Provision a Drive folder where Timeline can store derived artifacts (summaries,
-            indexes) owned by you.
-          </p>
-          <div className={styles.provisionActions}>
+          <h2>2) Drive Folder Provisioning</h2>
+          <p className={styles.muted}>Timeline writes app artifacts only after you explicitly provision.</p>
+          <ul className={styles.statusList}>
+            <li>
+              <span>Status</span>
+              <Badge tone={driveFolderId ? 'success' : 'warning'}>
+                {driveFolderId ? '✅ Drive folder provisioned' : '⚠️ Not provisioned'}
+              </Badge>
+            </li>
+            <li>
+              <span>Folder ID</span>
+              <span className={styles.muted}>{driveFolderId ?? '—'}</span>
+            </li>
+          </ul>
+          {folderUrl ? (
+            <p className={styles.muted}>
+              <a href={folderUrl} target="_blank" rel="noreferrer">
+                Open folder in Drive
+              </a>
+            </p>
+          ) : null}
+          <div className={styles.actions}>
             <Button
               onClick={handleProvision}
               variant="primary"
-              disabled={!canProvision}
+              disabled={!authState.signedIn || provisionLoading || adminMisconfigured}
             >
-              {provisionState.status === 'loading' ? 'Provisioning...' : 'Provision Drive folder'}
+              {provisionLoading ? 'Provisioning...' : 'Provision Drive folder'}
             </Button>
-            {provisionState.status === 'success' ? (
-              <Badge tone="success">Folder ready</Badge>
-            ) : null}
           </div>
-          {provisionState.status === 'success' ? (
-            <div className={styles.provisionDetails}>
-              <p>
-                Provisioned: <strong>{provisionState.folderName}</strong>
-              </p>
-              <p className={styles.muted}>Folder ID: {provisionState.folderId}</p>
-            </div>
-          ) : null}
-          {provisionState.status === 'idle' && session?.driveFolderId ? (
-            <div className={styles.provisionDetails}>
-              <p>
-                Provisioned folder ID: <strong>{session.driveFolderId}</strong>
-              </p>
-            </div>
-          ) : null}
-          {provisionState.status === 'error' ? (
-            <p className={styles.error}>{provisionState.message}</p>
-          ) : null}
-          {status !== 'authenticated' ? (
-            <p className={styles.muted}>
-              Sign in to provision. If you&apos;re seeing reconnect errors, visit{' '}
-              <Link href="/connect">/connect</Link>.
+          {driveError ? <p className={styles.error}>{driveError}</p> : null}
+        </Card>
+
+        <Card>
+          <h2>3) Diagnostics</h2>
+          <p className={styles.muted}>Check API health and environment warnings.</p>
+          <ul className={styles.statusList}>
+            <li>
+              <span>API /api/health</span>
+              <Badge tone={healthState.reachable ? 'success' : 'warning'}>
+                {healthState.isLoading
+                  ? 'Checking...'
+                  : healthState.reachable
+                    ? '✅ Reachable'
+                    : '⚠️ Unreachable'}
+              </Badge>
+            </li>
+            <li>
+              <span>Last checked</span>
+              <span className={styles.muted}>{formatTimestamp(healthState.checkedAt)}</span>
+            </li>
+          </ul>
+          {healthState.error ? <p className={styles.error}>{healthState.error}</p> : null}
+          {healthState.warnings.map((warning) => (
+            <p key={warning} className={styles.error}>
+              Admin must configure: {warning.replace(/^Admin must configure:\s*/i, '')}
             </p>
-          ) : null}
-          {status === 'authenticated' && !scopesReady ? (
-            <p className={styles.error}>Scopes missing. Update GOOGLE_SCOPES and reconnect.</p>
-          ) : null}
-        </Card>
-
-        <Card>
-          <h2>Scopes &amp; data access</h2>
-          <p className={styles.muted}>
-            Timeline only touches items you explicitly select. No background scanning, ever.
-          </p>
-          <ul className={styles.scopeDetails}>
-            <li>
-              <strong>Read access:</strong> only selected Gmail messages and Drive files.
-            </li>
-            <li>
-              <strong>Write access:</strong> summaries, selection sets, and the index file inside the
-              app folder.
-            </li>
-            <li>
-              <strong>No background scanning:</strong> we only fetch what you click.
-            </li>
-          </ul>
-          <div className={styles.scopeBlock}>
-            <p className={styles.muted}>Requested scopes</p>
-            <ul className={styles.scopeDetails}>
-              {configuredScopes.map((scope) => (
-                <li key={scope}>
-                  <Badge tone="accent">{scope}</Badge>
-                  <span className={styles.scopeReason}>
-                    {SCOPE_EXPLANATIONS[scope] ?? 'Custom scope configured for this environment.'}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </Card>
-
-        <Card>
-          <h2>Data model &amp; storage</h2>
-          <ul className={styles.scopeDetails}>
-            <li>
-              <strong>Stored in Drive:</strong> summaries (.md + .json), selection sets, and the
-              timeline index inside your app folder.
-            </li>
-            <li>
-              <strong>Stored locally:</strong> your current selection list, recent summaries cache,
-              and last sync timestamp in your browser.
-            </li>
-            <li>
-              <strong>Cached only:</strong> UI preferences (grouping + filters) stay in your browser.
-            </li>
-          </ul>
-        </Card>
-
-        <Card>
-          <h2>Next steps</h2>
-          <p className={styles.muted}>After connecting, choose what to summarize.</p>
+          ))}
           <div className={styles.actions}>
-            <Button
-              variant="secondary"
-              disabled={!isSignedIn}
-              onClick={() => (window.location.href = '/select/gmail')}
-            >
-              Select Gmail
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={!isSignedIn}
-              onClick={() => (window.location.href = '/select/drive')}
-            >
-              Select Drive
-            </Button>
-            <Button
-              variant="primary"
-              disabled={!isSignedIn}
-              onClick={() => (window.location.href = '/timeline')}
-            >
-              Go to Timeline
+            <Button onClick={() => void refreshHealth()} variant="secondary" disabled={healthState.isLoading}>
+              Refresh status
             </Button>
           </div>
-        </Card>
-
-        <Card>
-          <h2>App data management</h2>
-          <p className={styles.muted}>
-            Manage the Drive folder that stores your Timeline artifacts. Deleting removes only app
-            data in that folder.
-          </p>
-          <div className={styles.actions}>
-            <Button
-              variant="secondary"
-              disabled={!driveFolderLink}
-              onClick={() => {
-                if (driveFolderLink) {
-                  window.open(driveFolderLink, '_blank', 'noreferrer');
-                }
-              }}
-            >
-              Open app folder in Drive
-            </Button>
-            <Button
-              onClick={handleCleanupPreview}
-              variant="secondary"
-              disabled={!isSignedIn || !driveFolderId || cleanupLoading}
-            >
-              {cleanupLoading ? 'Listing...' : 'List app data'}
-            </Button>
-          </div>
-          {cleanupPreview.length > 0 ? (
-            <div className={styles.cleanupPanel}>
-              <p className={styles.muted}>
-                {cleanupPreview.length} file(s) would be deleted. This does not remove your original
-                Gmail or Drive files.
-              </p>
-              <ul className={styles.cleanupList}>
-                {cleanupPreview.map((file) => (
-                  <li key={file.id}>{file.name}</li>
-                ))}
-              </ul>
-              <label className={styles.confirmRow}>
-                <span>Type DELETE to confirm:</span>
-                <input
-                  className={styles.confirmInput}
-                  value={cleanupConfirmText}
-                  onChange={(event) => setCleanupConfirmText(event.target.value)}
-                />
-              </label>
-              <Button
-                onClick={handleCleanupConfirm}
-                variant="secondary"
-                className={styles.dangerButton}
-                disabled={cleanupLoading || cleanupConfirmText !== 'DELETE'}
-              >
-                Delete app data in Drive
-              </Button>
-            </div>
-          ) : null}
-          {cleanupError ? <p className={styles.error}>{cleanupError}</p> : null}
         </Card>
       </div>
+
+      <p className={styles.muted}>
+        Next step: <Link href="/getting-started">Go to Getting Started</Link>
+      </p>
     </section>
   );
 }
