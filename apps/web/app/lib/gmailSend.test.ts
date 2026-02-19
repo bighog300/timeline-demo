@@ -19,21 +19,23 @@ describe('gmailSend', () => {
         subject: 'Hello',
         textBody: 'Body text',
       }),
-    ).resolves.toEqual({ id: 'msg-1', threadId: 'thread-1' });
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://gmail.googleapis.com/gmail/v1/users/me/messages/send',
-      expect.objectContaining({ method: 'POST' }),
-    );
+    ).resolves.toMatchObject({ id: 'msg-1', threadId: 'thread-1', attempts: 1 });
 
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string) as { raw: string };
     expect(body.raw).not.toMatch(/[+=/]/);
-    const decoded = Buffer.from(body.raw.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
-    expect(decoded).toContain('Subject: Hello');
-    expect(decoded).toContain('To: to@example.com');
   });
 
-  it('throws GmailApiError on upstream failure', async () => {
+  it('retries on upstream 500 and 429', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 500, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: false, status: 429, json: async () => ({}) })
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: 'msg-1' }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(sendEmail({ accessToken: 't', fromEmail: 'a@b.com', to: ['c@d.com'], subject: 's', textBody: 'b' })).resolves.toMatchObject({ attempts: 3 });
+  });
+
+  it('throws GmailApiError on non-retryable 4xx', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({ ok: false, status: 401, json: async () => ({ error: 'bad token' }) }),

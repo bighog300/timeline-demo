@@ -24,6 +24,7 @@ vi.mock('../../../lib/secrets/webhookTargets', () => ({ resolveSlackWebhookUrl: 
 vi.mock('../../../lib/notifications/slack', () => ({ postSlackMessage: vi.fn() }));
 vi.mock('../../../lib/notifications/webhook', () => ({ postWebhook: vi.fn() }));
 vi.mock('../../../lib/scheduler/channelMarkers', () => ({ existsMarker: vi.fn(() => false), writeMarker: vi.fn() }));
+vi.mock('../../../lib/scheduler/cronLock', () => ({ tryAcquireCronLock: vi.fn(async () => ({ acquired: true })), releaseCronLock: vi.fn(), readCronLock: vi.fn() }));
 vi.mock('../../../lib/scheduler/runJobs', () => ({
   runWeekInReviewJob: vi.fn(),
   runAlertsJob: vi.fn(),
@@ -46,6 +47,7 @@ import { postSlackMessage } from '../../../lib/notifications/slack';
 import { postWebhook } from '../../../lib/notifications/webhook';
 import { existsMarker } from '../../../lib/scheduler/channelMarkers';
 import { readScheduleConfigFromDrive } from '../../../lib/scheduler/scheduleConfigDrive';
+import { tryAcquireCronLock } from '../../../lib/scheduler/cronLock';
 import { POST } from './route';
 
 const mockAuth = vi.mocked(getGoogleAccessTokenForCron);
@@ -69,6 +71,24 @@ describe('/api/cron/run', () => {
   it('rejects invalid secret', async () => {
     const response = await POST(new Request('http://localhost/api/cron/run', { method: 'POST' }) as never);
     expect(response.status).toBe(401);
+  });
+
+
+  it('when lock held and not expired -> skipped locked', async () => {
+    mockAuth.mockResolvedValue({ ok: true, accessToken: 'token' });
+    mockFolder.mockResolvedValue({ id: 'folder-1', name: 'f' });
+    vi.mocked(tryAcquireCronLock).mockResolvedValue({ acquired: false, reason: 'locked' } as never);
+    const response = await POST(new Request('http://localhost/api/cron/run', { headers: { Authorization: 'Bearer secret' } }) as never);
+    await expect(response.json()).resolves.toMatchObject({ ok: true, skipped: true, reason: 'locked' });
+  });
+
+  it('expired lock -> proceeds', async () => {
+    mockAuth.mockResolvedValue({ ok: true, accessToken: 'token' });
+    mockFolder.mockResolvedValue({ id: 'folder-1', name: 'f' });
+    vi.mocked(tryAcquireCronLock).mockResolvedValue({ acquired: true } as never);
+    mockRead.mockResolvedValue({ config: { version: 1, updatedAtISO: '2026-01-05T00:00:00Z', jobs: [] }, fileId: 'cfg', webViewLink: undefined });
+    const response = await POST(new Request('http://localhost/api/cron/run', { headers: { Authorization: 'Bearer secret' } }) as never);
+    await expect(response.json()).resolves.toMatchObject({ ok: true });
   });
 
   it('records missing refresh token cleanly', async () => {

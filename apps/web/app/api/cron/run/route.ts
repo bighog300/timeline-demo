@@ -26,6 +26,7 @@ import { formatDigest } from '../../../lib/notifications/formatDigest';
 import { postSlackMessage } from '../../../lib/notifications/slack';
 import { postWebhook } from '../../../lib/notifications/webhook';
 import { existsMarker, writeMarker } from '../../../lib/scheduler/channelMarkers';
+import { releaseCronLock, tryAcquireCronLock } from '../../../lib/scheduler/cronLock';
 
 const isAuthorized = (request: NextRequest) => {
   const header = request.headers.get('authorization') ?? '';
@@ -113,8 +114,9 @@ const sendChannelNotifications = async ({
   jobMeta: { id: string; type: 'week_in_review' | 'alerts'; dateFromISO?: string; dateToISO?: string; lookbackStartISO?: string; nowISO?: string };
   now: Date;
 }) => {
-  const slack = { attempted: 0, sent: 0, skipped: 0, failed: 0 };
-  const webhook = { attempted: 0, sent: 0, skipped: 0, failed: 0 };
+  const slack = { attempted: 0, sent: 0, skipped: 0, failed: 0, attemptsTotal: 0, retries: 0, missingTargets: [] as string[] };
+  const webhook = { attempted: 0, sent: 0, skipped: 0, failed: 0, attemptsTotal: 0, retries: 0, missingTargets: [] as string[] };
+  const failures: Array<{ channel: 'slack' | 'webhook'; targetKey: string; status?: number; code?: string; message: string }> = [];
 
   const slackChannel = notify.channels?.slack;
   if (slackChannel?.enabled) {
@@ -130,6 +132,8 @@ const sendChannelNotifications = async ({
       const webhookUrl = resolveSlackWebhookUrl(targetKey);
       if (!webhookUrl) {
         slack.failed += 1;
+        slack.missingTargets.push(targetKey);
+        failures.push({ channel: 'slack', targetKey, code: 'missing_env_target', message: 'missing_env_target' });
         continue;
       }
       if (await existsMarker({ drive, folderId, type: 'slack', runKey, recipientKey, targetKey })) {
@@ -144,14 +148,21 @@ const sendChannelNotifications = async ({
           maxItems: slackChannel.maxItems ?? 8,
           includeReportLink: slackChannel.includeReportLink ?? true,
         });
-        await postSlackMessage({ webhookUrl, text: formatted.slackText });
+        const slackResult = await postSlackMessage({ webhookUrl, text: formatted.slackText });
+        slack.attemptsTotal += slackResult.attempts;
+        slack.retries += Math.max(0, slackResult.attempts - 1);
         await writeMarker({
           drive, folderId, type: 'slack', runKey, recipientKey, targetKey,
           details: { runKey, recipientKey, targetKey, sentAtISO: now.toISOString() },
         });
         slack.sent += 1;
-      } catch {
+      } catch (error) {
         slack.failed += 1;
+        const status = error && typeof error === 'object' && 'status' in error ? Number((error as { status?: number }).status) : undefined;
+        const attempts = error && typeof error === 'object' && 'attempts' in error ? Number((error as { attempts?: number }).attempts) : 1;
+        slack.attemptsTotal += Number.isFinite(attempts) ? attempts : 1;
+        slack.retries += Math.max(0, (Number.isFinite(attempts) ? attempts : 1) - 1);
+        failures.push({ channel: 'slack', targetKey, status, message: error instanceof Error ? error.message.slice(0, 200) : 'slack_send_failed' });
       }
     }
   }
@@ -169,6 +180,8 @@ const sendChannelNotifications = async ({
       const url = resolveGenericWebhookUrl(targetKey);
       if (!url) {
         webhook.failed += 1;
+        webhook.missingTargets.push(targetKey);
+        failures.push({ channel: 'webhook', targetKey, code: 'missing_env_target', message: 'missing_env_target' });
         continue;
       }
       if (await existsMarker({ drive, folderId, type: 'webhook', runKey, recipientKey, targetKey })) {
@@ -183,19 +196,26 @@ const sendChannelNotifications = async ({
           maxItems: webhookChannel.maxItems ?? 10,
           includeReportLink: webhookChannel.includeReportLink ?? true,
         });
-        await postWebhook({ url, payload: formatted.webhookPayload });
+        const webhookResult = await postWebhook({ url, payload: formatted.webhookPayload });
+        webhook.attemptsTotal += webhookResult.attempts;
+        webhook.retries += Math.max(0, webhookResult.attempts - 1);
         await writeMarker({
           drive, folderId, type: 'webhook', runKey, recipientKey, targetKey,
           details: { runKey, recipientKey, targetKey, sentAtISO: now.toISOString(), version: 1 },
         });
         webhook.sent += 1;
-      } catch {
+      } catch (error) {
         webhook.failed += 1;
+        const status = error && typeof error === 'object' && 'status' in error ? Number((error as { status?: number }).status) : undefined;
+        const attempts = error && typeof error === 'object' && 'attempts' in error ? Number((error as { attempts?: number }).attempts) : 1;
+        webhook.attemptsTotal += Number.isFinite(attempts) ? attempts : 1;
+        webhook.retries += Math.max(0, (Number.isFinite(attempts) ? attempts : 1) - 1);
+        failures.push({ channel: 'webhook', targetKey, status, message: error instanceof Error ? error.message.slice(0, 200) : 'webhook_send_failed' });
       }
     }
   }
 
-  return { slack, webhook };
+  return { slack, webhook, failures };
 };
 
 const run = async (request: NextRequest) => {
@@ -212,6 +232,12 @@ const run = async (request: NextRequest) => {
   const folder = await resolveOrProvisionAppDriveFolder(drive, { requestId: 'cron', route: '/api/cron/run' });
   if (!folder?.id) {
     return NextResponse.json({ ok: false, error: 'drive_not_provisioned' }, { status: 500 });
+  }
+
+  const lockHolder = `cron-${Math.random().toString(36).slice(2, 10)}`;
+  const lock = await tryAcquireCronLock({ drive, driveFolderId: folder.id, holder: lockHolder });
+  if (!lock.acquired) {
+    return NextResponse.json({ ok: true, skipped: true, reason: 'locked' });
   }
 
   const loaded = await readScheduleConfigFromDrive(drive, folder.id);
@@ -249,10 +275,18 @@ const run = async (request: NextRequest) => {
       webhookSent?: number;
       webhookSkipped?: number;
       webhookFailed?: number;
+      emailAttemptsTotal?: number;
+      emailRetries?: number;
+      slackAttemptsTotal?: number;
+      slackRetries?: number;
+      webhookAttemptsTotal?: number;
+      webhookRetries?: number;
+      failures?: Array<{ channel: string; targetKey?: string; status?: number; code?: string; message: string }>;
     };
   }> = [];
 
-  for (const job of loaded.config.jobs.filter((item) => item.enabled)) {
+  try {
+    for (const job of loaded.config.jobs.filter((item) => item.enabled)) {
     if (!isJobDue(job.schedule.cron, job.schedule.timezone, now)) {
       continue;
     }
@@ -459,7 +493,7 @@ const run = async (request: NextRequest) => {
                   subject: message.subject,
                   textBody: message.body,
                 });
-                result.email = { attempted: true, ok: true, mode: 'broadcast' };
+                result.email = { attempted: true, ok: true, mode: 'broadcast', emailAttemptsTotal: sent.attempts ?? 1, emailRetries: Math.max(0, (sent.attempts ?? 1) - 1) };
                 await writeEmailSentMarker({
                   drive,
                   folderId: folder.id,
@@ -503,7 +537,7 @@ const run = async (request: NextRequest) => {
             webhookSent = channelResult.webhook.sent;
             webhookSkipped = channelResult.webhook.skipped;
             webhookFailed = channelResult.webhook.failed;
-            result.email = { ...(result.email ?? {}), slackAttempted, slackSent, slackSkipped, slackFailed, webhookAttempted, webhookSent, webhookSkipped, webhookFailed };
+            result.email = { ...(result.email as any), slackAttempted, slackSent, slackSkipped, slackFailed, webhookAttempted, webhookSent, webhookSkipped, webhookFailed, slackAttemptsTotal: channelResult.slack.attemptsTotal, slackRetries: channelResult.slack.retries, webhookAttemptsTotal: channelResult.webhook.attemptsTotal, webhookRetries: channelResult.webhook.retries, failures: channelResult.failures } as any;
           }
         }
         ranJobs.push(result);
@@ -699,7 +733,7 @@ const run = async (request: NextRequest) => {
                   subject: message.subject,
                   textBody: message.body,
                 });
-                result.email = { attempted: true, ok: true, mode: 'broadcast' };
+                result.email = { attempted: true, ok: true, mode: 'broadcast', emailAttemptsTotal: sent.attempts ?? 1, emailRetries: Math.max(0, (sent.attempts ?? 1) - 1) };
                 await writeEmailSentMarker({
                   drive,
                   folderId: folder.id,
@@ -743,7 +777,7 @@ const run = async (request: NextRequest) => {
             webhookSent = channelResult.webhook.sent;
             webhookSkipped = channelResult.webhook.skipped;
             webhookFailed = channelResult.webhook.failed;
-            result.email = { ...(result.email ?? {}), slackAttempted, slackSent, slackSkipped, slackFailed, webhookAttempted, webhookSent, webhookSkipped, webhookFailed };
+            result.email = { ...(result.email as any), slackAttempted, slackSent, slackSkipped, slackFailed, webhookAttempted, webhookSent, webhookSkipped, webhookFailed, slackAttemptsTotal: channelResult.slack.attemptsTotal, slackRetries: channelResult.slack.retries, webhookAttemptsTotal: channelResult.webhook.attemptsTotal, webhookRetries: channelResult.webhook.retries, failures: channelResult.failures } as any;
           }
         }
 
@@ -762,12 +796,16 @@ const run = async (request: NextRequest) => {
         type: job.type,
         ok: ranJobs[ranJobs.length - 1]?.ok ?? false,
         email: ranJobs[ranJobs.length - 1]?.email,
+        failures: ranJobs[ranJobs.length - 1]?.email?.failures,
         durationMs: Date.now() - started,
       },
     });
   }
 
-  return NextResponse.json({ ok: true, ranJobs });
+    return NextResponse.json({ ok: true, ranJobs });
+  } finally {
+    await releaseCronLock({ drive, driveFolderId: folder.id, holder: lockHolder });
+  }
 };
 
 export const POST = run;

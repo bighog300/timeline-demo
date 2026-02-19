@@ -6,8 +6,13 @@ export default function SchedulesEditor() {
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [authWarning, setAuthWarning] = useState(false);
 
   useEffect(() => {
+    fetch('/api/admin/ops/status').then((r) => r.json()).then((json) => {
+      setAuthWarning(Boolean(json?.issues?.auth?.missingRefreshToken || json?.issues?.auth?.insufficientScope));
+    }).catch(() => {});
+
     fetch('/api/admin/schedules')
       .then(async (response) => {
         const json = await response.json();
@@ -42,6 +47,7 @@ export default function SchedulesEditor() {
 
   return (
     <div>
+      {authWarning ? <p>Auth permissions need re-consent. See /admin/ops for guidance.</p> : null}
       <textarea value={value} onChange={(event) => setValue(event.target.value)} rows={24} cols={100} />
       <div>
         <button type="button" onClick={onSave}>Save schedule config</button>

@@ -61,14 +61,11 @@ describe('SubscriptionsPageClient', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenNthCalledWith(
-        2,
-        '/api/admin/schedules',
-        expect.objectContaining({ method: 'PUT' }),
-      );
+      expect(fetchMock.mock.calls.some((call) => call[0] === '/api/admin/schedules' && (call[1] as any)?.method === 'PUT')).toBe(true);
     });
 
-    const putBody = JSON.parse((fetchMock.mock.calls[1]?.[1] as { body: string }).body);
+    const putCall = fetchMock.mock.calls.find((call) => call[0] === '/api/admin/schedules' && (call[1] as any)?.method === 'PUT');
+    const putBody = JSON.parse((putCall?.[1] as { body: string }).body);
     expect(putBody.recipientProfiles.some((profile: { id: string }) => profile.id === 'p3')).toBe(true);
   });
 
@@ -123,9 +120,21 @@ describe('SubscriptionsPageClient', () => {
     fireEvent.change(screen.getByLabelText('Slack targets (comma separated keys)'), { target: { value: 'team_a' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    const putBody = JSON.parse((fetchMock.mock.calls[1]?.[1] as { body: string }).body);
+    await waitFor(() => expect(fetchMock.mock.calls.some((call) => call[0] === '/api/admin/schedules' && (call[1] as any)?.method === 'PUT')).toBe(true));
+    const putCall = fetchMock.mock.calls.find((call) => call[0] === '/api/admin/schedules' && (call[1] as any)?.method === 'PUT');
+    const putBody = JSON.parse((putCall?.[1] as { body: string }).body);
     expect(putBody.jobs[0].notify.channels.slack.targets).toEqual(['TEAM_A']);
+  });
+
+
+  it('shows auth warning banner when ops reports auth issue', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ config: baseConfig, issues: { auth: { missingRefreshToken: true, insufficientScope: false } } }),
+    }));
+
+    render(<SubscriptionsPageClient />);
+    expect(await screen.findByText(/Auth permissions need re-consent/)).toBeInTheDocument();
   });
 
   it('invalid target key blocks save', async () => {
@@ -141,7 +150,7 @@ describe('SubscriptionsPageClient', () => {
     fireEvent.change(screen.getByLabelText('Slack targets (comma separated keys)'), { target: { value: 'ops-team' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.filter((call) => call[0] === '/api/admin/schedules' && (call[1] as any)?.method === 'PUT')).toHaveLength(0);
     expect(screen.getByText('Webhook target keys must match A-Z0-9_.')).toBeInTheDocument();
   });
 });
