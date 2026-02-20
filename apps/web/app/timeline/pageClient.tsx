@@ -23,10 +23,12 @@ import {
 } from '../lib/timelineView';
 import type { SelectionSet, SelectionSetItem, SummaryArtifact } from '../lib/types';
 import { isSummaryArtifact, normalizeArtifact } from '../lib/validateArtifact';
+import { detectPotentialConflicts } from '../lib/timeline/conflicts';
 import RunsPanel from './RunsPanel';
 import TimelineView from './TimelineView';
 import RecentExports from './RecentExports';
 import TimelineQuality from './TimelineQuality';
+import PotentialConflicts from './PotentialConflicts';
 import styles from './timeline.module.css';
 
 type TimelineDisplayMode = 'summaries' | 'timeline';
@@ -587,6 +589,11 @@ export default function TimelinePageClient() {
           Boolean(value),
         ),
     [artifacts, filteredEntries],
+  );
+  const highlightedArtifactId = searchParams?.get('artifactId') ?? null;
+  const potentialConflicts = useMemo(
+    () => detectPotentialConflicts(filteredSummaryArtifacts),
+    [filteredSummaryArtifacts],
   );
 
   const selectionItems = useMemo(
@@ -2690,6 +2697,11 @@ export default function TimelinePageClient() {
 
         <TimelineQuality artifacts={filteredSummaryArtifacts} onDateApplied={() => handleSyncFromDrive({ fullSync: true })} />
 
+        <PotentialConflicts
+          conflicts={potentialConflicts}
+          highlightedArtifactId={highlightedArtifactId}
+        />
+
         <RecentExports
           viewMode={displayMode}
           selectionSetId={selectionSetIdParam}
@@ -2713,7 +2725,7 @@ export default function TimelinePageClient() {
         ) : displayMode === 'timeline' ? (
           <TimelineView
             artifacts={filteredSummaryArtifacts}
-            highlightedArtifactId={searchParams?.get('artifactId')}
+            highlightedArtifactId={highlightedArtifactId}
           />
         ) : (
           <div className={styles.groupList}>
