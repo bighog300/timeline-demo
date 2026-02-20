@@ -1,0 +1,67 @@
+.panel {
+  margin-top: 16px;
+}
+
+.counts {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.countChip {
+  background: var(--surface-2, #f5f5f5);
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.85rem;
+}
+
+.notice {
+  margin: 8px 0;
+}
+
+.fixer {
+  margin-top: 12px;
+  border-top: 1px solid var(--border-color, #ddd);
+  padding-top: 12px;
+}
+
+.artifactRow {
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.meta {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.preview {
+  margin: 8px 0;
+  font-size: 0.9rem;
+}
+
+.candidates {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.candidate {
+  border: 1px solid var(--border-color, #ddd);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.warning {
+  color: #9a6700;
+  font-size: 0.85rem;
+}
+
+.success {
+  color: #1a7f37;
+  margin-top: 8px;
+}
