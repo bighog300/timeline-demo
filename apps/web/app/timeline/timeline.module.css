@@ -543,3 +543,31 @@
   flex-direction: column;
   gap: 2px;
 }
+
+.recentExportsList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.recentExportRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  border-radius: 12px;
+  padding: 12px;
+  flex-wrap: wrap;
+}
+
+.recentFormat {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #334155;
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+  padding: 2px 8px;
+}

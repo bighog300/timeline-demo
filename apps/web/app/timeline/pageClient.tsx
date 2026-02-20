@@ -25,6 +25,7 @@ import type { SelectionSet, SelectionSetItem, SummaryArtifact } from '../lib/typ
 import { isSummaryArtifact, normalizeArtifact } from '../lib/validateArtifact';
 import RunsPanel from './RunsPanel';
 import TimelineView from './TimelineView';
+import RecentExports from './RecentExports';
 import styles from './timeline.module.css';
 
 type TimelineDisplayMode = 'summaries' | 'timeline';
@@ -1611,13 +1612,21 @@ export default function TimelinePageClient() {
     setExportDriveLink(null);
 
     try {
+      const exportId = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `exp_${Date.now()}`;
       const response = await fetch(
         exportFormat === 'pdf' ? '/api/timeline/export/pdf' : '/api/timeline/export/drive',
         {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
+            exportId,
             artifactIds: filteredSummaryArtifacts.map(({ artifact }) => artifact.driveFileId),
+            source: {
+              viewMode: displayMode,
+              ...(selectionSetIdParam ? { selectionSetId: selectionSetIdParam } : {}),
+              ...(filters.text ? { query: filters.text } : {}),
+              ...(fromSelect ? { from: 'select' } : {}),
+            },
           }),
         },
       );
@@ -2676,6 +2685,14 @@ export default function TimelinePageClient() {
             </a>
           </div>
         ) : null}
+
+
+        <RecentExports
+          viewMode={displayMode}
+          selectionSetId={selectionSetIdParam}
+          from={fromSelect ? 'select' : undefined}
+          query={filters.text || undefined}
+        />
 
         {timelineEntries.length === 0 ? (
           <Card className={styles.emptyState}>

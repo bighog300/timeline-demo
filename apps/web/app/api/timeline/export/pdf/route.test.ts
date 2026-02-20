@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 
+vi.mock('pdfkit', () => ({
+  default: class MockPdfDocument {},
+}));
+
 vi.mock('../../../../lib/googleAuth', () => ({
   getGoogleSession: vi.fn(),
   getGoogleAccessToken: vi.fn(),
@@ -13,6 +17,14 @@ vi.mock('../../../../lib/timeline/exportArtifacts', () => ({
   loadArtifactsForExport: vi.fn(),
 }));
 
+vi.mock('../../../../lib/timeline/exportPdf', () => ({
+  renderTimelinePdf: vi.fn(async () => new Uint8Array([1, 2, 3])),
+}));
+
+
+vi.mock('../../../../lib/timeline/exportHistoryDrive', () => ({
+  appendExportHistoryItem: vi.fn(),
+}));
 import { getGoogleAccessToken, getGoogleSession } from '../../../../lib/googleAuth';
 import { createDriveClient } from '../../../../lib/googleDrive';
 import { loadArtifactsForExport } from '../../../../lib/timeline/exportArtifacts';
