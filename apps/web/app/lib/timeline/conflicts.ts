@@ -87,9 +87,29 @@ const dateDiffDays = (leftISO?: string, rightISO?: string) => {
   return Math.abs(leftMs - rightMs) / (1000 * 60 * 60 * 24);
 };
 
-const amountRegex = /(?:([$£€])\s?([0-9][0-9,]*(?:\.[0-9]{1,2})?)|([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s?(USD|GBP|EUR))/gi;
+export const amountRegex = /(?:([$£€])\s?([0-9][0-9,]*(?:\.[0-9]{1,2})?)|([0-9][0-9,]*(?:\.[0-9]{1,2})?)\s?(USD|GBP|EUR))/gi;
 
 const parseAmount = (artifact: TimelineArtifact) => {
+  const userAmount = artifact.artifact.userAnnotations?.amount?.trim();
+  if (userAmount) {
+    const matchFromUser = amountRegex.exec(userAmount);
+    amountRegex.lastIndex = 0;
+    if (matchFromUser) {
+      const symbol = matchFromUser[1] ?? null;
+      const symbolValue = matchFromUser[2] ?? null;
+      const codeValue = matchFromUser[3] ?? null;
+      const code = matchFromUser[4]?.toUpperCase() ?? null;
+      const rawNumber = symbolValue ?? codeValue;
+      if (rawNumber) {
+        const numericValue = Number.parseFloat(rawNumber.replace(/,/g, ''));
+        if (Number.isFinite(numericValue)) {
+          const currency = symbol === '$' ? 'USD' : symbol === '£' ? 'GBP' : symbol === '€' ? 'EUR' : code;
+          return { currency, value: numericValue, raw: userAmount, source: 'user_annotation' as const };
+        }
+      }
+    }
+  }
+
   const text = `${artifact.artifact.title} ${artifact.artifact.summary}`;
   const match = amountRegex.exec(text);
   amountRegex.lastIndex = 0;
@@ -111,6 +131,7 @@ const parseAmount = (artifact: TimelineArtifact) => {
     currency,
     value: numericValue,
     raw: match[0],
+    source: 'text' as const,
   };
 };
 
@@ -244,8 +265,8 @@ export const detectPotentialConflicts = (artifacts: TimelineArtifact[]): Potenti
               },
             ],
             details: {
-              leftValue: leftAmount.raw,
-              rightValue: rightAmount.raw,
+              leftValue: `${leftAmount.raw} (${leftAmount.source})`,
+              rightValue: `${rightAmount.raw} (${rightAmount.source})`,
               evidence: `Matching label: ${leftLabel.raw || rightLabel.raw}`,
             },
           });

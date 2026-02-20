@@ -56,7 +56,11 @@ export const extractEntityStrings = (artifact: TimelineArtifact): string[] => {
     .map(toEntityName)
     .filter((value): value is string => Boolean(value));
 
-  return Array.from(new Set(structured));
+  const userAnnotationsEntities = (artifact.artifact.userAnnotations?.entities ?? [])
+    .map((value) => normalizeWhitespace(value))
+    .filter(Boolean);
+
+  return Array.from(new Set([...structured, ...userAnnotationsEntities]));
 };
 
 export const buildEntityIndex = (artifacts: TimelineArtifact[]) => {

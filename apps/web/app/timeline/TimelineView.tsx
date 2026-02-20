@@ -60,7 +60,9 @@ export default function TimelineView({ artifacts, highlightedArtifactId }: Timel
               const bullets = toBullets(artifact);
               const participants = artifact.participants?.join(', ');
               const entities = artifact.entities?.map((entity) => entity.name).join(', ');
-              const people = participants || entities;
+              const annotatedEntities = artifact.userAnnotations?.entities?.join(', ');
+              const people = participants || entities || annotatedEntities;
+              const location = artifact.userAnnotations?.location;
               const externalLink = artifact.driveWebViewLink || `https://drive.google.com/file/d/${artifact.driveFileId}/view`;
               const internalLink = `/timeline?artifactId=${encodeURIComponent(artifact.driveFileId)}`;
               const isHighlighted =
@@ -83,6 +85,7 @@ export default function TimelineView({ artifacts, highlightedArtifactId }: Timel
                   <div className={styles.metaRow}>
                     <span>{sourceTypeLabel(artifact)}</span>
                     {people ? <span>• {people}</span> : null}
+                    {location ? <span>• {location}</span> : null}
                     <a href={externalLink} target="_blank" rel="noreferrer">
                       View source
                     </a>

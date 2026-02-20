@@ -33,6 +33,7 @@ import RunsPanel from './RunsPanel';
 import TimelineView from './TimelineView';
 import RecentExports from './RecentExports';
 import TimelineQuality from './TimelineQuality';
+import MissingInfo from './MissingInfo';
 import PotentialConflicts from './PotentialConflicts';
 import EntityFilter from './EntityFilter';
 import styles from './timeline.module.css';
@@ -2751,6 +2752,8 @@ export default function TimelinePageClient() {
 
 
         <TimelineQuality artifacts={visibleArtifacts} onDateApplied={() => handleSyncFromDrive({ fullSync: true })} />
+
+        <MissingInfo artifacts={visibleArtifacts} onApplied={() => handleSyncFromDrive({ fullSync: true })} />
 
         <PotentialConflicts
           conflicts={potentialConflicts}

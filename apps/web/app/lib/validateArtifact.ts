@@ -32,6 +32,24 @@ const normalizeSuggestedActions = (value: unknown) => {
 };
 
 
+const normalizeUserAnnotations = (value: unknown) => {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const entities = Array.isArray(value.entities)
+    ? value.entities.filter((item): item is string => typeof item === 'string')
+    : undefined;
+
+  return {
+    entities,
+    location: normalizeString(value.location),
+    amount: normalizeString(value.amount),
+    note: normalizeString(value.note),
+    updatedAtISO: normalizeString(value.updatedAtISO),
+  };
+};
+
 const normalizeEntities = (value: unknown) =>
   Array.isArray(value)
     ? value
@@ -139,6 +157,7 @@ const coerceArtifact = (value: unknown): SummaryArtifact | null => {
     participants: normalizeStringArray(value.participants),
     tags: normalizeStringArray(value.tags),
     topics: normalizeStringArray(value.topics),
+    userAnnotations: normalizeUserAnnotations(value.userAnnotations),
     driveFolderId: typeof value.driveFolderId === 'string' ? value.driveFolderId : '',
     driveFileId: typeof value.driveFileId === 'string' ? value.driveFileId : '',
     driveWebViewLink: normalizeString(value.driveWebViewLink),

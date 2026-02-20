@@ -84,3 +84,46 @@ describe('NotificationCircuitBreakerSchema', () => {
     expect(result.success).toBe(false);
   });
 });
+
+
+describe('SummaryArtifactSchema userAnnotations', () => {
+  const baseArtifact = {
+    artifactId: 'a1',
+    source: 'drive',
+    sourceId: 'src-1',
+    title: 'Artifact',
+    createdAtISO: '2026-01-01T00:00:00.000Z',
+    summary: 'Summary',
+    highlights: ['h'],
+    driveFolderId: 'folder-1',
+    driveFileId: 'file-1',
+    model: 'stub',
+    version: 1,
+  };
+
+  it('accepts valid userAnnotations shape', async () => {
+    const { SummaryArtifactSchema } = await import('./timeline.js');
+    const result = SummaryArtifactSchema.safeParse({
+      ...baseArtifact,
+      userAnnotations: {
+        entities: ['Alice', 'Bob'],
+        location: 'London',
+        amount: '£1200',
+        note: 'Provided manually',
+        updatedAtISO: '2026-01-02T00:00:00.000Z',
+      },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it('rejects invalid userAnnotations values', async () => {
+    const { SummaryArtifactSchema } = await import('./timeline.js');
+    const result = SummaryArtifactSchema.safeParse({
+      ...baseArtifact,
+      userAnnotations: {
+        entities: Array.from({ length: 26 }, (_, i) => `e${i}`),
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+});
