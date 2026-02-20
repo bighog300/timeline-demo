@@ -47,16 +47,26 @@ const firstSentence = (text?: string) => {
   return sentence.trim();
 };
 
+const buildUserAnnotationBullets = (artifact: SummaryArtifact) => {
+  const rows: string[] = [];
+  if (artifact.userAnnotations?.entities?.length) rows.push(`Entities: ${artifact.userAnnotations.entities.join(', ')}`);
+  if (artifact.userAnnotations?.location) rows.push(`Location: ${artifact.userAnnotations.location}`);
+  if (artifact.userAnnotations?.amount) rows.push(`Amount: ${artifact.userAnnotations.amount}`);
+  if (artifact.userAnnotations?.note) rows.push(`Note: ${artifact.userAnnotations.note}`);
+  return rows.length ? [`User annotations — ${rows.join(' · ')}`] : [];
+};
+
 export const toBullets = (artifact: SummaryArtifact) => {
   if (artifact.highlights?.length) {
-    return artifact.highlights.slice(0, 3);
+    return [...artifact.highlights.slice(0, 3), ...buildUserAnnotationBullets(artifact)];
   }
   const parts = artifact.summary
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean)
     .slice(0, 3);
-  return parts.length ? parts : [artifact.summary.slice(0, 180)];
+  const base = parts.length ? parts : [artifact.summary.slice(0, 180)];
+  return [...base, ...buildUserAnnotationBullets(artifact)];
 };
 
 export const sourceTypeLabel = (artifact: SummaryArtifact) => {

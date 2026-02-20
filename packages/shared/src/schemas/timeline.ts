@@ -110,6 +110,16 @@ export const RiskSchema = z
   })
   .strict();
 
+export const UserAnnotationsSchema = z
+  .object({
+    entities: z.array(z.string().trim().min(1).max(50)).max(25).optional(),
+    location: z.string().trim().min(1).max(200).optional(),
+    amount: z.string().trim().min(1).max(200).optional(),
+    note: z.string().trim().min(1).max(200).optional(),
+    updatedAtISO: isoDateString.optional(),
+  })
+  .strict();
+
 export const SummaryArtifactSchema = z
   .object({
     artifactId: z.string(),
@@ -141,6 +151,7 @@ export const SummaryArtifactSchema = z
     participants: z.array(z.string().trim().min(1)).max(30).optional(),
     tags: z.array(z.string().trim().min(1)).max(20).optional(),
     topics: z.array(z.string().trim().min(1)).max(20).optional(),
+    userAnnotations: UserAnnotationsSchema.optional(),
     driveFolderId: z.string(),
     driveFileId: z.string(),
     driveWebViewLink: z.string().optional(),

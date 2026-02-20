@@ -81,7 +81,7 @@ export default function TimelineQuality({ artifacts, onDateApplied }: Props) {
   };
 
   return (
-    <Card className={styles.panel}>
+    <Card id="timeline-quality" className={styles.panel}>
       <h2>Timeline quality</h2>
       <div className={styles.counts}>
         <span className={styles.countChip}>Total: {coverage.total}</span>

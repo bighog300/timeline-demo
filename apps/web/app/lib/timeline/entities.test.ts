@@ -23,11 +23,13 @@ const makeArtifact = (overrides: Partial<TimelineArtifact['artifact']>): Timelin
 
 describe('entities helpers', () => {
   it('extractEntityStrings uses structured entities when present', () => {
-    const artifact = makeArtifact({
-      entities: [{ name: '  Alice  ' }, { name: 'Acme Corp' }],
-    });
-
+    const artifact = makeArtifact({ entities: [{ name: '  Alice  ' }, { name: 'Acme Corp' }] });
     expect(extractEntityStrings(artifact)).toEqual(['Alice', 'Acme Corp']);
+  });
+
+  it('includes user annotations entities in extraction', () => {
+    const artifact = makeArtifact({ userAnnotations: { entities: ['  Alice  '] } });
+    expect(extractEntityStrings(artifact)).toEqual(['Alice']);
   });
 
   it('filterArtifactsByEntity matches structured exact match (case-insensitive)', () => {

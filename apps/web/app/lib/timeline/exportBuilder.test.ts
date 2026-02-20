@@ -13,6 +13,7 @@ const buildArtifact = (overrides: Partial<SummaryArtifact>): SummaryArtifact => 
   summary: overrides.summary ?? 'Summary first sentence. More detail.',
   highlights: overrides.highlights ?? ['Line one', 'Line two'],
   sourceMetadata: overrides.sourceMetadata,
+  userAnnotations: overrides.userAnnotations,
   driveFolderId: overrides.driveFolderId ?? 'folder-1',
   driveFileId: overrides.driveFileId ?? 'file-1',
   driveWebViewLink: overrides.driveWebViewLink,
@@ -64,5 +65,14 @@ describe('buildTimelineExportModel', () => {
         sourceLabel: 'Doc subject',
       }),
     );
+  });
+
+  it('includes user annotations block when present', () => {
+    const model = buildTimelineExportModel([{
+      entryKey: 'a',
+      artifact: buildArtifact({ artifactId: 'a', driveFileId: 'a', userAnnotations: { entities: ['Alice'], location: 'London', amount: '£20', note: 'manual' } }),
+    }]);
+
+    expect(model.groups[0].items[0].bullets.some((line) => line.includes('User annotations'))).toBe(true);
   });
 });
