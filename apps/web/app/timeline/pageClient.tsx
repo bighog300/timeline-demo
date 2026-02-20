@@ -36,6 +36,7 @@ import TimelineQuality from './TimelineQuality';
 import MissingInfo from './MissingInfo';
 import PotentialConflicts from './PotentialConflicts';
 import EntityFilter from './EntityFilter';
+import ArtifactDetailsDrawer from './ArtifactDetailsDrawer';
 import styles from './timeline.module.css';
 
 type TimelineDisplayMode = 'summaries' | 'timeline';
@@ -462,6 +463,8 @@ export default function TimelinePageClient() {
   const [searchPartial, setSearchPartial] = useState(false);
   const searchAbortRef = useRef<AbortController | null>(null);
   const [pendingArtifactId, setPendingArtifactId] = useState<string | null>(null);
+  const [selectedArtifactId, setSelectedArtifactId] = useState<string | null>(null);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [indexData, setIndexData] = useState<TimelineIndex | null>(null);
   const [indexStale, setIndexStale] = useState(false);
   const [isIndexLoading, setIsIndexLoading] = useState(false);
@@ -1254,6 +1257,53 @@ export default function TimelinePageClient() {
     [scrollToEntry],
   );
 
+  const replaceArtifactParam = useCallback((artifactId: string | null) => {
+    const nextParams = new URLSearchParams(searchParams?.toString() ?? '');
+    if (artifactId) {
+      nextParams.set('artifactId', artifactId);
+    } else {
+      nextParams.delete('artifactId');
+    }
+    const query = nextParams.toString();
+    router.replace(query ? `/timeline?${query}` : '/timeline');
+  }, [router, searchParams]);
+
+  const openArtifactDrawer = useCallback((artifactId: string) => {
+    setSelectedArtifactId(artifactId);
+    setIsDrawerOpen(true);
+    replaceArtifactParam(artifactId);
+  }, [replaceArtifactParam]);
+
+  const closeArtifactDrawer = useCallback(() => {
+    setIsDrawerOpen(false);
+    setSelectedArtifactId(null);
+    replaceArtifactParam(null);
+  }, [replaceArtifactParam]);
+
+  const handleDrawerSaved = useCallback((artifactId: string, userAnnotations: SummaryArtifact['userAnnotations'] | null) => {
+    setArtifacts((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      Object.entries(prev).forEach(([key, item]) => {
+        if (item.driveFileId !== artifactId && item.artifactId !== artifactId) {
+          return;
+        }
+        const updated = { ...item } as SummaryArtifact;
+        if (userAnnotations && Object.keys(userAnnotations).length) {
+          updated.userAnnotations = userAnnotations;
+        } else {
+          delete (updated as SummaryArtifact & { userAnnotations?: SummaryArtifact['userAnnotations'] }).userAnnotations;
+        }
+        next[key] = updated;
+        changed = true;
+      });
+      if (changed && typeof window !== 'undefined') {
+        window.localStorage.setItem(ARTIFACTS_KEY, JSON.stringify(next));
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
   const jumpToArtifactByDriveId = useCallback(
     (driveFileId: string) => {
       const entry = Object.entries(artifacts).find(([, artifact]) => {
@@ -1338,6 +1388,17 @@ export default function TimelinePageClient() {
     jumpToArtifactByDriveId(artifactId);
     jumpedArtifactRef.current = artifactId;
   }, [artifacts, jumpToArtifactByDriveId, searchParams]);
+
+  useEffect(() => {
+    const artifactId = searchParams?.get('artifactId');
+    if (!artifactId) {
+      setIsDrawerOpen(false);
+      setSelectedArtifactId(null);
+      return;
+    }
+    setSelectedArtifactId(artifactId);
+    setIsDrawerOpen(true);
+  }, [searchParams]);
 
 
   useEffect(() => {
@@ -2791,6 +2852,7 @@ export default function TimelinePageClient() {
           <TimelineView
             artifacts={visibleArtifacts}
             highlightedArtifactId={highlightedArtifactId}
+            onSelectArtifact={openArtifactDrawer}
           />
         ) : (
           <div className={styles.groupList}>
@@ -2809,7 +2871,28 @@ export default function TimelinePageClient() {
                       : '—';
 
                     return (
-                      <Card key={entry.key} className={styles.item} data-entry-key={entry.key}>
+                      <Card
+                        key={entry.key}
+                        className={`${styles.item} ${styles.clickableItem}`.trim()}
+                        data-entry-key={entry.key}
+                        tabIndex={0}
+                        onClick={(event) => {
+                          const target = event.target as HTMLElement;
+                          if (target.closest('a,button,input,textarea,select,summary')) {
+                            return;
+                          }
+                          const id = artifacts[entry.key]?.driveFileId;
+                          if (id) {
+                            openArtifactDrawer(id);
+                          }
+                        }}
+                        onKeyDown={(event) => {
+                          if ((event.key === 'Enter' || event.key === ' ') && artifacts[entry.key]?.driveFileId) {
+                            event.preventDefault();
+                            openArtifactDrawer(artifacts[entry.key]?.driveFileId ?? '');
+                          }
+                        }}
+                      >
                         <div className={styles.itemContent}>
                           <div className={styles.itemHeader}>
                             <div>
@@ -3058,6 +3141,14 @@ export default function TimelinePageClient() {
           </div>
         )}
       </div>
+
+      <ArtifactDetailsDrawer
+        isOpen={isDrawerOpen}
+        artifactId={selectedArtifactId}
+        artifact={visibleArtifacts.find(({ artifact }) => artifact.driveFileId === selectedArtifactId || artifact.artifactId === selectedArtifactId) ?? null}
+        onClose={closeArtifactDrawer}
+        onSaved={handleDrawerSaved}
+      />
     </section>
   );
 }

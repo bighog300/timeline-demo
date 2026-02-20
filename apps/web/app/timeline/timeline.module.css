@@ -571,3 +571,5 @@
   border-radius: 999px;
   padding: 2px 8px;
 }
+
+.clickableItem { cursor: pointer; }

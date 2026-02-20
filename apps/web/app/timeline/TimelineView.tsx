@@ -22,9 +22,10 @@ type TimelineArtifact = {
 type TimelineViewProps = {
   artifacts: TimelineArtifact[];
   highlightedArtifactId?: string | null;
+  onSelectArtifact?: (artifactId: string) => void;
 };
 
-export default function TimelineView({ artifacts, highlightedArtifactId }: TimelineViewProps) {
+export default function TimelineView({ artifacts, highlightedArtifactId, onSelectArtifact }: TimelineViewProps) {
   const groups = groupTimelineArtifacts(artifacts);
 
   useEffect(() => {
@@ -63,6 +64,7 @@ export default function TimelineView({ artifacts, highlightedArtifactId }: Timel
               const annotatedEntities = artifact.userAnnotations?.entities?.join(', ');
               const people = participants || entities || annotatedEntities;
               const location = artifact.userAnnotations?.location;
+              const amount = artifact.userAnnotations?.amount;
               const externalLink = artifact.driveWebViewLink || `https://drive.google.com/file/d/${artifact.driveFileId}/view`;
               const internalLink = `/timeline?artifactId=${encodeURIComponent(artifact.driveFileId)}`;
               const isHighlighted =
@@ -75,6 +77,13 @@ export default function TimelineView({ artifacts, highlightedArtifactId }: Timel
                   className={`${styles.item} ${isHighlighted ? styles.highlighted : ''}`.trim()}
                   data-entry-key={entryKey}
                   data-artifact-id={artifact.driveFileId}
+                  onClick={(event) => {
+                    const target = event.target as HTMLElement;
+                    if (target.closest('a,button,input,textarea,select')) {
+                      return;
+                    }
+                    onSelectArtifact?.(artifact.driveFileId);
+                  }}
                 >
                   <h4 className={styles.itemTitle}>{title}</h4>
                   <ul className={styles.bullets}>
@@ -86,6 +95,7 @@ export default function TimelineView({ artifacts, highlightedArtifactId }: Timel
                     <span>{sourceTypeLabel(artifact)}</span>
                     {people ? <span>• {people}</span> : null}
                     {location ? <span>• {location}</span> : null}
+                    {amount ? <span>• {amount}</span> : null}
                     <a href={externalLink} target="_blank" rel="noreferrer">
                       View source
                     </a>

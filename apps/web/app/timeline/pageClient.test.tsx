@@ -1473,4 +1473,74 @@ describe('TimelinePageClient', () => {
     });
   });
 
+  it('opens artifact details drawer on summaries row click', async () => {
+    window.localStorage.setItem('timeline.summaryArtifacts', JSON.stringify({ 'gmail:msg-1': syncArtifact }));
+    mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    render(<TimelinePageClient />);
+
+    fireEvent.click(await screen.findByText(/synced summary/i));
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /artifact details/i })).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText(/note/i)).toBeInTheDocument();
+  });
+
+  it('opens drawer from deep link artifactId on first render', async () => {
+    mockSearchParams = new URLSearchParams('artifactId=file-1');
+    window.localStorage.setItem('timeline.summaryArtifacts', JSON.stringify({ 'gmail:msg-1': syncArtifact }));
+    mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: /artifact details/i })).toBeInTheDocument();
+    });
+  });
+
+  it('saves annotation and updates local entity index immediately', async () => {
+    window.localStorage.setItem('timeline.summaryArtifacts', JSON.stringify({ 'gmail:msg-1': syncArtifact }));
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url === '/api/timeline/index/get') return new Response(JSON.stringify({ index: null }), { status: 200 });
+      if (url === '/api/timeline/selection/list') return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      if (url === '/api/timeline/exports/history?limit=10') return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      if (url === '/api/timeline/quality/apply-annotation' && init?.method === 'POST') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { patch?: { note?: string; entities?: string[] } };
+        expect(body.patch?.note).toBe('Needs follow-up');
+        expect(body.patch?.entities).toEqual(['Acme']);
+        return new Response(JSON.stringify({ ok: true, artifactId: 'file-1', userAnnotations: { entities: ['Acme'], note: 'Needs follow-up', updatedAtISO: '2024-01-03T00:00:00.000Z' } }), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    });
+    vi.stubGlobal('fetch', fetchMock as unknown as typeof fetch);
+
+    render(<TimelinePageClient />);
+
+    fireEvent.click(await screen.findByText(/synced summary/i));
+    fireEvent.change(screen.getByLabelText(/entities \(comma-separated\)/i), { target: { value: 'Acme' } });
+    fireEvent.change(screen.getByLabelText(/note/i), { target: { value: 'Needs follow-up' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Saved')).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /acme/i })).toBeInTheDocument();
+    });
+  });
+
+
 });
