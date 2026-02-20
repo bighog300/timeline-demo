@@ -24,7 +24,10 @@ import {
 import type { SelectionSet, SelectionSetItem, SummaryArtifact } from '../lib/types';
 import { isSummaryArtifact, normalizeArtifact } from '../lib/validateArtifact';
 import RunsPanel from './RunsPanel';
+import TimelineView from './TimelineView';
 import styles from './timeline.module.css';
+
+type TimelineDisplayMode = 'summaries' | 'timeline';
 
 type GmailSelection = {
   id: string;
@@ -417,6 +420,7 @@ export default function TimelinePageClient() {
   const [lastSyncISO, setLastSyncISO] = useState<string | null>(null);
   const [hasHydrated, setHasHydrated] = useState(false);
   const [groupingMode, setGroupingMode] = useState<TimelineGroupMode>('day');
+  const [displayMode, setDisplayMode] = useState<TimelineDisplayMode>('summaries');
   const [filters, setFilters] = useState<TimelineFilters>(DEFAULT_FILTERS);
   const [appliedSetMessage, setAppliedSetMessage] = useState<string | null>(null);
   const [pendingScrollKey, setPendingScrollKey] = useState<string | null>(null);
@@ -557,6 +561,24 @@ export default function TimelinePageClient() {
   const groupedEntries = useMemo(
     () => groupEntries(filteredEntries, groupingMode),
     [filteredEntries, groupingMode],
+  );
+  const filteredSummaryArtifacts = useMemo(
+    () =>
+      filteredEntries
+        .map((entry) => {
+          const artifact = artifacts[entry.key];
+          if (!artifact) {
+            return null;
+          }
+          return {
+            entryKey: entry.key,
+            artifact,
+          };
+        })
+        .filter((value): value is { entryKey: string; artifact: SummaryArtifact } =>
+          Boolean(value),
+        ),
+    [artifacts, filteredEntries],
   );
 
   const selectionItems = useMemo(
@@ -2419,29 +2441,47 @@ export default function TimelinePageClient() {
               <span className={styles.toolbarCount}>{visibleCountLabel}</span>
             </div>
             <div className={styles.toolbarRow}>
-              <div className={styles.segmentedControl} role="group" aria-label="Grouping">
+              <div className={styles.segmentedControl} role="group" aria-label="View mode">
                 <Button
                   variant="ghost"
-                  className={groupingMode === 'day' ? styles.segmentedActive : undefined}
-                  onClick={() => setGroupingMode('day')}
+                  className={displayMode === 'summaries' ? styles.segmentedActive : undefined}
+                  onClick={() => setDisplayMode('summaries')}
                 >
-                  Day
+                  Summaries
                 </Button>
                 <Button
                   variant="ghost"
-                  className={groupingMode === 'week' ? styles.segmentedActive : undefined}
-                  onClick={() => setGroupingMode('week')}
+                  className={displayMode === 'timeline' ? styles.segmentedActive : undefined}
+                  onClick={() => setDisplayMode('timeline')}
                 >
-                  Week
-                </Button>
-                <Button
-                  variant="ghost"
-                  className={groupingMode === 'month' ? styles.segmentedActive : undefined}
-                  onClick={() => setGroupingMode('month')}
-                >
-                  Month
+                  Timeline
                 </Button>
               </div>
+              {displayMode === 'summaries' ? (
+                <div className={styles.segmentedControl} role="group" aria-label="Grouping">
+                  <Button
+                    variant="ghost"
+                    className={groupingMode === 'day' ? styles.segmentedActive : undefined}
+                    onClick={() => setGroupingMode('day')}
+                  >
+                    Day
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className={groupingMode === 'week' ? styles.segmentedActive : undefined}
+                    onClick={() => setGroupingMode('week')}
+                  >
+                    Week
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className={groupingMode === 'month' ? styles.segmentedActive : undefined}
+                    onClick={() => setGroupingMode('month')}
+                  >
+                    Month
+                  </Button>
+                </div>
+              ) : null}
               <div className={styles.toolbarFilters}>
                 <label className={styles.field}>
                   <span>Source</span>
@@ -2559,6 +2599,11 @@ export default function TimelinePageClient() {
               Clear filters
             </Button>
           </Card>
+        ) : displayMode === 'timeline' ? (
+          <TimelineView
+            artifacts={filteredSummaryArtifacts}
+            highlightedArtifactId={searchParams?.get('artifactId')}
+          />
         ) : (
           <div className={styles.groupList}>
             {groupedEntries.map((group) => (
