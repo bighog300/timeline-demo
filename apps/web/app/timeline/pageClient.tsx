@@ -26,6 +26,7 @@ import { isSummaryArtifact, normalizeArtifact } from '../lib/validateArtifact';
 import RunsPanel from './RunsPanel';
 import TimelineView from './TimelineView';
 import RecentExports from './RecentExports';
+import TimelineQuality from './TimelineQuality';
 import styles from './timeline.module.css';
 
 type TimelineDisplayMode = 'summaries' | 'timeline';
@@ -2686,6 +2687,8 @@ export default function TimelinePageClient() {
           </div>
         ) : null}
 
+
+        <TimelineQuality artifacts={filteredSummaryArtifacts} onDateApplied={() => handleSyncFromDrive({ fullSync: true })} />
 
         <RecentExports
           viewMode={displayMode}
