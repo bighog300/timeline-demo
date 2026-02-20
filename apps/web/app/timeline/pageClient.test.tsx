@@ -32,6 +32,9 @@ const withIndexGet =
     if (url === '/api/timeline/index/get') {
       return new Response(JSON.stringify({ index: null }), { status: 200 });
     }
+    if (url === '/api/timeline/exports/history?limit=10') {
+      return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+    }
     return handler(url, init);
   };
 
@@ -174,6 +177,9 @@ describe('TimelinePageClient', () => {
     window.localStorage.setItem('timeline.selectionVersion', '1');
     window.localStorage.setItem('timeline.gmailSelections', JSON.stringify([{ foo: 'bar' }]));
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -192,6 +198,9 @@ describe('TimelinePageClient', () => {
   it('shows invalid_request with clear selections action', async () => {
     setSelections();
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -215,6 +224,9 @@ describe('TimelinePageClient', () => {
 
   it('shows an empty state when no selections exist', () => {
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -231,6 +243,9 @@ describe('TimelinePageClient', () => {
     mockFetch((url) => {
       if (url === '/api/timeline/index/get') {
         return new Response(JSON.stringify({ index: indexPayload }), { status: 200 });
+      }
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
       }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
@@ -256,6 +271,9 @@ describe('TimelinePageClient', () => {
       if (url === '/api/timeline/index/rebuild' && init?.method === 'POST') {
         return new Response(JSON.stringify({ index: indexPayload }), { status: 200 });
       }
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -278,6 +296,9 @@ describe('TimelinePageClient', () => {
       }
       if (url === '/api/timeline/index/rebuild' && init?.method === 'POST') {
         return buildApiError(429, 'rate_limited', 'Too many requests. Try again in a moment.');
+      }
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
       }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
@@ -302,6 +323,9 @@ describe('TimelinePageClient', () => {
       if (url === '/api/timeline/index/rebuild' && init?.method === 'POST') {
         return buildApiError(502, 'upstream_error', 'Google API error.');
       }
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -320,6 +344,9 @@ describe('TimelinePageClient', () => {
   it('shows reconnect CTA when summarize returns 401', async () => {
     setSelections();
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -346,6 +373,9 @@ describe('TimelinePageClient', () => {
   it('shows provision CTA when summarize returns drive_not_provisioned', async () => {
     setSelections();
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -372,6 +402,9 @@ describe('TimelinePageClient', () => {
   it('shows a rate limit notice when summarize is rate limited', async () => {
     setSelections();
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -397,6 +430,9 @@ describe('TimelinePageClient', () => {
   it('navigates to the new summary after summarize succeeds', async () => {
     setSelections();
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -432,6 +468,9 @@ describe('TimelinePageClient', () => {
   it('syncs artifacts from Drive when clicking sync button', async () => {
     setSelections();
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -466,6 +505,9 @@ describe('TimelinePageClient', () => {
       const url = typeof input === 'string' ? input : input.url;
       if (url === '/api/timeline/index/get') {
         return new Response(JSON.stringify({ index: null }), { status: 200 });
+      }
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
       }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
@@ -507,6 +549,9 @@ describe('TimelinePageClient', () => {
       if (url === '/api/timeline/index/get') {
         return new Response(JSON.stringify({ index: null }), { status: 200 });
       }
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -536,6 +581,9 @@ describe('TimelinePageClient', () => {
     mockFetch((url) => {
       if (url === '/api/timeline/index/get') {
         return new Response(JSON.stringify({ index: null }), { status: 200 });
+      }
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
       }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
@@ -579,6 +627,9 @@ describe('TimelinePageClient', () => {
       if (url === '/api/timeline/index/get') {
         return new Response(JSON.stringify({ index: null }), { status: 200 });
       }
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -614,6 +665,9 @@ describe('TimelinePageClient', () => {
       if (url === '/api/timeline/index/get') {
         return new Response(JSON.stringify({ index: null }), { status: 200 });
       }
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -642,6 +696,9 @@ describe('TimelinePageClient', () => {
 
   it('renders search results from Drive-scoped search', async () => {
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -685,6 +742,9 @@ describe('TimelinePageClient', () => {
 
   it('shows an inline hint when the search query is too short', async () => {
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -705,6 +765,9 @@ describe('TimelinePageClient', () => {
 
   it('shows reconnect CTA when search returns 401', async () => {
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -729,6 +792,9 @@ describe('TimelinePageClient', () => {
 
   it('shows an upstream timeout notice when search fails', async () => {
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -754,6 +820,9 @@ describe('TimelinePageClient', () => {
   it('shows reconnect CTA when sync returns 401', async () => {
     setSelections();
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -780,6 +849,9 @@ describe('TimelinePageClient', () => {
   it('shows provision CTA when sync returns drive_not_provisioned', async () => {
     setSelections();
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -811,6 +883,9 @@ describe('TimelinePageClient', () => {
       if (url === '/api/timeline/index/get') {
         return new Response(JSON.stringify({ index: null }), { status: 200 });
       }
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -833,6 +908,9 @@ describe('TimelinePageClient', () => {
   it('saves a selection and shows a success banner', async () => {
     setSelections();
     mockFetch(withIndexGet((url, init) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -861,6 +939,9 @@ describe('TimelinePageClient', () => {
 
   it('lists saved sets and loads a preview', async () => {
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: selectionList }), { status: 200 });
       }
@@ -895,6 +976,9 @@ describe('TimelinePageClient', () => {
     );
 
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: selectionList }), { status: 200 });
       }
@@ -924,6 +1008,9 @@ describe('TimelinePageClient', () => {
     setSelections();
     window.localStorage.setItem('timeline.summaryArtifacts', JSON.stringify({ 'gmail:msg-1': artifactWithMetadata }));
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -956,6 +1043,9 @@ describe('TimelinePageClient', () => {
       ]),
     );
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -986,6 +1076,9 @@ describe('TimelinePageClient', () => {
       ]),
     );
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -1022,6 +1115,9 @@ describe('TimelinePageClient', () => {
       JSON.stringify({ 'gmail:msg-1': syncArtifact }),
     );
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -1043,6 +1139,9 @@ describe('TimelinePageClient', () => {
       JSON.stringify({ 'gmail:msg-1': syncArtifact }),
     );
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -1063,6 +1162,9 @@ describe('TimelinePageClient', () => {
       JSON.stringify({ 'gmail:msg-1': syncArtifact }),
     );
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -1087,6 +1189,9 @@ describe('TimelinePageClient', () => {
   it('jumps to a timeline entry from search results', async () => {
     setSelections();
     mockFetch(withIndexGet((url) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -1154,6 +1259,9 @@ describe('TimelinePageClient', () => {
     };
 
     mockFetch(withIndexGet((url, init) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }
@@ -1198,6 +1306,9 @@ describe('TimelinePageClient', () => {
 
     let attempt = 0;
     mockFetch(withIndexGet((url, init) => {
+      if (url === '/api/timeline/exports/history?limit=10') {
+        return new Response(JSON.stringify({ items: [], updatedAtISO: '2024-01-01T00:00:00.000Z' }), { status: 200 });
+      }
       if (url === '/api/timeline/selection/list') {
         return new Response(JSON.stringify({ sets: [] }), { status: 200 });
       }

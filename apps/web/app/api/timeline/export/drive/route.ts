@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
+import { randomUUID } from 'crypto';
 
 import { jsonError } from '../../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../../lib/googleAuth';
@@ -10,10 +11,20 @@ import { createCtx, withRequestId } from '../../../../lib/requestContext';
 import { createTimelineDriveDoc } from '../../../../lib/timeline/driveDoc';
 import { buildTimelineExportModel } from '../../../../lib/timeline/exportBuilder';
 import { loadArtifactsForExport } from '../../../../lib/timeline/exportArtifacts';
+import { appendExportHistoryItem } from '../../../../lib/timeline/exportHistoryDrive';
 
 const BodySchema = z
   .object({
     artifactIds: z.array(z.string().trim().min(1)).max(500).optional(),
+    exportId: z.string().trim().min(1).max(120).optional(),
+    source: z
+      .object({
+        viewMode: z.enum(['summaries', 'timeline']).optional(),
+        selectionSetId: z.string().trim().min(1).max(300).optional(),
+        query: z.string().trim().min(1).max(500).optional(),
+        from: z.string().trim().min(1).max(80).optional(),
+      })
+      .optional(),
   })
   .strict();
 
@@ -66,6 +77,29 @@ export const POST = async (request: NextRequest) => {
     model,
     ctx,
   });
+
+  try {
+    await appendExportHistoryItem(drive, session.driveFolderId, {
+      exportId: body.exportId ?? randomUUID(),
+      createdAtISO: new Date().toISOString(),
+      format: 'drive_doc',
+      artifactIds: Array.from(new Set(artifacts.map((artifact) => artifact.driveFileId).filter(Boolean))),
+      artifactCount: artifacts.length,
+      source: {
+        viewMode: body.source?.viewMode ?? 'summaries',
+        ...(body.source?.selectionSetId ? { selectionSetId: body.source.selectionSetId } : {}),
+        ...(body.source?.query ? { query: body.source.query } : {}),
+        ...(body.source?.from ? { from: body.source.from } : {}),
+      },
+      result: {
+        driveDoc: { docId: created.docId, webViewLink: created.webViewLink },
+      },
+    });
+  } catch (error) {
+    logInfo(ctx, 'export_history_append_failed', {
+      error: error instanceof Error ? error.message : 'unknown_error',
+    });
+  }
 
   return respond(NextResponse.json(created));
 };

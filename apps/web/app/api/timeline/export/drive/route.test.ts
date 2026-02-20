@@ -17,6 +17,10 @@ vi.mock('../../../../lib/timeline/driveDoc', () => ({
   createTimelineDriveDoc: vi.fn(),
 }));
 
+
+vi.mock('../../../../lib/timeline/exportHistoryDrive', () => ({
+  appendExportHistoryItem: vi.fn(),
+}));
 import { getGoogleAccessToken, getGoogleSession } from '../../../../lib/googleAuth';
 import { createDriveClient } from '../../../../lib/googleDrive';
 import { createTimelineDriveDoc } from '../../../../lib/timeline/driveDoc';

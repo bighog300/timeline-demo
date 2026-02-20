@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
+import { randomUUID } from 'crypto';
 
 import { jsonError } from '../../../../lib/apiErrors';
 import { getGoogleAccessToken, getGoogleSession } from '../../../../lib/googleAuth';
@@ -9,11 +10,21 @@ import { checkRateLimit, getRateLimitKey } from '../../../../lib/rateLimit';
 import { createCtx, withRequestId } from '../../../../lib/requestContext';
 import { buildTimelineExportModel } from '../../../../lib/timeline/exportBuilder';
 import { loadArtifactsForExport } from '../../../../lib/timeline/exportArtifacts';
+import { appendExportHistoryItem } from '../../../../lib/timeline/exportHistoryDrive';
 import { renderTimelinePdf } from '../../../../lib/timeline/exportPdf';
 
 const BodySchema = z
   .object({
     artifactIds: z.array(z.string().trim().min(1)).max(500).optional(),
+    exportId: z.string().trim().min(1).max(120).optional(),
+    source: z
+      .object({
+        viewMode: z.enum(['summaries', 'timeline']).optional(),
+        selectionSetId: z.string().trim().min(1).max(300).optional(),
+        query: z.string().trim().min(1).max(500).optional(),
+        from: z.string().trim().min(1).max(80).optional(),
+      })
+      .optional(),
   })
   .strict();
 
@@ -60,12 +71,36 @@ export const POST = async (request: NextRequest) => {
     artifacts.map((artifact) => ({ entryKey: artifact.artifactId, artifact })),
   );
   const pdf = await renderTimelinePdf(model);
+  const filename = `timeline-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+
+  try {
+    await appendExportHistoryItem(drive, session.driveFolderId, {
+      exportId: body.exportId ?? randomUUID(),
+      createdAtISO: new Date().toISOString(),
+      format: 'pdf',
+      artifactIds: Array.from(new Set(artifacts.map((artifact) => artifact.driveFileId).filter(Boolean))),
+      artifactCount: artifacts.length,
+      source: {
+        viewMode: body.source?.viewMode ?? 'summaries',
+        ...(body.source?.selectionSetId ? { selectionSetId: body.source.selectionSetId } : {}),
+        ...(body.source?.query ? { query: body.source.query } : {}),
+        ...(body.source?.from ? { from: body.source.from } : {}),
+      },
+      result: {
+        pdf: { filename },
+      },
+    });
+  } catch (error) {
+    logInfo(ctx, 'export_history_append_failed', {
+      error: error instanceof Error ? error.message : 'unknown_error',
+    });
+  }
 
   const response = new NextResponse(new Uint8Array(pdf), {
     status: 200,
     headers: {
       'content-type': 'application/pdf',
-      'content-disposition': `attachment; filename="timeline-report-${new Date().toISOString().slice(0, 10)}.pdf"`,
+      'content-disposition': `attachment; filename="${filename}"`,
     },
   });
   return respond(response);
