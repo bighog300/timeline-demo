@@ -6,6 +6,7 @@ import TimelinePageClient from './pageClient';
 
 const mockUseSession = vi.fn();
 const pushMock = vi.fn();
+const replaceMock = vi.fn();
 let mockSearchParams = new URLSearchParams();
 
 vi.mock('next-auth/react', () => ({
@@ -16,6 +17,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => mockSearchParams,
   useRouter: () => ({
     push: pushMock,
+    replace: replaceMock,
   }),
 }));
 
@@ -161,6 +163,7 @@ describe('TimelinePageClient', () => {
     window.localStorage.clear();
     vi.restoreAllMocks();
     pushMock.mockClear();
+    replaceMock.mockClear();
     mockSearchParams = new URLSearchParams();
     mockUseSession.mockReturnValue({
       data: { driveFolderId: 'folder-1' },
@@ -1400,6 +1403,73 @@ describe('TimelinePageClient', () => {
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/timeline/open-loops', expect.any(Object));
+    });
+  });
+
+
+  it('applies entity filter to visible artifacts and exports filtered artifactIds', async () => {
+    window.localStorage.setItem(
+      'timeline.summaryArtifacts',
+      JSON.stringify({
+        'gmail:msg-1': {
+          artifactId: 'gmail:msg-1',
+          source: 'gmail',
+          sourceId: 'msg-1',
+          title: 'Acme kickoff',
+          createdAtISO: '2024-01-02T00:00:00Z',
+          summary: 'Discussed Acme launch',
+          highlights: ['Acme timeline'],
+          entities: [{ name: 'Acme Corp', type: 'org' }],
+          driveFolderId: 'folder-1',
+          driveFileId: 'file-1',
+          model: 'stub',
+          version: 1,
+        },
+        'gmail:msg-2': {
+          artifactId: 'gmail:msg-2',
+          source: 'gmail',
+          sourceId: 'msg-2',
+          title: 'Bob follow-up',
+          createdAtISO: '2024-01-03T00:00:00Z',
+          summary: 'General follow-up',
+          highlights: ['No org mention'],
+          entities: [{ name: 'Bob Stone', type: 'person' }],
+          driveFolderId: 'folder-1',
+          driveFileId: 'file-2',
+          model: 'stub',
+          version: 1,
+        },
+      }),
+    );
+
+    mockFetch(withIndexGet((url, init) => {
+      if (url === '/api/timeline/selection/list') {
+        return new Response(JSON.stringify({ sets: [] }), { status: 200 });
+      }
+      if (url === '/api/timeline/export/pdf') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { artifactIds?: string[] };
+        expect(body.artifactIds).toEqual(['file-1']);
+        return new Response(new Blob(['pdf']), { status: 200 });
+      }
+      return new Response('Not found', { status: 404 });
+    }));
+
+    render(<TimelinePageClient />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/2 shown of 2 total/i).length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /acme corp/i }));
+
+    await waitFor(() => {
+      expect(screen.getAllByText(/1 shown of 2 total/i).length).toBeGreaterThan(0);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^export$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/pdf exported successfully/i)).toBeInTheDocument();
     });
   });
 

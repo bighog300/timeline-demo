@@ -24,11 +24,17 @@ import {
 import type { SelectionSet, SelectionSetItem, SummaryArtifact } from '../lib/types';
 import { isSummaryArtifact, normalizeArtifact } from '../lib/validateArtifact';
 import { detectPotentialConflicts } from '../lib/timeline/conflicts';
+import {
+  buildEntityIndex,
+  filterArtifactsByEntity,
+  normalizeEntityQueryParam,
+} from '../lib/timeline/entities';
 import RunsPanel from './RunsPanel';
 import TimelineView from './TimelineView';
 import RecentExports from './RecentExports';
 import TimelineQuality from './TimelineQuality';
 import PotentialConflicts from './PotentialConflicts';
+import EntityFilter from './EntityFilter';
 import styles from './timeline.module.css';
 
 type TimelineDisplayMode = 'summaries' | 'timeline';
@@ -133,6 +139,7 @@ const AUTO_SYNC_KEY = 'timeline.autoSyncOnOpen';
 const LAST_SYNC_KEY = 'timeline.lastSyncISO';
 const GROUPING_KEY = 'timeline.groupingMode';
 const FILTERS_KEY = 'timeline.filters';
+const ENTITY_FILTER_KEY = 'timeline.entityFilter';
 const SELECTION_VERSION_KEY = 'timeline.selectionVersion';
 const CURRENT_SELECTION_VERSION = 2;
 const ARTIFACT_LIMIT = 100;
@@ -427,6 +434,7 @@ export default function TimelinePageClient() {
   const [groupingMode, setGroupingMode] = useState<TimelineGroupMode>('day');
   const [displayMode, setDisplayMode] = useState<TimelineDisplayMode>('summaries');
   const [filters, setFilters] = useState<TimelineFilters>(DEFAULT_FILTERS);
+  const [entityFilter, setEntityFilter] = useState<string | null>(null);
   const [appliedSetMessage, setAppliedSetMessage] = useState<string | null>(null);
   const [pendingScrollKey, setPendingScrollKey] = useState<string | null>(null);
   const [selectionSets, setSelectionSets] = useState<SelectionSetSummary[]>([]);
@@ -490,6 +498,9 @@ export default function TimelinePageClient() {
     setLastSyncISO(window.localStorage.getItem(LAST_SYNC_KEY));
     setGroupingMode(parseStoredGrouping());
     setFilters(parseStoredFilters());
+    const storedEntity = normalizeEntityQueryParam(window.localStorage.getItem(ENTITY_FILTER_KEY));
+    const urlEntity = normalizeEntityQueryParam(searchParams?.get('entity') ?? null);
+    setEntityFilter(urlEntity ?? storedEntity);
     setHasHydrated(true);
   }, []);
 
@@ -568,11 +579,7 @@ export default function TimelinePageClient() {
     () => filterEntries(sortedEntries, filters),
     [filters, sortedEntries],
   );
-  const groupedEntries = useMemo(
-    () => groupEntries(filteredEntries, groupingMode),
-    [filteredEntries, groupingMode],
-  );
-  const filteredSummaryArtifacts = useMemo(
+  const visibleArtifactsBase = useMemo(
     () =>
       filteredEntries
         .map((entry) => {
@@ -590,10 +597,30 @@ export default function TimelinePageClient() {
         ),
     [artifacts, filteredEntries],
   );
+  const { entities: indexedEntities, counts: entityCounts } = useMemo(
+    () => buildEntityIndex(visibleArtifactsBase),
+    [visibleArtifactsBase],
+  );
+  const visibleArtifacts = useMemo(
+    () => (entityFilter ? filterArtifactsByEntity(visibleArtifactsBase, entityFilter) : visibleArtifactsBase),
+    [entityFilter, visibleArtifactsBase],
+  );
+  const visibleEntryKeys = useMemo(
+    () => new Set(visibleArtifacts.map((item) => item.entryKey)),
+    [visibleArtifacts],
+  );
+  const filteredEntriesForDisplay = useMemo(
+    () => (entityFilter ? filteredEntries.filter((entry) => visibleEntryKeys.has(entry.key)) : filteredEntries),
+    [entityFilter, filteredEntries, visibleEntryKeys],
+  );
+  const groupedEntries = useMemo(
+    () => groupEntries(filteredEntriesForDisplay, groupingMode),
+    [filteredEntriesForDisplay, groupingMode],
+  );
   const highlightedArtifactId = searchParams?.get('artifactId') ?? null;
   const potentialConflicts = useMemo(
-    () => detectPotentialConflicts(filteredSummaryArtifacts),
-    [filteredSummaryArtifacts],
+    () => detectPotentialConflicts(visibleArtifacts),
+    [visibleArtifacts],
   );
 
   const selectionItems = useMemo(
@@ -619,7 +646,7 @@ export default function TimelinePageClient() {
     });
     return Array.from(tags).sort((a, b) => a.localeCompare(b));
   }, [timelineEntries]);
-  const visibleCountLabel = `${filteredEntries.length} shown of ${timelineEntries.length} total`;
+  const visibleCountLabel = `${(entityFilter ? visibleArtifacts.length : filteredEntries.length)} shown of ${timelineEntries.length} total`;
   const filtersActive =
     filters.source !== 'all' ||
     filters.status !== 'all' ||
@@ -1313,7 +1340,21 @@ export default function TimelinePageClient() {
 
 
   useEffect(() => {
-    const nextEntity = searchParams?.get('entity')?.trim() ?? '';
+    const rawEntityParam = searchParams?.get('entity') ?? null;
+    if (rawEntityParam !== null) {
+      const urlEntity = normalizeEntityQueryParam(rawEntityParam);
+      if (urlEntity !== entityFilter) {
+        setEntityFilter(urlEntity);
+        if (typeof window !== 'undefined') {
+          if (urlEntity) {
+            window.localStorage.setItem(ENTITY_FILTER_KEY, urlEntity);
+          } else {
+            window.localStorage.removeItem(ENTITY_FILTER_KEY);
+          }
+        }
+      }
+    }
+
     const hasOpenLoops = parseBooleanParam(searchParams?.get('hasOpenLoops') ?? null);
     const hasRisks = parseBooleanParam(searchParams?.get('hasRisks') ?? null);
     const hasDecisions = parseBooleanParam(searchParams?.get('hasDecisions') ?? null);
@@ -1322,19 +1363,18 @@ export default function TimelinePageClient() {
       ? riskSeverityParam
       : 'all';
 
-    if (!nextEntity && !hasOpenLoops && !hasRisks && !hasDecisions && riskSeverity === 'all') {
+    if (!hasOpenLoops && !hasRisks && !hasDecisions && riskSeverity === 'all') {
       return;
     }
 
     setFilters((prev) => ({
       ...prev,
-      entity: nextEntity || prev.entity,
       hasOpenLoops: hasOpenLoops || prev.hasOpenLoops,
       hasRisks: hasRisks || prev.hasRisks,
       hasDecisions: hasDecisions || prev.hasDecisions,
       riskSeverity: riskSeverity !== 'all' ? riskSeverity : prev.riskSeverity,
     }));
-  }, [searchParams]);
+  }, [entityFilter, searchParams]);
 
   useEffect(() => {
     if (!pendingArtifactId) {
@@ -1609,8 +1649,16 @@ export default function TimelinePageClient() {
     setFilters(DEFAULT_FILTERS);
   };
 
+  const handleEntityFilterChange = (next: string | null) => {
+    setEntityFilter(next);
+  };
+
+  const clearEntityFilter = () => {
+    handleEntityFilterChange(null);
+  };
+
   const handleExport = async () => {
-    if (filteredSummaryArtifacts.length === 0 || isExporting) {
+    if (visibleArtifacts.length === 0 || isExporting) {
       return;
     }
 
@@ -1628,11 +1676,12 @@ export default function TimelinePageClient() {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             exportId,
-            artifactIds: filteredSummaryArtifacts.map(({ artifact }) => artifact.driveFileId),
+            artifactIds: visibleArtifacts.map(({ artifact }) => artifact.driveFileId),
             source: {
               viewMode: displayMode,
               ...(selectionSetIdParam ? { selectionSetId: selectionSetIdParam } : {}),
               ...(filters.text ? { query: filters.text } : {}),
+              ...(entityFilter ? { entity: entityFilter } : {}),
               ...(fromSelect ? { from: 'select' } : {}),
             },
           }),
@@ -2542,7 +2591,7 @@ export default function TimelinePageClient() {
                   <select
                     value={exportFormat}
                     onChange={(event) => setExportFormat(event.target.value as ExportFormat)}
-                    disabled={filteredSummaryArtifacts.length === 0 || isExporting}
+                    disabled={visibleArtifacts.length === 0 || isExporting}
                   >
                     <option value="pdf">Export as PDF</option>
                     <option value="drive">Export to Drive Doc</option>
@@ -2551,11 +2600,17 @@ export default function TimelinePageClient() {
                 <Button
                   variant="secondary"
                   onClick={handleExport}
-                  disabled={filteredSummaryArtifacts.length === 0 || isExporting}
+                  disabled={visibleArtifacts.length === 0 || isExporting}
                 >
                   {isExporting ? 'Exporting…' : 'Export'}
                 </Button>
               </div>
+              <EntityFilter
+                entities={indexedEntities}
+                counts={entityCounts}
+                value={entityFilter}
+                onChange={handleEntityFilterChange}
+              />
               {displayMode === 'summaries' ? (
                 <div className={styles.segmentedControl} role="group" aria-label="Grouping">
                   <Button
@@ -2695,7 +2750,7 @@ export default function TimelinePageClient() {
         ) : null}
 
 
-        <TimelineQuality artifacts={filteredSummaryArtifacts} onDateApplied={() => handleSyncFromDrive({ fullSync: true })} />
+        <TimelineQuality artifacts={visibleArtifacts} onDateApplied={() => handleSyncFromDrive({ fullSync: true })} />
 
         <PotentialConflicts
           conflicts={potentialConflicts}
@@ -2714,7 +2769,7 @@ export default function TimelinePageClient() {
             <h2>No items selected yet</h2>
             <p>Pick Gmail and Drive items to create your first Timeline selection.</p>
           </Card>
-        ) : filteredEntries.length === 0 ? (
+        ) : filteredEntriesForDisplay.length === 0 ? (
           <Card className={styles.emptyState}>
             <h2>No items match your filters</h2>
             <p>Try adjusting or clearing your filters to see more.</p>
@@ -2722,9 +2777,16 @@ export default function TimelinePageClient() {
               Clear filters
             </Button>
           </Card>
+        ) : entityFilter && visibleArtifacts.length === 0 ? (
+          <Card className={styles.emptyState}>
+            <h2>No artifacts match entity ‘{entityFilter}’ in the current view.</h2>
+            <Button variant="secondary" onClick={clearEntityFilter}>
+              Clear entity filter
+            </Button>
+          </Card>
         ) : displayMode === 'timeline' ? (
           <TimelineView
-            artifacts={filteredSummaryArtifacts}
+            artifacts={visibleArtifacts}
             highlightedArtifactId={highlightedArtifactId}
           />
         ) : (
