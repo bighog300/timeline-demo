@@ -291,6 +291,14 @@
   justify-content: space-between;
 }
 
+
+.exportControls {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .toolbarFilters {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));

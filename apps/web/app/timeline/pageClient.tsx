@@ -28,6 +28,7 @@ import TimelineView from './TimelineView';
 import styles from './timeline.module.css';
 
 type TimelineDisplayMode = 'summaries' | 'timeline';
+type ExportFormat = 'pdf' | 'drive';
 
 type GmailSelection = {
   id: string;
@@ -460,6 +461,11 @@ export default function TimelinePageClient() {
   const [openLoopErrorsByKey, setOpenLoopErrorsByKey] = useState<Record<string, string>>({});
   const [indexRequestId, setIndexRequestId] = useState<string | null>(null);
   const [indexMessage, setIndexMessage] = useState<string | null>(null);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('pdf');
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+  const [exportDriveLink, setExportDriveLink] = useState<string | null>(null);
   const timelineTopRef = useRef<HTMLDivElement | null>(null);
 
   const driveFolderId = session?.driveFolderId;
@@ -1594,6 +1600,62 @@ export default function TimelinePageClient() {
     setFilters(DEFAULT_FILTERS);
   };
 
+  const handleExport = async () => {
+    if (filteredSummaryArtifacts.length === 0 || isExporting) {
+      return;
+    }
+
+    setIsExporting(true);
+    setExportError(null);
+    setExportSuccess(null);
+    setExportDriveLink(null);
+
+    try {
+      const response = await fetch(
+        exportFormat === 'pdf' ? '/api/timeline/export/pdf' : '/api/timeline/export/drive',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            artifactIds: filteredSummaryArtifacts.map(({ artifact }) => artifact.driveFileId),
+          }),
+        },
+      );
+
+      if (response.status === 401) {
+        setExportError('Sign in required');
+        return;
+      }
+
+      if (!response.ok) {
+        const apiError = await parseApiError(response);
+        setExportError(apiError?.message ?? 'Export failed.');
+        return;
+      }
+
+      if (exportFormat === 'pdf') {
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `timeline-report-${new Date().toISOString().slice(0, 10)}.pdf`;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        window.URL.revokeObjectURL(url);
+        setExportSuccess('PDF exported successfully.');
+      } else {
+        const payload = (await response.json()) as { webViewLink?: string };
+        setExportSuccess('Drive document exported successfully.');
+        setExportDriveLink(payload.webViewLink ?? null);
+      }
+    } catch {
+      setExportError('Export failed.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   const handleSaveSelectionSet = async () => {
     if (!saveName.trim()) {
       setSaveError('Enter a name for this saved selection.');
@@ -2457,6 +2519,26 @@ export default function TimelinePageClient() {
                   Timeline
                 </Button>
               </div>
+              <div className={styles.exportControls}>
+                <label className={styles.field}>
+                  <span>Export</span>
+                  <select
+                    value={exportFormat}
+                    onChange={(event) => setExportFormat(event.target.value as ExportFormat)}
+                    disabled={filteredSummaryArtifacts.length === 0 || isExporting}
+                  >
+                    <option value="pdf">Export as PDF</option>
+                    <option value="drive">Export to Drive Doc</option>
+                  </select>
+                </label>
+                <Button
+                  variant="secondary"
+                  onClick={handleExport}
+                  disabled={filteredSummaryArtifacts.length === 0 || isExporting}
+                >
+                  {isExporting ? 'Exporting…' : 'Export'}
+                </Button>
+              </div>
               {displayMode === 'summaries' ? (
                 <div className={styles.segmentedControl} role="group" aria-label="Grouping">
                   <Button
@@ -2585,6 +2667,15 @@ export default function TimelinePageClient() {
         ) : null}
 
         {appliedSetMessage ? <div className={styles.noticeSuccess}>{appliedSetMessage}</div> : null}
+        {exportSuccess ? <div className={styles.noticeSuccess}>{exportSuccess}</div> : null}
+        {exportError ? <div className={styles.notice}>{exportError}</div> : null}
+        {exportDriveLink ? (
+          <div className={styles.noticeSuccess}>
+            <a href={exportDriveLink} target="_blank" rel="noreferrer" className={styles.driveLink}>
+              Open in Drive
+            </a>
+          </div>
+        ) : null}
 
         {timelineEntries.length === 0 ? (
           <Card className={styles.emptyState}>
