@@ -1,0 +1,71 @@
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.groupHeader {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.undatedHelp {
+  margin: 0;
+  color: #6b7280;
+  font-size: 0.85rem;
+}
+
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-left: 0.75rem;
+  border-left: 2px solid #e5e7eb;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.highlighted {
+  border: 1px solid #3b82f6;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.itemTitle {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.bullets {
+  margin: 0;
+  padding-left: 1rem;
+}
+
+.metaRow {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.emptyState h2 {
+  margin: 0;
+}
