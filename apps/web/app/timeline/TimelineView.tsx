@@ -98,7 +98,6 @@ const groupTimelineArtifacts = (artifacts: TimelineArtifact[]): TimelineGroup[] 
     groups.push({
       key: 'undated',
       label: 'Undated',
-      undated: true,
       artifacts: undated.sort((a, b) => a.artifact.artifactId.localeCompare(b.artifact.artifactId)),
     });
   }
@@ -133,7 +132,7 @@ export default function TimelineView({ artifacts, highlightedArtifactId }: Timel
       {groups.map((group) => (
         <section key={group.key} className={styles.group}>
           <h3 className={styles.groupHeader}>{group.label}</h3>
-          {group.undated ? (
+          {group.key === 'undated' ? (
             <p className={styles.undatedHelp}>No clear date detected in source.</p>
           ) : null}
           <div className={styles.items}>
