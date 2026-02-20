@@ -7,7 +7,7 @@ import styles from './selectionBar.module.css';
 type SelectionBarProps = {
   selectedCount: number;
   unauthorized: boolean;
-  onSave: () => Promise<void>;
+  onSave: () => Promise<unknown>;
   onSummarize: () => Promise<void>;
   saveLoading: boolean;
   summarizeLoading: boolean;
