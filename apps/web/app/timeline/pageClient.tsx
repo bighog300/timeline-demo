@@ -23,6 +23,7 @@ import {
 } from '../lib/timelineView';
 import type { SelectionSet, SelectionSetItem, SummaryArtifact } from '../lib/types';
 import { isSummaryArtifact, normalizeArtifact } from '../lib/validateArtifact';
+import RunsPanel from './RunsPanel';
 import styles from './timeline.module.css';
 
 type GmailSelection = {
@@ -458,6 +459,9 @@ export default function TimelinePageClient() {
   const timelineTopRef = useRef<HTMLDivElement | null>(null);
 
   const driveFolderId = session?.driveFolderId;
+  const selectionSetIdParam = searchParams?.get('selectionSetId') ?? null;
+  const fromSelect = searchParams?.get('from') === 'select';
+  const runIdParam = searchParams?.get('runId') ?? null;
   const driveFolderLink = driveFolderId
     ? `https://drive.google.com/drive/folders/${driveFolderId}`
     : null;
@@ -1865,6 +1869,8 @@ export default function TimelinePageClient() {
           </label>
         </div>
       </div>
+
+      <RunsPanel fromSelect={fromSelect} selectionSetId={selectionSetIdParam} runId={runIdParam} />
 
       <Card className={styles.searchPanel}>
         <div className={styles.searchHeader}>
