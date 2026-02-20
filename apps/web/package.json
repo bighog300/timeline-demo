@@ -2,10 +2,13 @@
   "name": "@timeline/web",
   "private": true,
   "scripts": {
+    "predev": "pnpm --filter @timeline/shared build",
     "dev": "next dev",
+    "prebuild": "pnpm --filter @timeline/shared build",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "pretest": "pnpm --filter @timeline/shared build",
     "test": "vitest run"
   },
   "dependencies": {
