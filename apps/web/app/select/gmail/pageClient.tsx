@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 
 import Badge from '../../components/ui/Badge';
 import Button from '../../components/ui/Button';
@@ -10,6 +11,7 @@ import { buildGmailQuery, DateRangePreset, parseSender } from '../../lib/gmailQu
 import type { GmailSelectionSet } from '../../lib/selectionSets';
 import { hydrateGmailQueryControls } from './selectionSetHydration';
 import styles from '../selection.module.css';
+import SelectionBar from '../SelectionBar';
 
 type GmailMessage = {
   id: string;
@@ -118,7 +120,16 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
   const [savedSearchRetryTarget, setSavedSearchRetryTarget] = useState<{ id: string; title: string } | null>(null);
   const [isSummarizingSavedSearch, setIsSummarizingSavedSearch] = useState(false);
 
+  const router = useRouter();
   const isAnySummarizing = isSummarizingSelected || isSummarizingSavedSearch;
+  const [selectionSetId, setSelectionSetId] = useState<string | null>(null);
+  const [selectionBarAuthRequired, setSelectionBarAuthRequired] = useState(false);
+  const [selectionSaveLoading, setSelectionSaveLoading] = useState(false);
+  const [selectionSaveError, setSelectionSaveError] = useState<string | null>(null);
+  const [selectionSaveSuccess, setSelectionSaveSuccess] = useState<string | null>(null);
+  const [selectionSummarizeLoading, setSelectionSummarizeLoading] = useState(false);
+  const [selectionSummarizeError, setSelectionSummarizeError] = useState<string | null>(null);
+  const [selectionSummarizeNote, setSelectionSummarizeNote] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedIds(parseStoredSelections().map((item) => item.id));
@@ -157,8 +168,9 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
   const loadSavedSelectionSets = async () => {
     setSavedSetsLoading(true);
     const response = await fetch('/api/saved-searches');
-    if (response.status === 401) {
+    if (response.status === 401 || response.status === 403) {
       setError('reconnect_required');
+      setSelectionBarAuthRequired(true);
       setSavedSetsLoading(false);
       return;
     }
@@ -852,6 +864,103 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
     });
   };
 
+
+  const toSelectionItems = () =>
+    searchResults
+      .filter((message) => searchSelectionSet.has(message.id))
+      .map((message) => ({
+        source: 'gmail' as const,
+        id: message.id,
+        title: message.subject,
+        dateISO: message.date,
+      }));
+
+  const saveSelectionForBar = async () => {
+    const items = toSelectionItems();
+    if (items.length === 0) {
+      setSelectionSaveError('Select items to continue.');
+      return null;
+    }
+
+    setSelectionSaveLoading(true);
+    setSelectionSaveError(null);
+    setSelectionSaveSuccess(null);
+    setSelectionSummarizeNote(null);
+
+    const response = await fetch('/api/timeline/selection/save', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        name: `Gmail selection (${new Date().toLocaleDateString()})`,
+        items,
+        driveFileId: selectionSetId ?? undefined,
+      }),
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      setSelectionBarAuthRequired(true);
+      setSelectionSaveError('Sign in required.');
+      setSelectionSaveLoading(false);
+      return null;
+    }
+
+    if (!response.ok) {
+      setSelectionSaveError('Unable to save selection set.');
+      setSelectionSaveLoading(false);
+      return null;
+    }
+
+    const payload = (await response.json()) as { set?: { driveFileId?: string } };
+    const nextId = payload.set?.driveFileId ?? null;
+    if (nextId) {
+      setSelectionSetId(nextId);
+      const url = new URL(window.location.href);
+      url.searchParams.set('selectionSetId', nextId);
+      window.history.replaceState({}, '', url.toString());
+    }
+
+    setSelectionSaveSuccess('Saved.');
+    setSelectionSaveLoading(false);
+    return nextId;
+  };
+
+  const summarizeFromBar = async () => {
+    setSelectionSummarizeError(null);
+    setSelectionSummarizeNote(null);
+    setSelectionSummarizeLoading(true);
+
+    const savedId = (await saveSelectionForBar()) ?? selectionSetId;
+    const items = toSelectionItems().map((message) => ({ source: message.source, id: message.id }));
+
+    if (items.length === 0) {
+      setSelectionSummarizeLoading(false);
+      return;
+    }
+
+    const response = await fetch('/api/timeline/summarize', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ items }),
+    });
+
+    if (response.status === 401 || response.status === 403) {
+      setSelectionBarAuthRequired(true);
+      setSelectionSummarizeError('Sign in required.');
+      setSelectionSummarizeLoading(false);
+      return;
+    }
+
+    if (!response.ok) {
+      router.push(savedId ? `/timeline?from=select&selectionSetId=${savedId}` : '/timeline?from=select');
+      setSelectionSummarizeNote('Summarization is started from Timeline.');
+      setSelectionSummarizeLoading(false);
+      return;
+    }
+
+    router.push(savedId ? `/timeline?from=select&selectionSetId=${savedId}` : '/timeline?from=select');
+    setSelectionSummarizeLoading(false);
+  };
+
   const reconnectNotice = (
     <div className={styles.notice}>
       Reconnect required. Please <Link href="/connect">connect your Google account</Link>.
@@ -1276,6 +1385,20 @@ export default function GmailSelectClient({ isConfigured }: GmailSelectClientPro
       {!loading && messages.length === 0 && isConfigured ? (
         <div className={styles.emptyState}>No recent Gmail messages found.</div>
       ) : null}
+
+
+      <SelectionBar
+        selectedCount={searchSelectedIds.length}
+        unauthorized={selectionBarAuthRequired}
+        onSave={saveSelectionForBar}
+        onSummarize={summarizeFromBar}
+        saveLoading={selectionSaveLoading}
+        summarizeLoading={selectionSummarizeLoading}
+        saveError={selectionSaveError}
+        summarizeError={selectionSummarizeError}
+        saveSuccess={selectionSaveSuccess}
+        summarizeNote={selectionSummarizeNote}
+      />
 
       <div className={styles.list}>
         {messages.map((message) => (
